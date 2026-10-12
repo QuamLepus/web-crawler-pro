@@ -1,0 +1,49 @@
+# ---- core runtime ----
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# ---- distributed architecture ----
+celery[redis]>=5.3.0
+redis>=5.0.0
+
+# ---- async fetching ----
+aiohttp>=3.9.0
+
+# ---- data pipeline & quality ----
+pandas>=2.1.0
+polars>=0.20.0
+pyarrow>=15.0.0
+datasketch>=1.6.0          # MinHash (optional; pure-python fallback exists)
+
+# ---- storage backends ----
+minio>=7.2.0
+elasticsearch>=8.13.0
+
+# ---- stealth / anti-bot (heavy, install in worker-stealth image) ----
+# playwright>=1.44
+# curl-cffi>=0.7
+# undetected-chromedriver>=3.5
+
+# ---- AI / ML (optional extras) ----
+# langchain>=0.2
+# langchain-openai>=0.1
+# chromadb>=0.5
+# sentence-transformers>=2.7
+# fasttext-wheel>=0.9       # language detection
+# presidio-analyzer>=2.2    # PII detection
+# presidio-anonymizer>=2.2  # PII redaction
+
+# ---- observability ----
+prometheus-client>=0.20.0
+sentry-sdk[celery]>=2.0.0
+
+# ---- dashboard ----
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# ---- dev / testing ----
+pytest>=8.0.0
+pytest-cov>=4.1.0
+fakeredis[lua]>=2.23
+ruff>=0.4.0
