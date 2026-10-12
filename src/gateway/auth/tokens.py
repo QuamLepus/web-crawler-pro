@@ -24,7 +24,27 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
+
+def _load_jwt_secret() -> str:
+    """Return the JWT signing secret, strictly required from the environment.
+
+    A hardcoded fallback would let anyone who has read the source forge
+    tokens for any tenant, so we refuse to start without an explicit
+    ``JWT_SECRET`` (minimum 16 characters).
+    """
+    secret = os.getenv("JWT_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "JWT_SECRET environment variable is required but not set. "
+            "Generate one with e.g. `python -c \"import secrets; "
+            "print(secrets.token_hex(32))\"` and export it before startup."
+        )
+    if len(secret) < 16:
+        raise RuntimeError("JWT_SECRET must be at least 16 characters long.")
+    return secret
+
+
+JWT_SECRET = _load_jwt_secret()
 JWT_ALG = "HS256"
 ACCESS_TTL = int(os.getenv("JWT_ACCESS_TTL", "3600"))
 REFRESH_TTL = int(os.getenv("JWT_REFRESH_TTL", str(86400 * 30)))
