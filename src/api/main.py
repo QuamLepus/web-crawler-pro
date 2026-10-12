@@ -29,7 +29,7 @@ import os
 import time
 from typing import Annotated, Any, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -126,15 +126,21 @@ def _make_userstore(redis_client):
 # Auth-context middleware (populates request.state.ctx for the routers)
 # --------------------------------------------------------------------------- #
 PUBLIC_PATHS = {"/healthz", "/livez", "/readyz", "/metrics", "/", "/docs",
-                "/redoc", "/openapi.json", "/graphql", "/graphql/playground"}
+                "/redoc", "/openapi.json", "/graphql/playground"}
+
+# Path prefixes that never require a resolvable credential at the ASGI layer;
+# /graphql does its own auth (anonymous -> 401, mutations refused) inside the
+# schema context so clients get GraphQL-shaped errors there.
+AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/", "/graphql")
 
 
 class AuthContextMiddleware:
     """ASGI middleware resolving credentials into ``request.state.ctx``.
 
     Kept as pure ASGI (not BaseHTTPMiddleware) so it wraps everything cheaply;
-    actual rejection happens in the routers' ``authenticate`` dependency —
-    here we only *attach* identity when a valid credential is present.
+    actual rejection happens here for protected paths — invalid credentials
+    are treated as absent so the request is rejected with a stable error
+    envelope instead of leaking through anonymously.
     """
 
     def __init__(self, app) -> None:
@@ -155,23 +161,26 @@ class AuthContextMiddleware:
                 record = svc.api_keys.lookup(api_key)
                 if record is not None:
                     ctx = {"tenant": record.tenant, "scopes": record.scopes,
-                           "role": "member", "user": None}
+                           "role": "member", "user": None,
+                           "principal": "apikey"}
             except Exception:
                 ctx = None
-        if ctx is None:
-            authz = headers.get("authorization", "")
-            if authz.lower().startswith("bearer "):
-                try:
-                    from src.gateway.auth.tokens import decode_token
+        bearer = ""
+        authz = headers.get("authorization", "")
+        if authz.lower().startswith("bearer "):
+            bearer = authz[7:]
+            try:
+                from src.gateway.auth.tokens import decode_token
 
-                    claims = decode_token(authz[7:])
-                    if claims.get("typ", "access") == "access":
-                        ctx = {"tenant": claims.get("tenant"),
-                               "scopes": ["read", "crawl"],
-                               "role": claims.get("role", "member"),
-                               "user": claims.get("sub")}
-                except Exception:
-                    ctx = None
+                claims = decode_token(bearer)
+                if claims.get("typ", "access") == "access":
+                    ctx = {"tenant": claims.get("tenant"),
+                           "scopes": ["read", "crawl"],
+                           "role": claims.get("role", "member"),
+                           "user": claims.get("sub"),
+                           "principal": "jwt"}
+            except Exception:
+                ctx = None
         # Always attach identity when resolvable (rate-limit middleware reads
         # request.state.tenant); only *reject* on protected paths.
         scope.setdefault("state", {})
@@ -180,11 +189,19 @@ class AuthContextMiddleware:
             if ctx.get("tenant"):
                 scope["state"]["tenant"] = ctx["tenant"]
         public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
-            or path.startswith("/api/auth")
+            or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES)
         if not public and ctx is None:
             from starlette.responses import JSONResponse
 
-            resp = JSONResponse({"detail": "authentication required"}, status_code=401)
+            code = "invalid_api_key" if api_key else "unauthorized"
+            message = ("invalid api key" if api_key else
+                       "authentication required")
+            if code == "unauthorized" and bearer:
+                message = "authentication required: invalid or expired token"
+            resp = JSONResponse(
+                {"error": {"code": code, "message": message}},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"})
             await resp(scope, receive, send)
             return
         await self.app(scope, receive, send)
@@ -317,14 +334,17 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
     # ---- REST v1 routers ------------------------------------------------------ #
     from src.api.routers import billing, jobs, marketplace, search, webhooks
 
-    api = APIRouter = __import__("fastapi").APIRouter
-    v1 = api(prefix=API_PREFIX)
-    v1.include_router(jobs.router)
-    v1.include_router(search.router)
-    v1.include_router(webhooks.router)
-    v1.include_router(billing.router)
-    v1.include_router(marketplace.router)
-    app.include_router(v1)
+    def _build_v1(prefix: str):
+        r = APIRouter(prefix=prefix)
+        r.include_router(jobs.router)
+        r.include_router(search.router)
+        r.include_router(webhooks.router)
+        r.include_router(billing.router)
+        r.include_router(marketplace.router)
+        return r
+
+    app.include_router(_build_v1(API_PREFIX))   # canonical: /api/v1/*
+    app.include_router(_build_v1("/v1"))        # legacy alias: /v1/*
 
     # ---- minimal auth helpers so tenants can bootstrap keys via this app ---- #
     _mount_auth_routes(app)
@@ -367,17 +387,26 @@ class LoginBody(BaseModel):
     password: str
 
 
+class RefreshBody(BaseModel):
+    refresh_token: str
+
+
 class ApiKeyBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     scopes: list[str] = ["read", "crawl"]
 
 
 def _mount_auth_routes(app: FastAPI) -> None:
-    """Signup / login / API-key issuance routes needed by SDKs & tests."""
-    from src.gateway.auth.tokens import issue_session
+    """Signup / login / refresh / whoami / API-key issuance routes.
 
-    @app.post("/api/auth/signup", tags=["auth"], summary="Create org + user")
-    async def signup(body: SignupBody, request: Request):
+    Mounted twice: canonical ``/api/auth/*`` (with ``/api/auth/api-keys``)
+    and the legacy SDK surface ``/auth/*`` + ``/keys`` — same handlers, so
+    old clients keep working while docs push the new prefix.
+    """
+    from src.gateway.auth.tokens import decode_token, issue_session, \
+        refresh_access
+
+    async def _signup(body: SignupBody, request: Request):
         svc = request.app.state.services
         try:
             org = svc.users.create_org(body.org_name, plan=body.plan)
@@ -388,17 +417,38 @@ def _mount_auth_routes(app: FastAPI) -> None:
         sess = issue_session(user.id, org.id, user.role)
         return {**sess, "org_id": org.id, "user_id": user.id}
 
-    @app.post("/api/auth/login", tags=["auth"], summary="Login -> JWT pair")
-    async def login(body: LoginBody, request: Request):
+    async def _login(body: LoginBody, request: Request):
         svc = request.app.state.services
         user = svc.users.authenticate(body.email, body.password)
         if user is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "invalid credentials")
         return issue_session(user.id, user.tenant, user.role)
 
-    @app.post("/api/auth/api-keys", tags=["auth"], status_code=201,
-              summary="Issue an API key (Bearer JWT required)")
-    async def create_api_key(body: ApiKeyBody, request: Request):
+    async def _refresh(body: RefreshBody):
+        try:
+            return refresh_access(body.refresh_token)
+        except Exception:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "invalid refresh token")
+
+    async def _me(request: Request):
+        ctx = getattr(request.state, "ctx", None)
+        if not ctx:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "authentication required")
+        out = {"principal": ctx.get("principal", "jwt"),
+               "tenant": ctx.get("tenant"), "role": ctx.get("role"),
+               "scopes": ctx.get("scopes", [])}
+        uid = ctx.get("user")
+        if uid:
+            user = request.app.state.services.users.get_user(uid)
+            if user is not None:
+                out.update({"user_id": user.id, "email": user.email,
+                            "name": user.name})
+        return out
+
+    async def _create_key(body: ApiKeyBody, request: Request):
         svc = request.app.state.services
         ctx = getattr(request.state, "ctx", None)
         if not ctx or not ctx.get("user"):
@@ -406,8 +456,34 @@ def _mount_auth_routes(app: FastAPI) -> None:
                                 "JWT session required to mint API keys")
         record, plaintext = svc.api_keys.create(ctx["tenant"], body.name,
                                                 body.scopes)
-        return {"key_id": record.key_id, "api_key": plaintext,
-                "tenant": record.tenant, "scopes": record.scopes}
+        return {"key": plaintext, "api_key": plaintext,
+                "key_id": record.key_id, "tenant": record.tenant,
+                "name": record.name, "scopes": record.scopes}
+
+    async def _list_keys(request: Request):
+        svc = request.app.state.services
+        ctx = getattr(request.state, "ctx", None)
+        if not ctx:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "authentication required")
+        return svc.api_keys.list_for_tenant(ctx["tenant"])
+
+    # canonical prefix + legacy aliases share the same handler functions ---- #
+    for base in ("/api/auth", "/auth"):
+        app.post(f"{base}/signup", tags=["auth"], summary="Create org + user")(
+            _signup)
+        app.post(f"{base}/login", tags=["auth"], summary="Login -> JWT pair")(
+            _login)
+        app.post(f"{base}/refresh", tags=["auth"],
+                 summary="Refresh access token")(_refresh)
+        app.get(f"{base}/me", tags=["auth"], summary="Current identity")(
+            _me)
+    app.post("/api/auth/api-keys", tags=["auth"], status_code=201,
+             summary="Issue an API key (Bearer JWT required)")(_create_key)
+    app.post("/keys", tags=["auth"], status_code=200,
+             summary="Issue an API key (legacy alias)")(_create_key)
+    app.get("/keys", tags=["auth"], summary="List API keys for tenant")(
+        _list_keys)
 
 
 app = create_api_app()

@@ -89,11 +89,30 @@ def _ctx(info: strawberry.Info) -> dict:
         record = svc.api_keys.lookup(api_key)
         if record is not None:
             return {"tenant": record.tenant, "scopes": record.scopes,
-                    "role": "member"}
+                    "role": "member", "principal": "apikey"}
+        raise PermissionError("invalid api key")
     ctx = getattr(request.state, "ctx", None)
     if ctx:
         return ctx
     raise PermissionError("authentication required: set X-API-Key header")
+
+
+def _mutations_locked() -> bool:
+    """GraphQL mutations are disabled on the public read-only surface."""
+    return os.getenv("WCP_GRAPHQL_MUTATIONS", "0") != "1"
+
+
+@strawberry.type
+class ViewerType:
+    tenant: str
+    role: str
+    principal: str
+
+
+@strawberry.type
+class JobPage:
+    total: int
+    items: List[JobType]
 
 
 # --------------------------------------------------------------------------- #
@@ -103,6 +122,13 @@ def _ctx(info: strawberry.Info) -> dict:
 
 @strawberry.type
 class Query:
+    @strawberry.field(description="Authenticated identity for this request")
+    def viewer(self, info: strawberry.Info) -> ViewerType:
+        ctx = _ctx(info)
+        return ViewerType(tenant=ctx.get("tenant") or "",
+                          role=ctx.get("role") or "member",
+                          principal=ctx.get("principal") or "apikey")
+
     @strawberry.field(description="Liveness + dependency snapshot")
     def health(self, info: strawberry.Info) -> HealthType:
         svc = _svc(info)
@@ -116,11 +142,12 @@ class Query:
 
     @strawberry.field(description="Current tenant's crawl jobs (newest first)")
     def jobs(self, info: strawberry.Info, limit: int = 20,
-             state: Optional[str] = None) -> List[JobType]:
+             state: Optional[str] = None) -> JobPage:
         ctx = _ctx(info)
         svc = _svc(info)
         r = svc.redis
         out: List[JobType] = []
+        total = int(r.zcard(f"wcp:v1:tenant_jobs:{ctx['tenant']}"))
         ids = r.zrevrange(f"wcp:v1:tenant_jobs:{ctx['tenant']}", 0, limit - 1)
         for jid in ids:
             jid_s = jid.decode() if isinstance(jid, bytes) else jid
@@ -140,12 +167,12 @@ class Query:
                 created_at=_to_ts(rec.get("created_at")),
                 error=rec.get("error") or None,
             ))
-        return out
+        return JobPage(total=total, items=out)
 
     @strawberry.field(description="Single job by id (tenant-scoped)")
-    def job(self, info: strawberry.Info, job_id: str) -> Optional[JobType]:
+    def job(self, info: strawberry.Info, id: str) -> Optional[JobType]:  # noqa: A002
         ctx = _ctx(info)
-        rec = _svc(info).redis.hgetall(f"wcp:v1:job:{job_id}")
+        rec = _svc(info).redis.hgetall(f"wcp:v1:job:{id}")
         if not rec:
             return None
         rec = {(k.decode() if isinstance(k, bytes) else k):
@@ -153,7 +180,7 @@ class Query:
         if rec.get("tenant") != ctx["tenant"]:
             return None
         return JobType(
-            job_id=rec.get("job_id", job_id), state=rec.get("state", "queued"),
+            job_id=rec.get("job_id", id), state=rec.get("state", "queued"),
             url=rec.get("url", ""), max_pages=int(rec.get("max_pages", 0)),
             pages_done=int(rec.get("pages_done", 0)),
             items_collected=int(rec.get("items_collected", 0)),
