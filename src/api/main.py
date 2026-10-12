@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -26,6 +27,7 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 from src.api.middleware import RateLimitConfig, RateLimitMiddleware
@@ -35,9 +37,13 @@ from src.gateway.billing.plans import get_plan
 
 logger = logging.getLogger("wcp.api")
 
-# Paths that never require authentication.
+# Paths that never require authentication.  Prefix-matched (see
+# ``AuthContextMiddleware._is_public``), so "/auth" covers /auth/signup,
+# /auth/login, /auth/refresh; "/billing/stripe/webhook" is the signed
+# Stripe callback (authenticated by signature, not by session).
 PUBLIC_PATHS: tuple[str, ...] = (
     "/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json",
+    "/auth", "/billing/stripe/webhook",
 )
 
 
@@ -274,7 +280,14 @@ def create_api_app(redis_client=None, *, require_auth: bool = True) -> FastAPI:
         return {"status": "ready"}
 
     # ---- auth & keys (delegated to the gateway implementation) -------- #
+    # The gateway registers every route on the module-level ``app`` symbol.
+    # We temporarily rebind it to our v1 app so the decorators attach here,
+    # then restore the original binding — the routes stay on our app because
+    # they were registered against it directly.  CORS / process-time
+    # middleware and the QuotaExceeded handler from the gateway are
+    # replicated below against *our* app.
     from src.gateway import app as gateway_app
+    from src.gateway.billing.quotas import QuotaExceededError
 
     _saved_app = getattr(gateway_app, "app", None)
     gateway_app.app = app  # route decorators inside create_app attach to `app`
@@ -282,6 +295,34 @@ def create_api_app(redis_client=None, *, require_auth: bool = True) -> FastAPI:
         gateway_app.create_app(redis_client=app.state.services.redis)
     finally:
         gateway_app.app = _saved_app
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=os.getenv("CORS_ORIGINS",
+                                "https://app.webcrawlerpro.example").split(","),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining",
+                        "Retry-After", "X-Process-Time-Ms"],
+    )
+
+    @app.middleware("http")
+    async def add_process_time_header(request: Request, call_next):
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        response.headers["X-Process-Time-Ms"] = \
+            f"{(time.perf_counter() - t0) * 1000:.1f}"
+        return response
+
+    @app.exception_handler(QuotaExceededError)
+    async def quota_handler(_req: Request, exc: QuotaExceededError):
+        return JSONResponse(status_code=402, content={
+            "error": "quota_exceeded", "metric": exc.status.metric,
+            "used": exc.status.used, "limit": exc.status.limit,
+            "period": exc.status.period,
+            "upgrade": "/billing/checkout",
+        })
 
     # ---- v1 routers --------------------------------------------------- #
     app.include_router(jobs.router, prefix="/v1")
