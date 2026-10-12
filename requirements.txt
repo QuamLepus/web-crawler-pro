@@ -1,0 +1,9 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Dev / testing
+pytest>=8.0.0
+pytest-cov>=4.1.0
+
+# Planned (not yet wired up): aiohttp, playwright, celery, redis, pandas, pyarrow
