@@ -74,8 +74,8 @@ async def usage(ctx: CtxDep, request: Request) -> UsageSummary:
     remaining = min(pcts) * 100 if pcts else 100.0
     invoice = build_invoice(plan, {**_usage_totals(svc, ctx["tenant"]),
                                    "_tenant": ctx["tenant"]},
-                            storage_gb_avg=_used("storage_gb"),
-                            period=current_period())
+                             storage_gb_avg=_used("storage_gb"),
+                             period=current_period())
     return UsageSummary(
         tenant=ctx["tenant"], period=current_period(),
         requests=int(_used("requests")), pages_crawled=int(_used("requests")),
@@ -99,4 +99,3 @@ async def invoice(ctx: CtxDep, request: Request,
                         storage_gb_avg=float(totals.get("storage_gb", 0)),
                         period=per)
     return asdict(inv)
-
