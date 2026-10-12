@@ -25,8 +25,12 @@ from typing import Any, Iterable
 logger = logging.getLogger(__name__)
 
 EVENT_TYPES = (
+    # internal engine events
     "job.completed", "job.failed", "dataset.ready",
     "quota.warning", "marketplace.purchase", "bounty.fulfilled",
+    # public v1 aliases (src/api/schemas.WebhookEvent)
+    "crawl.completed", "crawl.failed", "data.ready",
+    "export.ready", "dataset.sold",
 )
 
 MAX_ATTEMPTS = 5
@@ -136,15 +140,24 @@ class WebhookService:
         return [s for s in self.list_for_tenant(tenant)
                 if s.active and event_type in s.events]
 
+    def get_sub(self, tenant: str, sub_id: str) -> WebhookSubscription | None:
+        raw = self.r.get(f"webhook:sub:{sub_id}")
+        if not raw:
+            return None
+        sub = WebhookSubscription(**json.loads(raw))
+        return sub if sub.tenant == tenant else None
+
     # ------------------------------------------------------------------ #
     # dispatch
     # ------------------------------------------------------------------ #
     def emit(self, tenant: str, event_type: str, data: dict[str, Any],
-             *, synchronous: bool = False) -> list[str]:
+             *, synchronous: bool = False,
+             only_sub: str | None = None) -> list[str]:
         """Queue a signed delivery to all matching subscriptions.
 
         Returns delivery ids. With ``synchronous=True`` (tests/CLI) performs
         inline with retries; otherwise offloads to the thread pool.
+        ``only_sub`` restricts delivery to one subscription id (test endpoint).
         """
         payload = {
             "id": f"evt_{uuid.uuid4().hex}",
@@ -155,7 +168,12 @@ class WebhookService:
         }
         body = json.dumps(payload).encode()
         ids = []
-        for sub in self.subs_for_event(tenant, event_type):
+        if only_sub is not None:
+            sub = self.get_sub(tenant, only_sub)
+            targets = [sub] if sub and sub.active else []
+        else:
+            targets = self.subs_for_event(tenant, event_type)
+        for sub in targets:
             did = f"dlv_{uuid.uuid4().hex[:10]}"
             ids.append(did)
             if synchronous:
