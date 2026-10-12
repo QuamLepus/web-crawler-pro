@@ -48,6 +48,10 @@ class StealthFetcher:
 
     # ------------------------------------------------------------------ #
     def fetch(self, url: str) -> PageResult:
+        # Offline / CI guard: never hit the network from unit tests.
+        if os.getenv("WCP_OFFLINE", "0") == "1":
+            raise RuntimeError(
+                f"All stealth fetch strategies failed for {url} (offline mode)")
         for method in (self._fetch_curl_cffi, self._fetch_playwright,
                        self._fetch_uc):
             try:

@@ -12,3 +12,6 @@ import os
 
 os.environ.setdefault("JWT_SECRET", "test-only-secret-do-not-use-in-production")
 os.environ.setdefault("JWT_OLD_SECRETS", "")
+# Force offline mode: unit tests must never touch the real network even when
+# fetcher dependencies (e.g. curl_cffi) happen to be installed in CI images.
+os.environ.setdefault("WCP_OFFLINE", "1")

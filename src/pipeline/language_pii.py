@@ -7,8 +7,11 @@ and regex-based PII scrubbing so the pipeline still runs anywhere.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+
+logger = logging.getLogger("wcp.pipeline.language_pii")
 
 _MODEL_PATH = os.getenv("FASTTEXT_MODEL", "lid.176.bin")
 _model_cache = None
@@ -63,13 +66,18 @@ class PIIRedactor:
 
     def redact(self, text: str) -> str:
         if self._analyzer is not None:
-            results = self._analyzer.analyze(text=text, language="en",
-                                             entities=list(self.entities))
-            if results:
-                return self._anonymizer.anonymize(
-                    text=text, analyzer_results=results).text
-            return text
-        # Regex fallback (covers email/phone/card; PERSON needs NER model)
+            try:
+                results = self._analyzer.analyze(text=text, language="en",
+                                                 entities=list(self.entities))
+                if results:
+                    text = self._anonymizer.anonymize(
+                        text=text, analyzer_results=results).text
+            except Exception as exc:  # noqa: BLE001 - presidio runtime failure
+                logger.warning("presidio redaction failed (%s); regex fallback",
+                               exc)
+        # Always sweep with the regex fallback too: guarantees canonical
+        # [REDACTED_*] tokens for email/phone/card even when Presidio already
+        # masked spans as <EMAIL_ADDRESS>/<PHONE_NUMBER> etc.
         text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
         text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
         text = _CC_RE.sub("[REDACTED_CARD]", text)
