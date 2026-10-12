@@ -37,8 +37,8 @@ Rate the following record on four dimensions, each integer 1-5:
 - safety: free of PII, hate, sexual content, dangerous instructions (5 = clean)
 
 Return ONLY this JSON object:
-{"relevance": int, "coherence": int, "density": int, "safety": int,
- "reason": "<one short sentence>"}
+{{"relevance": int, "coherence": int, "density": int, "safety": int,
+ "reason": "<one short sentence>"}}
 
 RECORD:
 {record}

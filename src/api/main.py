@@ -348,11 +348,6 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
     return app
 
 
-try:  # module-level ASGI object for `uvicorn src.api.main:app`
-    app = create_api_app()
-except Exception:  # pragma: no cover
-    logger.exception("v1 api app failed to start")
-    raise
 # --------------------------------------------------------------------------- #
 # Auth bootstrap models (module scope: FastAPI resolves annotations reliably)
 # --------------------------------------------------------------------------- #
