@@ -149,7 +149,8 @@ async def get_job(job_id: str, request: Request, ctx: CtxDep,
     record = {(k.decode() if isinstance(k, bytes) else k):
               (v.decode() if isinstance(v, bytes) else v) for k, v in raw.items()}
     if record.get("tenant") != ctx["tenant"] and ctx.get("role") != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+        # tenant isolation: hide existence of other tenants' jobs
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job not found")
     # live-refresh from the scheduler's job store when still running
     if record.get("state") in ("queued", "running"):
         try:
