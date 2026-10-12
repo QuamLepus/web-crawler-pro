@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from src.api.routers.jobs import CtxDep
 from src.api.schemas import (CheckoutSessionOut, CheckoutSessionRequest,
                               PlanTier, UsageSummary)
+                             PlanTier, UsageSummary)
 from src.gateway.billing.plans import PLANS, build_invoice
 from src.gateway.billing.quotas import QuotaStatus, current_period
 

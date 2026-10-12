@@ -1,319 +1,265 @@
-"""WebCrawlerPro v1 API application factory.
+"""FastAPI application entrypoint for the WebCrawlerPro public API.
 
-Composes the FastAPI app around the gateway auth services:
+This is the runnable service (``uvicorn src.api.main:app``). It composes:
 
-* :class:`AuthContextMiddleware` — resolves the caller (JWT bearer or
-  ``X-API-Key``) once per request and stashes an auth context on
-  ``request.state`` (``ctx`` / ``tenant``) so routers can depend on it.
-* :class:`~src.api.middleware.RateLimitMiddleware` — Redis token-bucket /
-  fixed-window limiter with plan-aware caps.
-* GraphQL endpoint (``/graphql``) — a tiny dependency-free executor for the
-  documented ``viewer`` / ``job`` / ``jobs`` queries, auth-gated like REST.
-* Routers: ``/v1/jobs``, ``/v1/search``, ``/v1/billing``, ``/v1/webhooks``,
-  ``/v1/marketplace``.
+* **REST v1 routers** — jobs, search, webhooks, billing, marketplace
+  (all under ``/api/v1``, contract defined in :mod:`src.api.schemas`).
+* **GraphQL** — Strawberry schema at ``/graphql`` (+ GraphiQL IDE at
+  ``/graphql/playground``) over the same service container.
+* **Auth context** — resolves ``X-API-Key`` / JWT bearer into
+  ``request.state.ctx`` before any router runs (see :func:`_AuthContextMiddleware`).
+* **Rate limiting** — Redis token-bucket per credential
+  (:class:`src.api.middleware.RateLimitMiddleware`), plan-aware.
+* **Observability** — OpenTelemetry tracing, Prometheus ``/metrics``,
+  request latency headers, Sentry error capture
+  (:mod:`src.api.observability`).
+* **Health probes** — ``/healthz`` (liveness), ``/readyz`` (readiness incl.
+  Redis + scheduler check), ``/livez`` alias, all unauthenticated &
+  metrics-excluded for k8s.
 
-Run:  uvicorn src.api.main:app --port 8001
+The service container (:class:`ApiServices`) reuses the gateway's auth,
+quota, billing and webhook engines so REST, GraphQL and the internal gateway
+always agree on tenant state.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
 import time
-from typing import Any, Awaitable, Callable, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import Response
-
-from src.api.middleware import RateLimitConfig, RateLimitMiddleware
-from src.api.routers import billing, jobs, marketplace, search, webhooks
-from src.gateway.auth.tokens import TokenExpired, TokenInvalid, decode_token
-from src.gateway.billing.plans import get_plan
 
 logger = logging.getLogger("wcp.api")
 
-# Paths that never require authentication.  Prefix-matched (see
-# ``AuthContextMiddleware._is_public``), so "/auth" covers /auth/signup,
-# /auth/login, /auth/refresh; "/billing/stripe/webhook" is the signed
-# Stripe callback (authenticated by signature, not by session).
-PUBLIC_PATHS: tuple[str, ...] = (
-    "/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json",
-    "/auth", "/billing/stripe/webhook",
-)
+API_PREFIX = "/api/v1"
 
 
 # --------------------------------------------------------------------------- #
-# Auth context middleware
+# Service container
 # --------------------------------------------------------------------------- #
-class AuthContextMiddleware(BaseHTTPMiddleware):
-    """Resolve JWT/API-key credentials into ``request.state.ctx``.
+def _default_redis():
+    """Real Redis when reachable, fakeredis otherwise (dev/test friendly)."""
+    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        import redis as redis_lib
 
-    On success sets:
-      * ``request.state.ctx``     – dict(principal, tenant, key_id, scopes, role, user)
-      * ``request.state.tenant``  – convenience for rate-limiter & routers
+        client = redis_lib.Redis.from_url(url, decode_responses=False)
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning("redis unavailable (%s); falling back to fakeredis", exc)
+        import fakeredis
 
-    Public paths are always passed through unauthenticated. For any other
-    path the behaviour depends on ``require_auth``:
+        return fakeredis.FakeRedis(decode_responses=False)
 
-      * ``require_auth=True`` (default): missing/invalid credentials -> 401
-        JSON with structured error body (and ``WWW-Authenticate`` header).
-      * ``require_auth=False``: anonymous requests are allowed but carry no
-        ctx; authenticated ones still get their tenant resolved.
+
+class ApiServices:
+    """Lazy singleton wiring every dependency the routers touch.
+
+    Attributes mirror what the routers read off ``request.app.state.services``:
+    ``redis``, ``api_keys``, ``quotas``, ``webhooks``, ``scheduler``,
+    ``billing``, ``plan_for()``, plus a lazily-created ``marketplace``.
     """
 
-    def __init__(self, app, services_getter: Callable[[], Any], *,
-                 require_auth: bool = True,
-                 public_paths: tuple[str, ...] = PUBLIC_PATHS) -> None:
-        super().__init__(app)
-        self._services_getter = services_getter
-        self.require_auth = require_auth
-        self.public_paths = tuple(public_paths)
+    def __init__(self, redis_client: Any = None) -> None:
+        self._redis_override = redis_client
+        self._built = False
 
-    # ------------------------------------------------------------------ #
-    def _is_public(self, path: str) -> bool:
-        return any(path == p or path.startswith(p + "/") for p in self.public_paths)
+    # lazy build so importing this module never needs network services ------ #
+    def _build(self) -> None:
+        if self._built:
+            return
+        import fakeredis  # noqa: F401  (kept for type of fallback client)
 
-    @staticmethod
-    def _unauthorized(detail: str) -> Response:
-        return JSONResponse(
-            {"error": {"code": "unauthorized", "message": detail}},
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        from src.compute.scheduler import SchedulerService
+        from src.gateway.auth.tokens import ApiKeyStore
+        from src.gateway.billing.plans import get_plan
+        from src.gateway.billing.quotas import QuotaService
+        from src.gateway.billing.stripe_sync import BillingService
+        from src.gateway.webhooks.service import WebhookService
 
-    async def dispatch(self, request: Request,
-                       call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        path = request.url.path
-        if self._is_public(path):
-            return await call_next(request)
-
+        r = self._redis_override if self._redis_override is not None \
+            else _default_redis()
+        self.redis = r
+        self.api_keys = ApiKeyStore(r)
+        self.users = _make_userstore(r)
+        self.quotas = QuotaService(r, plan_resolver=self.plan_for)
+        self.webhooks = WebhookService(r)
+        self.billing = BillingService(self.users, r)
+        self.marketplace = None  # routers instantiate on demand
         try:
-            svc = self._services_getter()
-        except Exception as exc:  # pragma: no cover - wiring bug
-            logger.exception("services unavailable")
-            return JSONResponse({"error": {"code": "internal",
-                                           "message": f"services unavailable: {exc}"}},
-                                status_code=500)
+            from src.celery_app import celery_app
+        except Exception:
+            celery_app = None
+        self.scheduler = SchedulerService(r, celery_app=celery_app)
+        self._get_plan = get_plan
+        self._built = True
 
-        ctx, err = self._resolve_ctx(svc, request)
-
-        if err is not None:
-            return self._unauthorized(err)
-
-        if ctx is None:
-            # No valid credential present.
-            if self.require_auth:
-                return self._unauthorized(
-                    "provide Authorization: Bearer <jwt> or X-API-Key header")
-            return await call_next(request)
-
-        request.state.ctx = ctx
-        request.state.tenant = ctx["tenant"]
-        return await call_next(request)
+    def __getattr__(self, item):  # triggers lazy build once
+        self._build()
+        return getattr(self, item)
 
     # ------------------------------------------------------------------ #
-    def _resolve_ctx(self, svc, request: Request) -> Optional[dict]:
-        """Return ``(ctx_or_None, error_message_or_None)``."""
-        # 1) API key takes precedence for machine traffic.
-        api_key = request.headers.get("x-api-key", "")
-        if api_key:
-            record = svc.api_keys.lookup(api_key)
-            if record is None:
-                return None, "invalid api key"
-            return {"principal": "apikey", "tenant": record.tenant,
-                    "key_id": record.key_id, "scopes": record.scopes,
-                    "role": "member", "user": None}, None
+    def plan_for(self, tenant: str):
+        org = None
+        try:
+            org = self.users.get_org(tenant)
+        except Exception:
+            pass
+        return self._get_plan(org.plan if org else "free")
 
-        # 2) Bearer JWT.
-        auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            token = auth[7:].strip()
-            try:
-                claims = decode_token(token)
-            except TokenExpired:
-                return None, "token expired"
-            except TokenInvalid:
-                return None, "invalid token"
-            if claims.get("typ") != "access":
-                return None, "wrong token type"
-            try:
-                user = svc.users.get_user(claims["sub"])
-            except Exception as exc:  # defensive: storage layer hiccup
-                logger.exception("user lookup failed")
-                return None, f"user lookup failed: {exc}"
-            if user is None or getattr(user, "disabled", False) \
-                    or svc.users.is_locked(user.id):
-                return None, "user unavailable"
-            return {"principal": "jwt", "tenant": user.tenant, "key_id": user.id,
-                    "scopes": ["read", "crawl", "admin"], "role": user.role,
-                    "user": user}, None
-        return None, None
+
+def _make_userstore(redis_client):
+    try:
+        from src.gateway.auth.users import UserStore
+
+        return UserStore(redis_client)
+    except Exception:  # pragma: no cover - defensive
+        return None
 
 
 # --------------------------------------------------------------------------- #
-# Minimal GraphQL executor (no external deps)
+# Auth-context middleware (populates request.state.ctx for the routers)
 # --------------------------------------------------------------------------- #
-re_job_arg = re.compile(r"\bjob\s*\(")
-re_job_literal = re.compile(r'job\s*\(\s*id:\s*"([^"]+)"')
-re_jobs_field = re.compile(r"\bjobs\s*[\{(]")
+PUBLIC_PATHS = {"/healthz", "/livez", "/readyz", "/metrics", "/", "/docs",
+                "/redoc", "/openapi.json", "/graphql", "/graphql/playground"}
 
 
-def _gql_error(message: str, status_code: int = 400) -> JSONResponse:
-    return JSONResponse({"errors": [{"message": message}]}, status_code=status_code)
+class AuthContextMiddleware:
+    """ASGI middleware resolving credentials into ``request.state.ctx``.
 
-
-def execute_graphql(services, ctx: Optional[dict], query: str,
-                    variables: Optional[dict] = None) -> dict:
-    """Evaluate the supported read-only operations.
-
-    Supported queries::
-
-        { viewer { tenant principal role } }
-        query ($id: ID!) { job(id: $id) { jobId state url maxPages pagesDone } }
-        { jobs { items { jobId state url } total } }
+    Kept as pure ASGI (not BaseHTTPMiddleware) so it wraps everything cheaply;
+    actual rejection happens in the routers' ``authenticate`` dependency —
+    here we only *attach* identity when a valid credential is present.
     """
-    variables = variables or {}
-    q = (query or "").strip()
-    if not q:
-        raise ValueError("empty query")
-    if "mutation" in q.split("{")[0].lower():
-        raise PermissionError("mutations are not exposed over GraphQL; use REST")
 
-    def _need_tenant() -> str:
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        headers = {k.decode().lower(): v.decode()
+                   for k, v in scope.get("headers", [])}
+        svc = scope["app"].state.services
+        ctx = None
+        api_key = headers.get("x-api-key", "")
+        if api_key:
+            try:
+                record = svc.api_keys.lookup(api_key)
+                if record is not None:
+                    ctx = {"tenant": record.tenant, "scopes": record.scopes,
+                           "role": "member", "user": None}
+            except Exception:
+                ctx = None
         if ctx is None:
-            raise PermissionError("authentication required for GraphQL")
-        return ctx["tenant"]
+            authz = headers.get("authorization", "")
+            if authz.lower().startswith("bearer "):
+                try:
+                    from src.gateway.auth.tokens import decode_token
 
-    data: dict[str, Any] = {}
+                    claims = decode_token(authz[7:])
+                    if claims.get("typ", "access") == "access":
+                        ctx = {"tenant": claims.get("tenant"),
+                               "scopes": ["read", "crawl"],
+                               "role": claims.get("role", "member"),
+                               "user": claims.get("sub")}
+                except Exception:
+                    ctx = None
+        # Always attach identity when resolvable (rate-limit middleware reads
+        # request.state.tenant); only *reject* on protected paths.
+        scope.setdefault("state", {})
+        if ctx is not None:
+            scope["state"]["ctx"] = ctx
+            if ctx.get("tenant"):
+                scope["state"]["tenant"] = ctx["tenant"]
+        public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
+            or path.startswith("/api/auth")
+        if not public and ctx is None:
+            from starlette.responses import JSONResponse
 
-    if "viewer" in q:
-        tenant = _need_tenant()
-        org = services.users.get_org(tenant)
-        data["viewer"] = {
-            "tenant": tenant,
-            "name": org.name if org else tenant,
-            "plan": services.plan_for(tenant).name,
-            "principal": ctx["principal"],
-            "role": ctx["role"],
-        }
-
-    if re_job_arg.search(q):
-        job_id = variables.get("id") or variables.get("jobId") or ""
-        if not job_id:
-            m = re_job_literal.search(q)
-            job_id = m.group(1) if m else ""
-        if not job_id:
-            raise ValueError("job(id:) requires an id argument")
-        tenant = _need_tenant()
-        st = services.scheduler.status(job_id)
-        if st is None or st.get("tenant") != tenant:
-            data["job"] = None
-        else:
-            data["job"] = {"jobId": job_id, "state": st.get("status", "unknown"),
-                           "url": st.get("url", ""), "detail": st}
-
-    if re_jobs_field.search(q):
-        tenant = _need_tenant()
-        r = services.redis
-        members = r.zrevrange(jobs.TENANT_JOBS.format(tenant=tenant), 0, 49)
-        items = []
-        for jid in members:
-            jid_s = jid.decode() if isinstance(jid, bytes) else jid
-            rec = r.hgetall(jobs.JOB_KEY.format(job_id=jid_s))
-            dec = lambda k: k.decode() if isinstance(k, bytes) else k  # noqa: E731
-            rd = {dec(k): dec(v) for k, v in rec.items()} if rec else {}
-            items.append({"jobId": jid_s, "state": rd.get("state", "queued"),
-                          "url": rd.get("url", ""),
-                          "maxPages": int(rd.get("max_pages", 0) or 0),
-                          "pagesDone": int(rd.get("pages_done", 0) or 0)})
-        total = r.zcard(jobs.TENANT_JOBS.format(tenant=tenant)) or 0
-        data["jobs"] = {"items": items, "total": int(total)}
-
-    if not data:
-        raise ValueError("unsupported GraphQL operation")
-    return {"data": data}
+            resp = JSONResponse({"detail": "authentication required"}, status_code=401)
+            await resp(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 # --------------------------------------------------------------------------- #
 # App factory
 # --------------------------------------------------------------------------- #
-def create_api_app(redis_client=None, *, require_auth: bool = True) -> FastAPI:
-    from src.gateway.app import Services, _default_redis
-
+def create_api_app(redis_client=None, *, enable_graphql: bool = True,
+                   enable_rate_limit: bool = True) -> FastAPI:
+    """Build the fully-wired public API application."""
     app = FastAPI(
-        title="WebCrawlerPro v1 API",
-        version="1.0.0",
-        description="Public v1 surface: crawl jobs, semantic search/RAG, "
-                    "billing, webhooks, marketplace and GraphQL.",
-        docs_url="/docs", redoc_url="/redoc",
+        title="WebCrawlerPro Public API",
+        version="2.1.0",
+        description=(
+            "Petabyte-scale web scraping & LLM training-data platform.\n\n"
+            "REST surface lives under `/api/v1`; a GraphQL alternative is "
+            "available at `/graphql`. Authenticate with `X-API-Key` or a "
+            "JWT `Authorization: Bearer` token."
+        ),
+        contact={"name": "WebCrawlerPro Platform", "email": "api@webcrawlerpro.example"},
+        license_info={"name": "Apache-2.0"},
+        docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json",
     )
-    app.state.services = Services(redis_client if redis_client is not None
-                                  else _default_redis())
+    app.state.services = ApiServices(
+        redis_client if redis_client is not None else _default_redis())
+    app.state.services._build()  # eager build at startup; fail loud early
 
-    # Order matters: rate-limit outermost, auth innermost so the limiter can
-    # read request.state.tenant set by auth (plan-aware caps).
-    app.add_middleware(AuthContextMiddleware,
-                       services_getter=lambda: app.state.services,
-                       require_auth=require_auth)
-    plan_of_tenant = lambda t: RateLimitConfig.from_plan(  # noqa: E731
-        get_plan(app.state.services.plan_for(t).name).quotas.api_rate_per_minute)
-    app.add_middleware(RateLimitMiddleware,
-                       redis_client=app.state.services.redis,
-                       plan_resolver=plan_of_tenant)
-
-    # ---- ops ---------------------------------------------------------- #
-    @app.get("/healthz", tags=["ops"])
-    async def healthz():
-        return {"status": "ok", "ts": time.time()}
-
-    @app.get("/readyz", tags=["ops"])
-    async def readyz(request: Request):
-        try:
-            request.app.state.services.redis.ping()
-        except Exception as exc:
-            raise HTTPException(503, f"redis not ready: {exc}")
-        return {"status": "ready"}
-
-    # ---- auth & keys (delegated to the gateway implementation) -------- #
-    # The gateway registers every route on the module-level ``app`` symbol.
-    # We temporarily rebind it to our v1 app so the decorators attach here,
-    # then restore the original binding — the routes stay on our app because
-    # they were registered against it directly.  CORS / process-time
-    # middleware and the QuotaExceeded handler from the gateway are
-    # replicated below against *our* app.
-    from src.gateway import app as gateway_app
-    from src.gateway.billing.quotas import QuotaExceededError
-
-    _saved_app = getattr(gateway_app, "app", None)
-    gateway_app.app = app  # route decorators inside create_app attach to `app`
-    try:
-        gateway_app.create_app(redis_client=app.state.services.redis)
-    finally:
-        gateway_app.app = _saved_app
-
+    # ---- middleware (order: outermost added last) -------------------------- #
+    app.add_middleware(AuthContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.getenv("CORS_ORIGINS",
-                                "https://app.webcrawlerpro.example").split(","),
+        allow_origins=os.getenv(
+            "CORS_ORIGINS", "https://app.webcrawlerpro.example").split(","),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining",
-                        "Retry-After", "X-Process-Time-Ms"],
+                        "X-Process-Time-Ms", "Retry-After"],
     )
+    if enable_rate_limit:
+        try:
+            from src.api.middleware import RateLimitConfig, RateLimitMiddleware
+
+            svc = app.state.services
+
+            def _rate_config_for_tenant(tenant: str) -> RateLimitConfig:
+                q = svc.plan_for(tenant).quotas
+                return RateLimitConfig.from_plan(q.api_rate_per_minute,
+                                                 burst=q.burst_per_minute)
+
+            app.add_middleware(
+                RateLimitMiddleware,
+                redis_client=svc.redis,
+                config=RateLimitConfig(),
+                plan_resolver=_rate_config_for_tenant,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("rate-limit middleware disabled (%s)", exc)
+
+    from src.api.observability import setup_observability
+
+    setup_observability(app)
 
     @app.middleware("http")
-    async def add_process_time_header(request: Request, call_next):
+    async def process_time_header(request: Request, call_next):
         t0 = time.perf_counter()
         response = await call_next(request)
         response.headers["X-Process-Time-Ms"] = \
             f"{(time.perf_counter() - t0) * 1000:.1f}"
         return response
+
+    # ---- exception mapping -------------------------------------------------- #
+    from src.gateway.billing.quotas import QuotaExceededError
+    from src.marketplace.service import MarketplaceError
 
     @app.exception_handler(QuotaExceededError)
     async def quota_handler(_req: Request, exc: QuotaExceededError):
@@ -370,6 +316,84 @@ def create_api_app(redis_client=None, *, require_auth: bool = True) -> FastAPI:
         except (ValueError, KeyError) as exc:
             return _gql_error(str(exc))
         return JSONResponse(result)
+            "period": exc.status.period, "upgrade": f"{API_PREFIX}/billing/checkout",
+        })
+
+    @app.exception_handler(MarketplaceError)
+    async def marketplace_handler(_req: Request, exc: MarketplaceError):
+        return JSONResponse(status_code=400,
+                            content={"error": "marketplace_error",
+                                     "detail": str(exc)})
+
+    # ---- health probes (k8s liveness/readiness, unauthenticated) ------------ #
+    @app.get("/healthz", tags=["ops"], summary="Liveness probe")
+    async def healthz():
+        return {"status": "ok", "service": "webcrawlerpro-api",
+                "version": app.version, "ts": time.time()}
+
+    @app.get("/livez", tags=["ops"], include_in_schema=False)
+    async def livez():
+        return {"status": "ok"}
+
+    @app.get("/readyz", tags=["ops"], summary="Readiness probe (Redis + scheduler)")
+    async def readyz(request: Request):
+        svc = request.app.state.services
+        checks: dict[str, Any] = {}
+        try:
+            checks["redis"] = bool(svc.redis.ping())
+        except Exception as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                f"redis not ready: {exc}")
+        checks["scheduler"] = hasattr(svc.scheduler, "submit")
+        if not all(checks.values()):
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, checks)
+        return {"status": "ready", "checks": checks}
+
+    # ---- root / index -------------------------------------------------------- #
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return {
+            "service": "WebCrawlerPro Public API",
+            "version": app.version,
+            "docs": "/docs",
+            "graphql": "/graphql",
+            "metrics": "/metrics",
+            "health": ["/healthz", "/readyz"],
+            "endpoints": [f"{API_PREFIX}{p}" for p in
+                          ("/jobs", "/search", "/webhooks", "/billing",
+                           "/marketplace")],
+        }
+
+    # ---- REST v1 routers ------------------------------------------------------ #
+    from src.api.routers import billing, jobs, marketplace, search, webhooks
+
+    api = APIRouter = __import__("fastapi").APIRouter
+    v1 = api(prefix=API_PREFIX)
+    v1.include_router(jobs.router)
+    v1.include_router(search.router)
+    v1.include_router(webhooks.router)
+    v1.include_router(billing.router)
+    v1.include_router(marketplace.router)
+    app.include_router(v1)
+
+    # ---- minimal auth helpers so tenants can bootstrap keys via this app ---- #
+    _mount_auth_routes(app)
+
+    # ---- GraphQL -------------------------------------------------------------- #
+    if enable_graphql:
+        try:
+            from src.api.graphql import make_graphql_router
+
+            app.include_router(make_graphql_router(), prefix="/graphql")
+            logger.info("GraphQL mounted at /graphql")
+        except Exception as exc:  # pragma: no cover - strawberry missing
+            logger.warning("GraphQL disabled (strawberry unavailable: %s)", exc)
+
+    @app.on_event("startup")
+    async def _startup() -> None:  # pragma: no cover - trivial
+        logging.basicConfig(
+            level=os.getenv("LOG_LEVEL", "INFO").upper())
+        logger.info("WebCrawlerPro API ready (prefix=%s)", API_PREFIX)
 
     return app
 
@@ -379,3 +403,66 @@ try:  # module-level ASGI object for `uvicorn src.api.main:app`
 except Exception:  # pragma: no cover
     logger.exception("v1 api app failed to start")
     raise
+# --------------------------------------------------------------------------- #
+# Auth bootstrap models (module scope: FastAPI resolves annotations reliably)
+# --------------------------------------------------------------------------- #
+from pydantic import BaseModel, Field
+
+
+class SignupBody(BaseModel):
+    org_name: str = Field(min_length=2, max_length=120)
+    email: str = Field(pattern=r"^[\w.+-]+@[\w-]+\.[\w.-]+$")
+    password: str = Field(min_length=8, max_length=128)
+    name: str = ""
+    plan: str = "free"
+
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class ApiKeyBody(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    scopes: list[str] = ["read", "crawl"]
+
+
+def _mount_auth_routes(app: FastAPI) -> None:
+    """Signup / login / API-key issuance routes needed by SDKs & tests."""
+    from src.gateway.auth.tokens import issue_session
+
+    @app.post("/api/auth/signup", tags=["auth"], summary="Create org + user")
+    async def signup(body: SignupBody, request: Request):
+        svc = request.app.state.services
+        try:
+            org = svc.users.create_org(body.org_name, plan=body.plan)
+            user = svc.users.create_user(body.email, body.password, org.id,
+                                         "owner", name=body.name)
+        except ValueError as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        sess = issue_session(user.id, org.id, user.role)
+        return {**sess, "org_id": org.id, "user_id": user.id}
+
+    @app.post("/api/auth/login", tags=["auth"], summary="Login -> JWT pair")
+    async def login(body: LoginBody, request: Request):
+        svc = request.app.state.services
+        user = svc.users.authenticate(body.email, body.password)
+        if user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+        return issue_session(user.id, user.tenant, user.role)
+
+    @app.post("/api/auth/api-keys", tags=["auth"], status_code=201,
+              summary="Issue an API key (Bearer JWT required)")
+    async def create_api_key(body: ApiKeyBody, request: Request):
+        svc = request.app.state.services
+        ctx = getattr(request.state, "ctx", None)
+        if not ctx or not ctx.get("user"):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "JWT session required to mint API keys")
+        record, plaintext = svc.api_keys.create(ctx["tenant"], body.name,
+                                                body.scopes)
+        return {"key_id": record.key_id, "api_key": plaintext,
+                "tenant": record.tenant, "scopes": record.scopes}
+
+
+app = create_api_app()
