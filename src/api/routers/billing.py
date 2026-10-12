@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.routers.jobs import CtxDep
 from src.api.schemas import (CheckoutSessionOut, CheckoutSessionRequest,
+                              PlanTier, UsageSummary)
                              PlanTier, UsageSummary)
 from src.gateway.billing.plans import PLANS, build_invoice
 from src.gateway.billing.quotas import QuotaStatus, current_period
@@ -88,7 +89,7 @@ async def usage(ctx: CtxDep, request: Request) -> UsageSummary:
 
 @router.get("/invoice", summary="Detailed invoice for a period")
 async def invoice(ctx: CtxDep, request: Request,
-                  period: str | None = None) -> dict:
+                 period: str | None = None) -> dict:
     from dataclasses import asdict
 
     svc = request.app.state.services
@@ -99,4 +100,3 @@ async def invoice(ctx: CtxDep, request: Request,
                         storage_gb_avg=float(totals.get("storage_gb", 0)),
                         period=per)
     return asdict(inv)
-

@@ -266,6 +266,56 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         return JSONResponse(status_code=402, content={
             "error": "quota_exceeded", "metric": exc.status.metric,
             "used": exc.status.used, "limit": exc.status.limit,
+            "period": exc.status.period,
+            "upgrade": "/billing/checkout",
+        })
+
+    # ---- v1 routers --------------------------------------------------- #
+    app.include_router(jobs.router, prefix="/v1")
+    app.include_router(search.router, prefix="/v1")
+    app.include_router(billing.router, prefix="/v1")
+    app.include_router(webhooks.router, prefix="/v1")
+    app.include_router(marketplace.router, prefix="/v1")
+
+    # ---- GraphQL ------------------------------------------------------ #
+    @app.post("/graphql", tags=["graphql"])
+    async def graphql_endpoint(request: Request):
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _gql_error("invalid JSON body")
+        query = body.get("query", "")
+        variables = body.get("variables") or {}
+        ctx = getattr(request.state, "ctx", None)
+        try:
+            result = execute_graphql(request.app.state.services, ctx, query,
+                                     variables)
+        except PermissionError as exc:
+            return _gql_error(str(exc), 401)
+        except HTTPException as exc:  # invalid credentials surfaced by resolver
+            return _gql_error(str(exc.detail), exc.status_code)
+        except (ValueError, KeyError) as exc:
+            return _gql_error(str(exc))
+        return JSONResponse(result)
+
+    @app.get("/graphql", tags=["graphql"])
+    async def graphql_get(request: Request, query: str = "",
+                          variables: str = ""):
+        try:
+            vars_dict = json.loads(variables) if variables else {}
+        except json.JSONDecodeError:
+            return _gql_error("variables must be valid JSON")
+        ctx = getattr(request.state, "ctx", None)
+        try:
+            result = execute_graphql(request.app.state.services, ctx, query,
+                                     vars_dict)
+        except PermissionError as exc:
+            return _gql_error(str(exc), 401)
+        except HTTPException as exc:
+            return _gql_error(str(exc.detail), exc.status_code)
+        except (ValueError, KeyError) as exc:
+            return _gql_error(str(exc))
+        return JSONResponse(result)
             "period": exc.status.period, "upgrade": f"{API_PREFIX}/billing/checkout",
         })
 
@@ -348,6 +398,11 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
     return app
 
 
+try:  # module-level ASGI object for `uvicorn src.api.main:app`
+    app = create_api_app()
+except Exception:  # pragma: no cover
+    logger.exception("v1 api app failed to start")
+    raise
 # --------------------------------------------------------------------------- #
 # Auth bootstrap models (module scope: FastAPI resolves annotations reliably)
 # --------------------------------------------------------------------------- #
