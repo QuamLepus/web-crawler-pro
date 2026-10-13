@@ -91,9 +91,10 @@ class CapSolverClient:
         return bool(self.api_key)
 
     def _post(self, url: str, payload: dict) -> dict:
-        body = {"clientKey": self.api_key, "task": payload["task"]}
         if "taskId" in payload:
             body = {"clientKey": self.api_key, "taskId": payload["taskId"]}
+        else:
+            body = {"clientKey": self.api_key, "task": payload["task"]}
         if self.client_secret:
             body["clientSecret"] = self.client_secret
         try:

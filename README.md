@@ -134,7 +134,7 @@ web-crawler-pro/
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                      # edit as needed
-pytest                                    # 23 tests, fakeredis-backed, no services required
+pytest                                    # 62 tests, fakeredis-backed, no services required
 python main.py                            # quick crawl of https://example.com
 ```
 
@@ -632,8 +632,10 @@ Access the web dashboard at `http://localhost:5000`:
 ## 🧪 Testing
 
 ```bash
-pytest -q            # 23 passing: frontier semantics, politeness, ack/nack, stale recovery,
-                     # MinHash/SimHash, PII, exporters, proxy pools, captcha guards, metrics
+pytest -q            # 62 passing: frontier semantics, politeness, ack/nack, stale recovery,
+                     # MinHash/SimHash, PII, exporters, proxy pools, captcha guards, metrics,
+                     # Stealth Engine (providers, fingerprints, CapSolver, success monitor) &
+                     # AI Layer (agent crawler, RAG chain, curator, synthetic data)
 ```
 
 Tests use **fakeredis (Lua-enabled)** so frontier Lua scripts execute without external services — CI additionally spins up a real Redis service container for integration parity.
@@ -745,15 +747,15 @@ For issues, questions, or suggestions:
 ## 🗺️ Roadmap
 
 - [ ] Machine Learning for content extraction
-- [ ] Cloud deployment (AWS, Azure, GCP)
-- [ ] GraphQL API
+- [x] Cloud deployment (AWS, Azure, GCP)
+- [x] GraphQL API
 - [ ] Advanced scheduling (APScheduler)
 - [ ] Webhook support
 - [ ] Real-time notifications
 - [ ] Data visualization suite
 - [ ] Multi-language support
-- [ ] Browser automation via Playwright
-- [ ] Headless browser support
+- [x] Browser automation via Playwright
+- [x] Headless browser support
 
 ## 📊 Statistics
 
