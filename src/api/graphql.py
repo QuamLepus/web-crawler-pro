@@ -14,7 +14,7 @@ import time
 from typing import List, Optional
 
 import strawberry
-from fastapi import Request
+from fastapi import Request, Response
 from strawberry.fastapi import GraphQLRouter
 
 # --------------------------------------------------------------------------- #
@@ -99,6 +99,8 @@ def _ctx(info: strawberry.Info) -> dict:
 
 def _mutations_locked() -> bool:
     """GraphQL mutations are disabled on the public read-only surface."""
+    import os
+
     return os.getenv("WCP_GRAPHQL_MUTATIONS", "0") != "1"
 
 
@@ -170,8 +172,10 @@ class Query:
         return JobPage(total=total, items=out)
 
     @strawberry.field(description="Single job by id (tenant-scoped)")
-    def job(self, info: strawberry.Info, id: str) -> Optional[JobType]:  # noqa: A002
+    def job(self, info: strawberry.Info,
+            id: strawberry.ID) -> Optional[JobType]:  # noqa: A002
         ctx = _ctx(info)
+        id = str(id)
         rec = _svc(info).redis.hgetall(f"wcp:v1:job:{id}")
         if not rec:
             return None
