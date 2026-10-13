@@ -1,0 +1,15 @@
+# ============================================================================
+# Optional: persistent vector-store backend (data/chroma/ — gitignored).
+#
+# Kept OUT of the main requirements.txt on purpose: chromadb pulls in heavy
+# transitive deps (onnxruntime, pydantic pin ranges, kubernetes clients) that
+# conflict with the core CI install and are not needed to run the test suite.
+# The code imports it lazily and degrades gracefully when absent
+# (src/ai/vector_search.py, src/ai/agents/rag_chain.py), and the tests use
+# `pytest.importorskip("chromadb")` so nothing fails or skips in CI without it.
+#
+# Install only where the RAG / vector-search feature is actually served:
+#     pip install -r requirements-vectorstore.txt
+# ============================================================================
+
+chromadb>=0.5                  # persistent vector store (data/chroma/)
