@@ -101,8 +101,6 @@ class StealthFetcher:
                 last_exc = exc
                 continue
             except Exception as exc:  # noqa: BLE001
-                from src.middleware.success_monitor import Outcome
-
                 snippet = getattr(exc, "page", "") or ""
                 outcome = classify_outcome(exception=exc, html_snippet=str(snippet))
                 self.monitor.record(strat, outcome)

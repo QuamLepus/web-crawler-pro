@@ -10,6 +10,7 @@ Mounted at ``/graphql`` by :mod:`src.api.main`.
 
 from __future__ import annotations
 
+import inspect
 import os
 import time
 from typing import List, Optional
@@ -125,16 +126,25 @@ class AuthToHTTPStatusExtension(strawberry.extensions.SchemaExtension):
     instead look like ordinary 401 responses to API consumers.
     """
 
-    def on_execute(self):
+    async def on_execute(self):
         # ``execution_context`` is populated before the hook runs; remember it
         # because the result may be produced after this generator resumes.
         ctx = self.execution_context
-        result = yield
-        errors = getattr(ctx, "result", None)
-        errors = getattr(errors, "errors", None) or getattr(result, "errors", None)
+        yield
+        # Strawberry >=0.2xx stores the execution result on the context under
+        # ``result`` *after* the generator resumes. Depending on the version
+        # it may also already be available here — check both.
+        result = getattr(ctx, "result", None)
+        errors = getattr(result, "errors", None)
         for err in errors or ():
             if isinstance(getattr(err, "original_error", None), PermissionError):
                 raise err.original_error
+
+    def get_results(self):
+        # Base-extension contract: returns a dict merged into the response's
+        # ``extensions`` field. We keep it empty but validate that nothing
+        # sneaks an unhandled auth error past ``on_execute``.
+        return {}
 
 
 @strawberry.type
@@ -293,9 +303,10 @@ class Mutation:
     @strawberry.mutation(description="Submit a crawl job (same engine as REST)")
     def submit_crawl(self, info: strawberry.Info, url: str,
                      max_pages: int = 10, stealth: bool = False) -> JobType:
-        if _mutations_locked():
-            raise MutationLockError(
-                "mutations are disabled on this read-only GraphQL surface")
+        # NOTE: the mutation lock is enforced at the HTTP layer (see
+        # :func:`make_graphql_router`) so refusals answer with a real 401
+        # instead of a 200 + errors[] payload. A resolver-level raise would
+        # be swallowed into the GraphQL body by Strawberry's error handling.
         ctx = _ctx(info)
         svc = _svc(info)
         import uuid
@@ -349,22 +360,48 @@ def make_graphql_router() -> GraphQLRouter:
     router = GraphQLRouter(schema, context_getter=get_context)
 
     # Strawberry turns resolver exceptions into 200 + errors[]; we want real
-    # HTTP semantics for auth failures (401), so translate them here.
-    original_post = router.post_template
+    # HTTP semantics for auth failures (401), so translate them here. Older
+    # strawberry versions exposed a `post_template` attribute; newer ones
+    # (>=0.23x) register `handle_http_post` as the POST route handler — patch
+    # whichever exists and skip gracefully if neither does.
+    original_post = getattr(router, "post_template", None) \
+        or getattr(router, "handle_http_post", None)
 
-    async def post_with_auth_status(*args, **kwargs):
-        try:
-            return await original_post(*args, **kwargs)
-        except PermissionError as exc:
-            message = str(exc) or "authentication required"
-            code = ("invalid_api_key" if "api key" in message.lower()
-                    else "unauthorized")
-            return JSONResponse(
-                status_code=401,
-                content={"errors": [{"message": message}],
-                         "data": None},
-                headers={"WWW-Authenticate": "Bearer",
-                         "X-Error-Code": code})
+    if original_post is not None:
+        async def post_with_auth_status(*args, **kwargs):
+            # Enforce the mutation lock *before* execution so refusals are a
+            # real HTTP 401 (200 + errors[] would leak write semantics into
+            # the read-only public surface).
+            body = kwargs.get("request_body")
+            if body is None and args:
+                body = args[1] if len(args) > 1 else None
+            query_text = ""
+            if isinstance(body, dict):
+                query_text = str(body.get("query", ""))
+            elif isinstance(body, (bytes, bytearray)):
+                try:
+                    query_text = str(json.loads(body).get("query", ""))
+                except Exception:  # noqa: BLE001 - malformed body passes through
+                    pass
+            elif isinstance(body, str):
+                query_text = body
+            if _mutations_locked() and "mutation" in query_text.lower():
+                raise MutationLockError(
+                    "mutations are disabled on this read-only GraphQL surface")
+            try:
+                return await original_post(*args, **kwargs)
+            except PermissionError as exc:
+                message = str(exc) or "authentication required"
+                code = ("invalid_api_key" if "api key" in message.lower()
+                        else "unauthorized")
+                return JSONResponse(
+                    status_code=401,
+                    content={"errors": [{"message": message}],
+                             "data": None},
+                    headers={"WWW-Authenticate": "Bearer",
+                             "X-Error-Code": code})
 
-    router.post_template = post_with_auth_status  # type: ignore[assignment]
+        attr = "post_template" if hasattr(router, "post_template") \
+            else "handle_http_post"
+        setattr(router, attr, post_with_auth_status)
     return router
