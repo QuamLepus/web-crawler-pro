@@ -131,7 +131,7 @@ PUBLIC_PATHS = {"/healthz", "/livez", "/readyz", "/metrics", "/", "/docs",
 # Path prefixes that never require a resolvable credential at the ASGI layer;
 # /graphql does its own auth (anonymous -> 401, mutations refused) inside the
 # schema context so clients get GraphQL-shaped errors there.
-AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/", "/graphql")
+AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/")
 
 
 class AuthContextMiddleware:
@@ -141,6 +141,10 @@ class AuthContextMiddleware:
     actual rejection happens here for protected paths — invalid credentials
     are treated as absent so the request is rejected with a stable error
     envelope instead of leaking through anonymously.
+
+    ``/graphql`` (except the playground) is enforced *here* rather than inside
+    the schema so anonymous queries receive a real HTTP 401 instead of a
+    200-with-errors GraphQL envelope.
     """
 
     def __init__(self, app) -> None:
@@ -188,14 +192,44 @@ class AuthContextMiddleware:
             scope["state"]["ctx"] = ctx
             if ctx.get("tenant"):
                 scope["state"]["tenant"] = ctx["tenant"]
+        graphql_endpoint = (path == "/graphql" or
+                            (path.startswith("/graphql/") and
+                             not path.startswith("/graphql/playground")))
+        mutation_attempt = False
+        if graphql_endpoint and ctx is not None:
+            # Mutations are refused on the public read-only surface with a
+            # 401 (enforced at the ASGI layer, before execution).
+            try:
+                body = b""
+                more_body = True
+                while more_body:
+                    message = await receive()
+                    body += message.get("body", b"")
+                    more_body = message.get("more_body", False)
+                import json as _json
+
+                payload = _json.loads(body.decode("utf-8", "replace") or "{}")
+                mutation_attempt = "mutation" in (payload.get("query") or "")
+            except Exception:
+                body = b"{}"
+        body_replayed = {"replayed": False}
+
+        async def replay_receive():
+            if not body_replayed["replayed"]:
+                body_replayed["replayed"] = True
+                return {"type": "http.request", "body": body,
+                        "more_body": False}
+            return await receive()
         public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
-            or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES)
+            or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES) \
+            or (graphql_endpoint and ctx is not None)
         if not public and ctx is None:
             from starlette.responses import JSONResponse
 
             code = "invalid_api_key" if api_key else "unauthorized"
             message = ("invalid api key" if api_key else
-                       "authentication required")
+                       "authentication required: set X-API-Key header"
+                       if graphql_endpoint else "authentication required")
             if code == "unauthorized" and bearer:
                 message = "authentication required: invalid or expired token"
             resp = JSONResponse(
@@ -204,7 +238,21 @@ class AuthContextMiddleware:
                 headers={"WWW-Authenticate": "Bearer"})
             await resp(scope, receive, send)
             return
-        await self.app(scope, receive, send)
+        if mutation_attempt:
+            from starlette.responses import JSONResponse
+
+            resp = JSONResponse(
+                {"error": {"code": "mutations_disabled",
+                           "message": "GraphQL mutations are disabled on the "
+                                      "public API surface"}},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"})
+            await resp(scope, receive, send)
+            return
+        if graphql_endpoint and ctx is not None:
+            await self.app(scope, replay_receive, send)
+        else:
+            await self.app(scope, receive, send)
 
 
 # --------------------------------------------------------------------------- #

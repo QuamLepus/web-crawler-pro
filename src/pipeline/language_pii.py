@@ -13,23 +13,59 @@ import re
 
 logger = logging.getLogger("wcp.pipeline.language_pii")
 
-_MODEL_PATH = os.getenv("FASTTEXT_MODEL", "lid.176.bin")
+# NOTE: resolved lazily (per call) instead of at import time so that tests or
+# deployment code which sets/changes ``FASTTEXT_MODEL`` after this module has
+# already been imported still see the correct value.  Reading it at import
+# time was a source of cross-test pollution when another test (or fixture)
+# mutated the environment after import.
+_DEFAULT_MODEL_PATH = "lid.176.bin"
 _model_cache = None
+_model_cache_path = None
+
+
+def _model_path() -> str:
+    return os.environ.get("FASTTEXT_MODEL", _DEFAULT_MODEL_PATH)
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"(?<!\d)\+?\d[\d\s().-]{7,}\d(?!\d)")
 _CC_RE = re.compile(r"(?<!\d)(?:\d[ -]*?){13,16}(?!\d)")
 
+# Presidio's default replace-mask format: <EMAIL_ADDRESS>, <PERSON>, ...
+_PRESIDIO_TOKEN_RE = re.compile(r"<([A-Z][A-Z0-9_]*)>")
+
+# Canonical [REDACTED_*] tokens for the well-known Presidio entity types.
+_ENTITY_TOKEN_MAP = {
+    "EMAIL_ADDRESS": "[REDACTED_EMAIL]",
+    "PHONE_NUMBER": "[REDACTED_PHONE]",
+    "CREDIT_CARD": "[REDACTED_CARD]",
+    "US_SSN": "[REDACTED_SSN]",
+    "PERSON": "[REDACTED_PERSON]",
+}
+
+
+def _normalize_pii_tokens(text: str) -> str:
+    """Map Presidio ``<ENTITY_TYPE>`` masks to canonical ``[REDACTED_*]``."""
+
+    def repl(m: re.Match) -> str:
+        ent = m.group(1)
+        if ent in _ENTITY_TOKEN_MAP:
+            return _ENTITY_TOKEN_MAP[ent]
+        return f"[REDACTED_{ent.lower()}]"
+
+    return _PRESIDIO_TOKEN_RE.sub(repl, text)
+
 
 def detect_language(text: str) -> tuple[str, float]:
     """Return (iso639-1 code, confidence). Uses fastText when available."""
-    global _model_cache
-    if os.path.exists(_MODEL_PATH):
+    global _model_cache, _model_cache_path
+    path = _model_path()
+    if os.path.exists(path):
         try:
             import fasttext  # lazy
 
-            if _model_cache is None:
-                _model_cache = fasttext.load_model(_MODEL_PATH)
+            if _model_cache is None or _model_cache_path != path:
+                _model_cache = fasttext.load_model(path)
+                _model_cache_path = path
             labels, probs = _model_cache.predict(text.replace("\n", " ")[:512], k=1)
             return labels[0].replace("__label__", ""), float(probs[0])
         except Exception:  # noqa: BLE001
@@ -78,6 +114,7 @@ class PIIRedactor:
         # Always sweep with the regex fallback too: guarantees canonical
         # [REDACTED_*] tokens for email/phone/card even when Presidio already
         # masked spans as <EMAIL_ADDRESS>/<PHONE_NUMBER> etc.
+        text = _normalize_pii_tokens(text)
         text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
         text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
         text = _CC_RE.sub("[REDACTED_CARD]", text)
