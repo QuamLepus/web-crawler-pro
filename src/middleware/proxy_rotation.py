@@ -21,6 +21,10 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
+from src.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
+
 
 class ProxyTier(Enum):
     DATACENTER = "datacenter"
@@ -55,10 +59,29 @@ class Proxy:
 TIER_WEIGHTS = {ProxyTier.DATACENTER: 1, ProxyTier.RESIDENTIAL: 5, ProxyTier.MOBILE: 10}
 
 
-class ProxyRotationMiddleware:
-    """Round-robin-within-tier, weighted across tiers, failure-aware."""
+_TIER_MAP = {
+    "datacenter": ProxyTier.DATACENTER,
+    "residential": ProxyTier.RESIDENTIAL,
+    "mobile": ProxyTier.MOBILE,
+}
 
-    def __init__(self, provider_api: str | None = None):
+
+class ProxyRotationMiddleware:
+    """Round-robin-within-tier, weighted across tiers, failure-aware.
+
+    Two pool sources, usable together:
+
+    * Static env-var lists (``PROXY_DATACENTER`` / ``PROXY_RESIDENTIAL`` /
+      ``PROXY_MOBILE``).
+    * A live **provider adapter** (Bright Data / Oxylabs — see
+      :mod:`src.middleware.providers`). Pass ``provider="brightdata"`` or set
+      ``PROXY_PROVIDER``; fresh gateway URLs (with sticky-session/country
+      targeting and the mobile tier) are minted on demand and added to the
+      weighted pool as they are used.
+    """
+
+    def __init__(self, provider_api: str | None = None, provider: str | None = None,
+                 country: str | None = None, sticky_ttl_min: int | None = None):
         self.proxies: list[Proxy] = []
         for tier, var in (
             (ProxyTier.DATACENTER, "PROXY_DATACENTER"),
@@ -68,17 +91,42 @@ class ProxyRotationMiddleware:
             for p in os.getenv(var, "").split(","):
                 if p.strip():
                     self.proxies.append(Proxy(url=p.strip(), tier=tier))
-        self.provider_api = provider_api  # e.g. Smartproxy/BrightData endpoint
+        self.provider_api = provider_api  # legacy hook, kept for compat
+        # Live provider adapter (Bright Data / Oxylabs)
+        from src.middleware.providers import get_provider
+
+        self.adapter = get_provider(provider)
+        self.country = country or os.getenv("PROXY_COUNTRY") or None
+        self.sticky_ttl_min = sticky_ttl_min or int(
+            os.getenv("PROXY_STICKY_TTL", "0") or 0) or None
+        self._seen_provider_urls: set[str] = set()
         self._rr = itertools.cycle(self.proxies) if self.proxies else None
 
     # -- provider API ----------------------------------------------------
     def _refresh_from_provider(self) -> None:
-        """Pull fresh rotating endpoints from a proxy-provider gateway."""
-        if not self.provider_api:
+        """Pull fresh rotating endpoints from a proxy-provider gateway.
+
+        Bright Data / Oxylabs rotate exit IPs server-side per *connection*,
+        so each refresh mints new session-tagged gateway URLs (including the
+        premium mobile tier) and merges them into the weighted pool.
+        """
+        if self.provider_api:
+            self.provider_api()  # legacy callable hook
+        if not self.adapter or not self.adapter.enabled:
             return
-        # Provider gateways (e.g. http://gate.smartproxy.com:7000) are static
-        # hostnames; real rotation happens server-side per connection.
-        pass
+        try:
+            tiers = ("datacenter", "residential", "mobile")
+            for pp in self.adapter.get_proxies(tiers=tiers, count_per_tier=2):
+                if pp.url in self._seen_provider_urls:
+                    continue
+                self._seen_provider_urls.add(pp.url)
+                tier = _TIER_MAP.get(pp.tier, ProxyTier.RESIDENTIAL)
+                self.proxies.append(Proxy(url=pp.url, tier=tier))
+            self._rr = itertools.cycle(self.proxies)
+            logger.info("proxy pool refreshed from %s (%d endpoints)",
+                        self.adapter.name, len(self.proxies))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("provider refresh failed: %s", exc)
 
     # -- public API ------------------------------------------------------
     def get_proxy(self) -> dict | None:

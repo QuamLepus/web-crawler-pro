@@ -211,13 +211,67 @@ class AgentCrawler:
     """
 
     def __init__(self, goal: str, llm=None, toolkit: PageToolKit | None = None,
-                 max_pages: int = 20, extraction_schema: dict | None = None):
+                 max_pages: int = 20, extraction_schema: dict | None = None,
+                 stealth: bool | None = None):
         self.goal = goal
         self.llm = llm
-        self.tools = toolkit or PageToolKit()
+        # Stealth Engine integration: when enabled (STEALTH_ENGINE=1 by
+        # default), blocked fetches automatically escalate through the
+        # curl_cffi TLS-spoof → playwright-stealth ladder and outcomes feed
+        # the Success-Rate Monitor.
+        if stealth is None:
+            stealth = os.getenv("STEALTH_ENGINE", "1") == "1"
+        self._stealth_enabled = stealth
+        self._stealth_fetcher = None
+        self.tools = toolkit or PageToolKit(fetcher=self._smart_fetch)
         self.max_pages = max_pages
         self.extraction_schema = extraction_schema or {"key_facts": ["..."]}
         self._planner = HeuristicPlanner(goal)
+
+    # ------------------------------------------------------------------ #
+    def _smart_fetch(self, url: str) -> str:
+        """requests-first, Stealth-Engine-on-block fetching strategy."""
+        import requests
+
+        try:
+            from src.middleware.success_monitor import get_monitor
+
+            monitor = get_monitor()
+            strat = monitor.best_strategy()
+        except Exception:  # pragma: no cover - monitor always available
+            monitor, strat = None, "http_plain"
+        headers = {"User-Agent": os.getenv(
+            "CRAWL_USER_AGENT",
+            "WebCrawlerProBot/2.1 (+https://webcrawlerpro.example/bot)")}
+        if strat == "http_plain" or strat is None:
+            try:
+                resp = requests.get(url, timeout=15, headers=headers)
+                resp.raise_for_status()
+                if monitor is not None:
+                    from src.middleware.success_monitor import classify as cl
+
+                    monitor.record("http_plain",
+                                   cl(status=resp.status_code,
+                                      html_snippet=resp.text[:2000]))
+                return resp.text
+            except Exception as exc:  # noqa: BLE001
+                if monitor is not None and not self._stealth_enabled:
+                    from src.middleware.success_monitor import Outcome
+
+                    monitor.record("http_plain", Outcome.ERROR)
+                if not self._stealth_enabled:
+                    raise
+                logger.info("plain fetch blocked (%s); escalating to "
+                            "Stealth Engine for %s", exc, url)
+        # escalation path: full stealth ladder w/ fingerprint rotation
+        return self._stealth().fetch(url).html
+
+    def _stealth(self):
+        if self._stealth_fetcher is None:
+            from src.middleware.stealth_middleware import StealthFetcher
+
+            self._stealth_fetcher = StealthFetcher()
+        return self._stealth_fetcher
 
     # ------------------------------------------------------------------ #
     def run(self, seed_url: str) -> AgentResult:
@@ -363,9 +417,9 @@ def build_langchain_agent(model_name: str | None = None):
 
 
 def crawl_site(seed_url: str, goal: str, *, llm=None,
-               max_pages: int = 20, fetcher=None) -> AgentResult:
+               max_pages: int = 20, fetcher=None, stealth=None) -> AgentResult:
     """Convenience one-shot entrypoint used by jobs/Celery tasks."""
     agent = AgentCrawler(goal=goal, llm=llm or build_langchain_agent(),
-                         toolkit=PageToolKit(fetcher=fetcher),
-                         max_pages=max_pages)
+                         toolkit=PageToolKit(fetcher=fetcher) if fetcher else None,
+                         max_pages=max_pages, stealth=stealth)
     return agent.run(seed_url)

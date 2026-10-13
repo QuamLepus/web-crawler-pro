@@ -14,10 +14,11 @@ unit-testable without network access.
 """
 
 from src.ai.agents.agent_crawler import AgentCrawler, CrawlAction, crawl_site
-from src.ai.agents.rag_chain import RAGChain, build_rag_chain
+from src.ai.agents.rag_chain import RAGAnswer, RAGChain, build_rag_chain
 from src.ai.agents.data_curator import DataCurator, QualityScore, curate_records
 from src.ai.agents.synthetic import (
     SyntheticDataGenerator,
+    SyntheticExample,
     generate_qa_pairs,
     generate_paraphrases,
 )
@@ -26,12 +27,14 @@ __all__ = [
     "AgentCrawler",
     "CrawlAction",
     "crawl_site",
+    "RAGAnswer",
     "RAGChain",
     "build_rag_chain",
     "DataCurator",
     "QualityScore",
     "curate_records",
     "SyntheticDataGenerator",
+    "SyntheticExample",
     "generate_qa_pairs",
     "generate_paraphrases",
 ]
