@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: crawl-worker, labels: { app: crawl-worker } }
+spec:
+  replicas: 3                    # horizontal scale; pair with HPA below
+  selector: { matchLabels: { app: crawl-worker } }
+  template:
+    metadata: { labels: { app: crawl-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/OWNER/web-crawler-pro/worker:latest
+          command: ["celery", "-A", "src.celery_app", "worker",
+                    "-Q", "crawl.default,crawl.bulk", "-c", "8",
+                    "--loglevel=info"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: SENTRY_DSN
+              valueFrom: { secretKeyRef: { name: crawler-secrets, key: sentry-dsn, optional: true } }
+          ports: [{ containerPort: 8000, name: metrics }]
+          resources:
+            requests: { memory: 256Mi, cpu: 250m }
+            limits: { memory: 512Mi }
+          readinessProbe:
+            exec: { command: ["celery", "-A", "src.celery_app", "inspect", "ping"] }
+            initialDelaySeconds: 20
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: crawl-worker-hpa }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: crawl-worker
+  minReplicas: 3
+  maxReplicas: 50
+  metrics:
+    - type: Pods
+      pods:
+        metric: { name: celery_queue_depth }
+        target: { type: AverageValue, averageValue: "100" }
