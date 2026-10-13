@@ -65,6 +65,21 @@ class PIIRedactor:
             self._analyzer = self._anonymizer = None
 
     def redact(self, text: str) -> str:
+        """Return *text* with every PII span replaced by a ``[REDACTED_*]`` token.
+
+        Order matters: raw values are scrubbed with the regex sweep **first**, so
+        Presidio never sees already-masked strings; Presidio then catches what
+        regexes cannot (names, SSNs, IBANs, …) and its ``<ENTITY_TYPE>``
+        placeholders are normalised back to the canonical ``[REDACTED_*]``
+        vocabulary.  If Presidio is unavailable the regex sweep alone still
+        guarantees the canonical tokens.
+        """
+        # 1. Regex sweep over the raw text (email / phone / card).
+        text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
+        text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
+        text = _CC_RE.sub("[REDACTED_CARD]", text)
+
+        # 2. Presidio pass for everything the regexes cannot see.
         if self._analyzer is not None:
             try:
                 results = self._analyzer.analyze(text=text, language="en",
@@ -72,13 +87,10 @@ class PIIRedactor:
                 if results:
                     text = self._anonymizer.anonymize(
                         text=text, analyzer_results=results).text
+                    # Normalise <PERSON> / <US_SSN> … -> [REDACTED_PERSON] …
+                    text = re.sub(r"<([A-Z][A-Z0-9_]{1,40})>",
+                                  lambda m: "[REDACTED_%s]" % m.group(1), text)
             except Exception as exc:  # noqa: BLE001 - presidio runtime failure
-                logger.warning("presidio redaction failed (%s); regex fallback",
+                logger.warning("presidio redaction failed (%s); regex-only result",
                                exc)
-        # Always sweep with the regex fallback too: guarantees canonical
-        # [REDACTED_*] tokens for email/phone/card even when Presidio already
-        # masked spans as <EMAIL_ADDRESS>/<PHONE_NUMBER> etc.
-        text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
-        text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
-        text = _CC_RE.sub("[REDACTED_CARD]", text)
         return text

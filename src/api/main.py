@@ -188,9 +188,14 @@ class AuthContextMiddleware:
             scope["state"]["ctx"] = ctx
             if ctx.get("tenant"):
                 scope["state"]["tenant"] = ctx["tenant"]
+        # /graphql stays exempt at this layer so the schema can answer with
+        # GraphQL-shaped errors, but it must never be served anonymously: an
+        # unauthenticated POST to /graphql is rejected here with a plain 401.
+        gql_endpoint = (path == "/graphql" or path == "/graphql/"
+                        or path.startswith("/graphql?"))
         public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
             or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES)
-        if not public and ctx is None:
+        if ctx is None and (not public or gql_endpoint):
             from starlette.responses import JSONResponse
 
             code = "invalid_api_key" if api_key else "unauthorized"
@@ -198,6 +203,8 @@ class AuthContextMiddleware:
                        "authentication required")
             if code == "unauthorized" and bearer:
                 message = "authentication required: invalid or expired token"
+            if gql_endpoint:
+                message = "authentication required: set X-API-Key header"
             resp = JSONResponse(
                 {"error": {"code": code, "message": message}},
                 status_code=401,

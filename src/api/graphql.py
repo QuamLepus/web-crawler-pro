@@ -10,13 +10,19 @@ Mounted at ``/graphql`` by :mod:`src.api.main`.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import List, Optional
 
 import strawberry
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from strawberry.fastapi import GraphQLRouter
-from strawberry.scalars import ID  # canonical GraphQL `ID` scalar
+
+# Strawberry does not register the spec's built-in `ID` scalar implicitly —
+# without this the schema has no `ID` type and queries like
+# `query ($id: ID!) { job(id: $id) { ... } }` fail with "Unknown type 'ID'".
+from strawberry.scalars import ID  # noqa: E402  canonical GraphQL `ID` scalar
 
 # --------------------------------------------------------------------------- #
 # Types
@@ -103,6 +109,34 @@ def _mutations_locked() -> bool:
     return os.getenv("WCP_GRAPHQL_MUTATIONS", "0") != "1"
 
 
+class MutationLockError(PermissionError):
+    """Raised when a client attempts a mutation on the read-only surface.
+
+    Mapped to HTTP 401 by :func:`make_graphql_router` — authentication is not
+    the problem here, write access simply is not offered by this deployment.
+    """
+
+
+class AuthToHTTPStatusExtension(strawberry.extensions.SchemaExtension):
+    """Re-raise auth failures so the ASGI layer can answer with HTTP 401.
+
+    Strawberry normally swallows resolver exceptions into ``errors[]`` and
+    replies 200; anonymous / invalid-key / locked-mutation requests must
+    instead look like ordinary 401 responses to API consumers.
+    """
+
+    def on_execute(self):
+        # ``execution_context`` is populated before the hook runs; remember it
+        # because the result may be produced after this generator resumes.
+        ctx = self.execution_context
+        result = yield
+        errors = getattr(ctx, "result", None)
+        errors = getattr(errors, "errors", None) or getattr(result, "errors", None)
+        for err in errors or ():
+            if isinstance(getattr(err, "original_error", None), PermissionError):
+                raise err.original_error
+
+
 @strawberry.type
 class ViewerType:
     tenant: str
@@ -171,8 +205,10 @@ class Query:
         return JobPage(total=total, items=out)
 
     @strawberry.field(description="Single job by id (tenant-scoped)")
-    def job(self, info: strawberry.Info, id: str) -> Optional[JobType]:  # noqa: A002
+    def job(self, info: strawberry.Info,
+            id: ID) -> Optional[JobType]:  # noqa: A002, E501
         ctx = _ctx(info)
+        id = str(id)
         rec = _svc(info).redis.hgetall(f"wcp:v1:job:{id}")
         if not rec:
             return None
@@ -257,6 +293,9 @@ class Mutation:
     @strawberry.mutation(description="Submit a crawl job (same engine as REST)")
     def submit_crawl(self, info: strawberry.Info, url: str,
                      max_pages: int = 10, stealth: bool = False) -> JobType:
+        if _mutations_locked():
+            raise MutationLockError(
+                "mutations are disabled on this read-only GraphQL surface")
         ctx = _ctx(info)
         svc = _svc(info)
         import uuid
@@ -297,7 +336,8 @@ class Mutation:
                        created_at=now.timestamp(), error=err or None)
 
 
-schema = strawberry.Schema(query=Query, mutation=Mutation)
+schema = strawberry.Schema(query=Query, mutation=Mutation,
+                           extensions=[AuthToHTTPStatusExtension])
 
 
 def make_graphql_router() -> GraphQLRouter:
@@ -306,4 +346,25 @@ def make_graphql_router() -> GraphQLRouter:
     async def get_context(request: Request) -> dict:
         return {"request": request}
 
-    return GraphQLRouter(schema, context_getter=get_context)
+    router = GraphQLRouter(schema, context_getter=get_context)
+
+    # Strawberry turns resolver exceptions into 200 + errors[]; we want real
+    # HTTP semantics for auth failures (401), so translate them here.
+    original_post = router.post_template
+
+    async def post_with_auth_status(*args, **kwargs):
+        try:
+            return await original_post(*args, **kwargs)
+        except PermissionError as exc:
+            message = str(exc) or "authentication required"
+            code = ("invalid_api_key" if "api key" in message.lower()
+                    else "unauthorized")
+            return JSONResponse(
+                status_code=401,
+                content={"errors": [{"message": message}],
+                         "data": None},
+                headers={"WWW-Authenticate": "Bearer",
+                         "X-Error-Code": code})
+
+    router.post_template = post_with_auth_status  # type: ignore[assignment]
+    return router
