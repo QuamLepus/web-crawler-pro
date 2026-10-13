@@ -16,6 +16,7 @@ from typing import List, Optional
 import strawberry
 from fastapi import Request
 from strawberry.fastapi import GraphQLRouter
+from strawberry.scalars import ID  # canonical GraphQL `ID` scalar
 
 # --------------------------------------------------------------------------- #
 # Types
