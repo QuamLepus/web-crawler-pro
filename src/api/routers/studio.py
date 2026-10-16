@@ -60,6 +60,14 @@ class QueryBody(BaseModel):
     limit: int = Field(5000, ge=1, le=200_000)
 
 
+class AskBody(BaseModel):
+    """A question in plain English — answered by the parse, not by a model."""
+
+    question: str = Field(..., min_length=2, max_length=500)
+    version: str = ""
+    limit: int = Field(5000, ge=1, le=200_000)
+
+
 class RecipeBody(BaseModel):
     recipe: dict[str, Any]
     run_tests: bool = True
@@ -176,6 +184,42 @@ async def query_dataset(ref: str, body: QueryBody, request: Request, ctx: CtxDep
         "quality": quality_report(rows, key=dataset.primary_key),
         "sample": rows[:25],
     }
+
+
+@router.post("/datasets/{ref:path}/ask",
+             summary="Ask a dataset a question in plain English")
+async def ask_dataset(ref: str, body: AskBody, request: Request, ctx: CtxDep
+                      ) -> dict[str, Any]:
+    """Deterministic question answering: the parse and the caveats come back
+    with the number, so an answer can be checked instead of trusted."""
+    from src.studio.nlq import answer as nlq_answer
+    from src.studio.nlq import caveats_for, examples
+    from src.studio.service import quality_report
+
+    platform = _platform(request)
+    dataset = _dataset(request, ctx, ref)
+    rows = platform.datasets.rows(dataset, body.version or None, limit=body.limit)
+    target = body.version or (dataset.latest.version if dataset.latest else "")
+    result = nlq_answer(body.question, rows, dataset=dataset.name, version=target,
+                        limit=body.limit)
+    result["caveats"] = list(result.get("caveats") or []) + caveats_for(
+        quality_report(rows, key=dataset.primary_key), rows)
+    result["caveats"] = result["caveats"][:6]
+    if not result.get("understood"):
+        result["examples"] = examples(rows)
+    return result
+
+
+@router.get("/datasets/{ref:path}/questions",
+            summary="Questions this dataset can actually answer")
+async def dataset_questions(ref: str, request: Request, ctx: CtxDep) -> dict[str, Any]:
+    from src.studio.nlq import examples
+
+    platform = _platform(request)
+    dataset = _dataset(request, ctx, ref)
+    rows = platform.datasets.rows(dataset, limit=500)
+    return {"dataset": dataset.name, "questions": examples(rows),
+            "columns": list(rows[0].keys()) if rows else []}
 
 
 @router.get("/datasets/{ref:path}/diff", summary="Diff two versions (row-level)")

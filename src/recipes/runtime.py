@@ -140,11 +140,28 @@ def _value_from_node(node: Any, field: Field, page_url: str = "") -> Any:
     return apply_transform(value, field.transform)
 
 
-def _select_regex(html: str, selector: str) -> list[str]:
-    """Tiny fallback engine: ``tag.class#id[key=value]`` selectors only.
+def _select_dom(html: str, selector: str) -> list[str]:
+    """Dependency-free selector engine (``src.recipes.dom``).
 
-    Enough for recipe tests in a container without BeautifulSoup — not a
-    general-purpose CSS engine, and the docs say so.
+    Used whenever BeautifulSoup is absent — and it is a real engine, not a
+    regex approximation: descendant and child combinators, comma lists,
+    attribute operators, ``@attr`` reads. The point is that extraction quality
+    does not depend on whether a wheel happened to install on the worker.
+    """
+    from src.recipes.dom import parse, select_text
+
+    try:
+        return select_text(parse(html), selector)
+    except Exception as exc:                      # noqa: BLE001 - user-authored selector
+        logger.debug("dom selector %r failed: %s", selector, exc)
+        return []
+
+
+def _select_regex(html: str, selector: str) -> list[str]:
+    """Last-ditch engine: ``tag.class#id[key=value]`` selectors only.
+
+    Kept as the final fallback so a pathological page (or a selector the DOM
+    parser cannot follow) still yields *something* rather than nothing.
     """
     core = selector.strip()
     attrs: list[tuple[str, str]] = []
@@ -193,7 +210,7 @@ def _extract_field(html: str, field: Field, *, page_url: str = "") -> tuple[Any,
                     return (values if len(values) > 1 else values[0], "selector")
     else:
         for selector in field.selectors:
-            chunks = _select_regex(html, selector)
+            chunks = _select_dom(html, selector) or _select_regex(html, selector)
             if chunks:
                 values = [apply_transform(_TAG.sub(" ", c), field.transform)
                           for c in chunks]

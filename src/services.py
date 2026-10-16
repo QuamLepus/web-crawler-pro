@@ -490,6 +490,32 @@ class PlatformServices:
             return []
         return self.datasets.rows(dataset, version or None)
 
+    def ask_dataset(self, tenant: str, name: str, question: str, *,
+                    version: str = "", limit: int = 5000) -> dict[str, Any]:
+        """Plain-English question over a dataset version (see src/studio/nlq.py).
+
+        Deterministic and offline: no model call, and the answer carries the
+        parse, the caveats and the working rows so it can be checked.
+        """
+        from src.studio.nlq import answer as nlq_answer
+        from src.studio.nlq import caveats_for, examples
+        from src.studio.service import quality_report
+
+        tenant = tenant or self.tenant_default
+        dataset = self.datasets.get(tenant, name)
+        if dataset is None:
+            raise KeyError(f"dataset {name!r} not found")
+        rows = self.datasets.rows(dataset, version or None, limit=limit)
+        target = version or (dataset.latest.version if dataset.latest else "")
+        result = nlq_answer(question, rows, dataset=dataset.name, version=target,
+                            limit=limit)
+        result["caveats"] = list(result.get("caveats") or []) + caveats_for(
+            quality_report(rows, key=dataset.primary_key), rows)
+        result["caveats"] = result["caveats"][:6]
+        if not result.get("understood"):
+            result["examples"] = examples(rows)
+        return result
+
     def workflow_deps(self, tenant: str = "") -> WorkflowDeps:
         """Real collaborators for the workflow engine."""
         tenant = tenant or self.tenant_default
