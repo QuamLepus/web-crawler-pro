@@ -97,6 +97,12 @@ class ApiServices:
             celery_app = None
         self.scheduler = SchedulerService(r, celery_app=celery_app)
         self._get_plan = get_plan
+        # The platform facade wires every layer added on top of the crawler:
+        # provenance, monitoring, datasets, workflows, graph, recipes, agents,
+        # enterprise controls. Lazy and offline-safe by construction.
+        from src.services import PlatformServices
+
+        self.platform = PlatformServices(r)
         self._built = True
 
     def __getattr__(self, item):  # triggers lazy build once
@@ -341,8 +347,10 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         return {"status": "ready", "checks": checks}
 
     # ---- REST v1 routers ------------------------------------------------------ #
-    from src.api.routers import (billing, discovery, jobs, marketplace,
-                                 search, search_index, webhooks)
+    from src.api.routers import (automation, billing, discovery, engine,
+                                 intelligence, jobs, marketplace, search,
+                                 search_index, studio, trust, watch,
+                                 webhooks)
 
     def _build_v1(prefix: str):
         r = APIRouter(prefix=prefix)
@@ -353,6 +361,13 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(billing.router)
         r.include_router(marketplace.router)
         r.include_router(search_index.router)
+        # intelligence & trust layers (see docs/ARCHITECTURE.md)
+        r.include_router(intelligence.router)
+        r.include_router(trust.router)
+        r.include_router(watch.router)
+        r.include_router(studio.router)
+        r.include_router(automation.router)
+        r.include_router(engine.router)
         return r
 
     app.include_router(_build_v1(API_PREFIX))   # canonical: /api/v1/*
@@ -397,7 +412,10 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
                 "health": ["/healthz", "/readyz"],
                 "endpoints": [f"{API_PREFIX}{p}" for p in
                               ("/jobs", "/discovery", "/search", "/webhooks",
-                               "/billing", "/marketplace", "/search-index")],
+                               "/billing", "/marketplace", "/search-index",
+                               "/ask", "/research", "/watch", "/datasets",
+                               "/workflows", "/agents", "/graph", "/mcp",
+                               "/cost/estimate", "/doctor")],
             }
 
     @app.on_event("startup")
