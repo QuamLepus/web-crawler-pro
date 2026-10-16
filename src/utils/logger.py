@@ -1,6 +1,7 @@
 """Logging setup for Web Crawler Pro."""
 
 import logging
+import os
 import sys
 
 from src.config import get_config
@@ -36,10 +37,15 @@ def setup_logger(name: str = "web_crawler_pro") -> logging.Logger:
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    # An empty LOG_FILE means "console only": importing this module must not
-    # create a logs/ directory (os.path.dirname("") is "", and makedirs("")
-    # raises FileNotFoundError) on hosts that log to stdout, e.g. containers.
+    # An empty LOG_FILE means "console only": no file handler, and no logs/
+    # directory created on hosts that log to stdout, e.g. containers. When it
+    # *is* set, the directory has to exist first — FileHandler does not create
+    # it, and a missing one breaks the import of every module that calls
+    # setup_logger() at module scope.
     if config.LOG_FILE:
+        log_dir = os.path.dirname(config.LOG_FILE)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
         file_handler = logging.FileHandler(config.LOG_FILE)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
