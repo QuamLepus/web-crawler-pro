@@ -528,9 +528,94 @@ website** by default, because discovery wants domains, not pages.
 
 ```bash
 curl "localhost:8000/v1/search-index/query?q=solar%20energy&limit=5" -H "X-API-Key: $KEY"
+curl "localhost:8000/v1/search-index/spell?q=solr%20energi"          -H "X-API-Key: $KEY"
 curl "localhost:8000/v1/search-index/stats"                          -H "X-API-Key: $KEY"
 curl "localhost:8000/v1/search-index/levels"                          -H "X-API-Key: $KEY"
 ```
+
+A corrected query comes back as `corrected_query` + `corrections`, so the caller
+can show "showing results for **solar energy**" instead of silently rewriting
+what the user typed.
+
+### Three optional layers on top of BM25
+
+BM25 is lexical: it cannot know that *cars* and *automobiles* are the same
+thing. These three layers are **off by default** (or free), and each one fails
+soft — with the model missing, the code says so and carries on.
+
+**1. Semantic reranking** — BM25 shortlists, an encoder reorders.
+
+```bash
+pip install sentence-transformers                       # optional, ~90 MB model
+python -m src.cli search-index embeddings --data-dir data/search-index
+python -m src.cli search-index query "cars" --rerank embedding
+```
+
+| `SEARCH_INDEX_RERANK` | What it does |
+|---|---|
+| `none` (default) | nothing — BM25 + authority, zero cost |
+| `embedding` | bi-encoder cosine on the fly; `all-MiniLM-L6-v2`, 384-d |
+| `cross-encoder` | sharper and slower (`ms-marco-MiniLM-L-6-v2`) |
+
+Both signals are min-max normalised *inside the candidate set* (BM25 scores are
+unbounded and differ by orders of magnitude between shards) and blended as
+`(1-w)·bm25 + w·semantic`, with `w = SEARCH_INDEX_RERANK_WEIGHT` (0.35). If
+`sentence-transformers` is not installed the reranker switches **itself off**
+rather than pretending — and it refuses the built-in hashing fallback, because
+that fallback is itself lexical and would only re-measure BM25.
+
+`build --embeddings` pre-computes vectors per shard (`docs × 384 × 4` bytes,
+~154 MB per 100k docs) so reranking is a memory-mapped lookup instead of a model
+call. Merging parts renumbers every `rowid`, so the merge step deletes stale
+vectors — rebuild them on the merged index.
+
+**2. Spelling correction** — trained on our own corpus.
+
+```bash
+python -m src.cli search-index spell --check "kubernets,reserch"
+```
+
+The dictionary is the index's **own vocabulary**, not a generic English word
+list. That matters: a standard dictionary "corrects" `kubernetes`, `tranco` and
+`duckduckgo` into something worse. Here, `df.npy` — the document frequency we
+already compute for BM25 — is the frequency, and a term is only rewritten when
+it is unknown, ≥4 characters, digit-free, and the candidate is ≥8× more
+frequent. Query operators (`site:`, `source:`, `-exclude`) and quoted phrases
+are never touched.
+
+**3. Incremental refresh** — re-index only what changed.
+
+```bash
+python -m src.cli search-index refresh --snapshot CC-MAIN-2026-40
+```
+
+Every URL is hashed (blake2b-64) and stored with a hash of the **indexed text**
+(title + snippet + first N body characters), not of the whole page — so a
+footer-only change counts as unchanged. On a refresh:
+
+| | |
+|---|---|
+| `unchanged` | skipped entirely — not re-tokenised, not re-inverted |
+| `changed` | `UPDATE`d in place, keeping the `rowid` the shards point at |
+| `new` | inserted as usual |
+
+The owning shards are marked dirty and rebuilt at the end, so a refresh touches
+a handful of shards instead of all of them.
+
+**The honest limit:** Common Crawl has no "changed since" API. The *download*
+cost of a refresh is still a full snapshot — it is storage, indexing and shard
+rebuilds that get cheaper, not bandwidth.
+
+### Keeping it fresh
+
+```bash
+python -m src.cli search-index refresh --snapshot CC-MAIN-2026-40   # only what changed
+python -m src.cli search-index spell                                # retrain after new words
+```
+
+The monthly scheduled workflow does exactly this: it restores the previous index
+from the Actions cache, refreshes, retrains the dictionary and uploads a new
+artifact.
 
 ### How it is built
 
@@ -541,7 +626,10 @@ curl "localhost:8000/v1/search-index/levels"                          -H "X-API-
 | Index | `src/search_index/bm25.py` | per-shard Okapi BM25 in CSR form, memory-mapped, top-k merged across shards like a real distributed engine |
 | Build | `src/search_index/indexer.py` | resumable, checkpointed, sharded |
 | Merge | `src/search_index/merge.py` | combines parallel parts, remapping `rowid`s and dropping duplicates |
-| Query | `src/search_index/query.py` | parse → retrieve → verify → blend → collapse |
+| Query | `src/search_index/query.py` | parse → correct → retrieve → verify → blend → rerank → collapse |
+| Rerank | `src/search_index/rerank.py` | bi-encoder / cross-encoder second stage, plus pre-computed shard vectors |
+| Spell | `src/search_index/spell.py` | reduced SymSpell over the index vocabulary |
+| Incremental | `src/search_index/incremental.py` | SQLite content-hash tracker: new / unchanged / changed |
 | Provider | `src/search_index/provider.py` | `OwnIndexProvider`, a drop-in `SearchProvider` |
 
 **Zero new hard dependencies** — numpy (already present) and the standard
@@ -602,6 +690,14 @@ See **`.env.example`** for the complete list. Highlights:
 | `SEARCH_INDEX_COLLAPSE_HOST` | `true` | One result per website |
 | `SEARCH_INDEX_MAX_PAGES` | `0` | Common Crawl page budget override (`0` = level default) |
 | `SEARCH_INDEX_SOURCES` | – | Comma-separated override, e.g. `curlie,wikipedia` |
+| `SEARCH_INDEX_RERANK` | `none` | `none` \| `embedding` \| `cross-encoder` — second-stage reranking |
+| `SEARCH_INDEX_RERANK_WEIGHT` | `0.35` | `0` = ignore semantics, `1` = semantics only |
+| `SEARCH_INDEX_RERANK_CANDIDATES` | `100` | How many BM25 hits the reranker sees |
+| `SEARCH_INDEX_EMBED_MODEL` | `all-MiniLM-L6-v2` | Encoder used by the reranker |
+| `SEARCH_INDEX_EMBEDDINGS` | `false` | Pre-compute vectors at build time (faster reranking, ~154 MB/100k docs) |
+| `SEARCH_INDEX_SPELL` | `true` | Typo correction against the index vocabulary |
+| `SEARCH_INDEX_SPELL_MAX_TERMS` | `30000` | Cap on the spelling dictionary |
+| `SEARCH_INDEX_INCREMENTAL` | `true` | Skip unchanged pages when re-ingesting a crawl |
 | `SENTRY_DSN` | – | Error tracking (optional) |
 
 Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefix
@@ -613,7 +709,8 @@ Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefi
 
 ```bash
 pytest                      # 170 tests
-pytest -q tests/test_search_index.py          # own search index, fully offline
+pytest -q tests/test_search_index.py           # own search index, fully offline
+pytest -q tests/test_search_index_advanced.py  # rerank + spell + incremental refresh
 pytest -q tests/test_worker_jobs.py tests/test_saas_billing.py
 ruff check src workers tests
 ```

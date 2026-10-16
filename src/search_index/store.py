@@ -26,7 +26,8 @@ from typing import Self
 from src.search_index.models import Doc, host_of
 
 COLUMNS = ("id", "url", "host", "title", "snippet", "body", "source",
-           "authority", "quality", "lang", "indexed_at")
+           "authority", "quality", "lang", "indexed_at",
+           "content_hash", "snapshot")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -45,6 +46,13 @@ CREATE TABLE IF NOT EXISTS docs (
 CREATE INDEX IF NOT EXISTS idx_docs_host   ON docs(host);
 CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source);
 """
+
+#: Columns added after the first release of the index; applied on open so an
+#: index built before incremental refresh existed keeps working.
+_MIGRATIONS = (
+    ("content_hash", "ALTER TABLE docs ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"),
+    ("snapshot", "ALTER TABLE docs ADD COLUMN snapshot TEXT NOT NULL DEFAULT ''"),
+)
 
 _PRAGMAS = (
     ("journal_mode", "WAL"),
@@ -77,6 +85,10 @@ class DocStore:
             except sqlite3.DatabaseError:  # pragma: no cover - locked/unsupported
                 pass
         conn.executescript(_SCHEMA)
+        present = {row[1] for row in conn.execute("PRAGMA table_info(docs)")}
+        for column, statement in _MIGRATIONS:
+            if column not in present:
+                conn.execute(statement)
         conn.commit()
         return conn
 
@@ -118,8 +130,9 @@ class DocStore:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         rowids: list[int] = []
         sql = ("INSERT OR IGNORE INTO docs "
-               "(url, host, title, snippet, body, source, authority, quality, lang, indexed_at) "
-               "VALUES (?,?,?,?,?,?,?,?,?,?)")
+               "(url, host, title, snippet, body, source, authority, quality, "
+               "lang, indexed_at, content_hash, snapshot) "
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
         try:
             with conn:  # one transaction per batch
                 for doc in docs:
@@ -134,6 +147,8 @@ class DocStore:
                         float(doc.quality),
                         doc.lang,
                         now,
+                        getattr(doc, "content_hash", "") or "",
+                        getattr(doc, "snapshot", "") or "",
                     ))
                     if cur.lastrowid and cur.rowcount:
                         rowids.append(int(cur.lastrowid))
@@ -143,6 +158,29 @@ class DocStore:
         except sqlite3.Error as exc:  # pragma: no cover - disk full / locked
             raise RuntimeError(f"doc store insert failed: {exc}") from exc
         return rowids
+
+    def update_document(self, url: str, doc: Doc, *, content_hash: str = "",
+                        snapshot: str = "") -> int | None:
+        """Replace the content of an existing row, keeping its ``rowid``.
+
+        This is the incremental-refresh path: the document store's ids are what
+        the BM25 shards point at, so refreshing a page must reuse the id rather
+        than insert a new row (which would orphan every posting that referenced
+        the old one).
+        """
+        cur = self.conn.execute(
+            "UPDATE docs SET host=?, title=?, snippet=?, body=?, source=?, "
+            "authority=?, quality=?, lang=?, indexed_at=?, content_hash=?, "
+            "snapshot=? WHERE url=?",
+            (doc.host or host_of(doc.url), doc.title[:1024], doc.snippet, doc.body,
+             doc.source, float(doc.authority), float(doc.quality), doc.lang,
+             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+             content_hash, snapshot, url))
+        self.conn.commit()
+        if not cur.rowcount:
+            return None
+        row = self.conn.execute("SELECT id FROM docs WHERE url=?", (url,)).fetchone()
+        return int(row[0]) if row else None
 
     def set_authority(self, host: str, authority: float) -> int:
         """Backfill authority for every document of ``host`` (Open PageRank pass)."""

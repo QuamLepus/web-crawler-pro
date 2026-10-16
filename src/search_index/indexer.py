@@ -36,7 +36,14 @@ from pathlib import Path
 from typing import Self
 
 from src.search_index.bm25 import SHARDS_FILE, BM25Shard, ShardMeta
+from src.search_index.incremental import (
+    CHANGED,
+    UNCHANGED,
+    ChangeTracker,
+    content_hash,
+)
 from src.search_index.models import Doc, IndexStats, LevelSpec, level_spec
+from src.search_index.spell import SPELL_FILE, SpellChecker
 from src.search_index.store import DocStore
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,12 @@ class BuildOptions:
     keep_body: bool = True
     wikipedia_date: str = ""       # empty = newest available dump
     commoncrawl_snapshot: str = ""  # empty = newest CC-MAIN snapshot
+    # Incremental refresh: skip pages whose indexed text has not changed.
+    incremental: bool = True
+    # Write per-document vectors into each shard so queries can be reranked
+    # without running the model at query time.
+    embeddings: bool = False
+    embed_model: str = ""          # empty = src.training.semantic_dedupe default
 
     def resolved_sources(self) -> tuple[str, ...]:
         return self.sources or level_spec(self.level).sources
@@ -97,6 +110,8 @@ class BuildOptions:
             "quality_filter": self.quality_filter,
             "authority": self.authority,
             "keep_body": self.keep_body,
+            "incremental": self.incremental,
+            "embeddings": self.embeddings,
         }
 
 
@@ -185,6 +200,11 @@ class SearchIndexBuilder:
         self._metas: list[ShardMeta] = []
         self._state: dict = {}
         self._authority = None
+        self._embedder = None
+        self._embeddings_disabled = False
+        self.tracker: ChangeTracker | None = (
+            ChangeTracker(self.root / "incremental.sqlite3")
+            if self.options.incremental else None)
         self.load()
 
     # -- state --------------------------------------------------------------- #
@@ -268,11 +288,89 @@ class SearchIndexBuilder:
             [rid for rid, _ in pairs],
             [self._index_text(doc) for _, doc in pairs],
             shard_id=self._next_shard_id(), source=source)
-        meta = shard.save(self.index_dir / f"{SHARD_PREFIX}{shard.meta.shard_id:05d}")
+        directory = self.index_dir / f"{SHARD_PREFIX}{shard.meta.shard_id:05d}"
+        meta = shard.save(directory)
+        if self.options.embeddings:
+            self._write_embeddings(shard, directory,
+                                   [doc for _, doc in pairs])
         self._metas.append(meta)
         self._write_shards()
+        if self.tracker is not None:
+            self.tracker.record_many(
+                [(doc.url, rid, doc.content_hash, doc.snapshot, meta.shard_id)
+                 for rid, doc in pairs])
         logger.info("shard %d: %d docs (%s)", meta.shard_id, len(pairs), source)
         return len(pairs)
+
+    # -- embeddings --------------------------------------------------------- #
+    def _embedder_instance(self):
+        """The configured embedder, or ``None`` when only the lexical fallback
+        is available (in which case writing vectors would be pointless)."""
+        if self._embedder is None and not self._embeddings_disabled:
+            from src.search_index.rerank import is_hashing_embedder
+            from src.training.semantic_dedupe import make_embedder
+
+            embedder = make_embedder(self.options.embed_model or None)
+            if is_hashing_embedder(embedder):
+                self._embeddings_disabled = True
+                logger.warning(
+                    "sentence-transformers is unavailable; skipping embeddings "
+                    "(the hashing fallback is lexical and would not add signal)")
+                return None
+            self._embedder = embedder
+        return None if self._embeddings_disabled else self._embedder
+
+    def _write_embeddings(self, shard: BM25Shard, directory: Path,
+                          docs: list[Doc]) -> bool:
+        """Compute and store per-document vectors for one shard."""
+        embedder = self._embedder_instance()
+        if embedder is None:
+            return False
+        try:
+            from src.search_index.rerank import EmbeddingReranker
+
+            vectors = EmbeddingReranker(embedder=embedder).encode(
+                [self._index_text(doc) for doc in docs])
+            shard.save_embeddings(directory, vectors,
+                                  model=str(getattr(embedder, "model_name",
+                                                    "") or self.options.embed_model
+                                            or "all-MiniLM-L6-v2"))
+            return True
+        except Exception as exc:  # noqa: BLE001 - embeddings must not fail a build
+            logger.warning("embeddings for shard %d failed: %s",
+                           shard.meta.shard_id, exc)
+            return False
+
+    def build_embeddings(self, shard_ids: Sequence[int] | None = None) -> int:
+        """Add vectors to shards of an index that was built without them."""
+        import numpy as np
+
+        done = 0
+        for meta in list(self._metas):
+            if shard_ids is not None and meta.shard_id not in set(shard_ids):
+                continue
+            directory = self.index_dir / meta.path
+            rowids = np.load(directory / "rowids.npy")
+            docs = self.store.fetch_map([int(r) for r in rowids.tolist()])
+            ordered = [docs[int(r)] for r in rowids.tolist() if int(r) in docs]
+            if not ordered:
+                continue
+            shard = BM25Shard(meta)
+            if self._write_embeddings(shard, directory, ordered):
+                done += 1
+        return done
+
+    def build_spell(self, config=None) -> dict:
+        """Train the spelling dictionary from this index's own vocabulary.
+
+        ``config`` is a :class:`~src.search_index.spell.SpellConfig`; small
+        indexes need a lower ``min_freq`` because every term occurs once.
+        """
+        checker = SpellChecker.from_index(self.index_dir, config)
+        checker.save(self.index_dir / SPELL_FILE)
+        logger.info("spell: %d terms, %d delete signatures",
+                    len(checker), len(checker.deletes))
+        return checker.stats()
 
     def add_documents(self, docs: Iterable[Doc], *, source: str = "seed") -> int:
         """Index an arbitrary stream of documents.
@@ -488,14 +586,87 @@ class SearchIndexBuilder:
             progress.error = ""
             self._write_progress(name, progress)
             self.progress(f"{name}: {written:,} documents indexed")
+            snapshot = self._snapshot_for(name)
+            if self.tracker is not None and snapshot:
+                self.tracker.record_snapshot(snapshot)
 
         self.save_state()
         return self.stats()
+
+    def _snapshot_for(self, source: str) -> str:
+        """Dataset version this source's documents belong to."""
+        if source == "commoncrawl":
+            return self.options.commoncrawl_snapshot or ""
+        if source == "wikipedia":
+            return self.options.wikipedia_date or ""
+        return ""
+
+    def refresh(self, snapshot: str | None = None, *,
+                shard_index: int | None = None,
+                shard_count: int | None = None,
+                incremental: bool | None = None) -> IndexStats:
+        """Ingest one Common Crawl snapshot into an existing index.
+
+        With incremental tracking (the default) only pages whose indexed text
+        actually changed are re-inverted, and only the shards that owned them
+        are rebuilt at the end. Run it with ``incremental=False`` and you get
+        the honest fallback: every page is re-read and every shard of this
+        source is rebuilt.
+        """
+        use_tracker = self.options.incremental if incremental is None \
+            else bool(incremental)
+        if use_tracker:
+            if self.tracker is None:
+                self.tracker = ChangeTracker(self.root / "incremental.sqlite3")
+            self.options.incremental = True
+        elif self.tracker is not None:
+            self.tracker.close()
+            self.tracker = None
+            self.options.incremental = False
+        if snapshot:
+            self.options.commoncrawl_snapshot = snapshot
+        if not self.options.commoncrawl_snapshot:
+            from src.search_index.sources.commoncrawl import latest_snapshot
+
+            self.options.commoncrawl_snapshot = latest_snapshot(
+                fetcher=self.fetcher)
+        if shard_count is not None:
+            self.options.shard_count = int(shard_count)
+        if shard_index is not None:
+            self.options.shard_index = int(shard_index)
+        # a refresh re-reads a whole snapshot, so the "done" marker must go
+        progress = self._progress_of("commoncrawl")
+        progress.status = "partial"
+        self._write_progress("commoncrawl", progress)
+
+        self.progress(f"refreshing from {self.options.commoncrawl_snapshot}")
+        stats = self.build(sources=("commoncrawl",))
+        if self.tracker is not None:
+            rebuilt = self.rebuild_dirty_shards()
+            self.tracker.record_snapshot(self.options.commoncrawl_snapshot)
+            counters = self.tracker.counters.to_dict()
+            self.progress(f"refresh done: {counters} "
+                          f"({rebuilt} shard(s) rebuilt)")
+        else:
+            # nothing tracked which shards changed, so redo all of this source
+            rebuilt = self.rebuild_shards([meta.shard_id for meta in self._metas
+                                           if meta.source == "commoncrawl"])
+            counters = {"new": stats.docs, "changed": 0, "unchanged": 0}
+            self.progress(f"refresh done (full): {stats.docs:,} documents, "
+                          f"{rebuilt} shard(s) rebuilt")
+        stats.state.setdefault("refresh", {})
+        stats.state["refresh"] = {**counters,
+                                  "shards_rebuilt": rebuilt,
+                                  "incremental": self.tracker is not None,
+                                  "snapshot": self.options.commoncrawl_snapshot}
+        return stats
 
     def _consume(self, source: str) -> Iterator[int]:
         """Feed one source through the sharder, yielding a running total."""
         buffer: list[Doc] = []
         written = 0
+        snapshot = self._snapshot_for(source)
+        tracker = self.tracker
         for doc in self._source_iterator(source):
             if not doc.url:
                 continue
@@ -508,6 +679,14 @@ class SearchIndexBuilder:
                 doc.quality = score
             if self._authority is not None:
                 doc.authority = max(doc.authority, self._authority.get(doc.host))
+            if tracker is not None:
+                doc.snapshot = snapshot
+                doc.content_hash = content_hash(text)
+                state = tracker.classify(doc.url, doc.content_hash, snapshot)
+                if state == UNCHANGED:
+                    continue
+                if state == CHANGED and self._apply_change(tracker, doc):
+                    continue
             if not self.options.keep_body:
                 doc.body = ""
             buffer.append(doc)
@@ -517,6 +696,74 @@ class SearchIndexBuilder:
                 yield written
         written += self._flush(source, buffer)
         yield written
+
+    def _apply_change(self, tracker: ChangeTracker, doc: Doc) -> bool:
+        """Update a page that changed in place; mark its shard dirty.
+
+        Returns ``True`` when the change was applied (so the caller should not
+        also insert it), ``False`` when the row has gone and it must be indexed
+        as new.
+        """
+        previous = tracker.get(doc.url)
+        rowid = self.store.update_document(
+            doc.url, doc, content_hash=doc.content_hash, snapshot=doc.snapshot)
+        if rowid is None:
+            tracker.forget(doc.url)
+            return False
+        shard_id = previous.shard_id if previous else -1
+        tracker.record(doc.url, rowid, doc.content_hash, doc.snapshot, shard_id)
+        tracker.mark_dirty(shard_id, reason="changed")
+        return True
+
+    # -- shard rebuild ------------------------------------------------------ #
+    def rebuild_dirty_shards(self) -> int:
+        """Re-invert every shard a refresh marked dirty. Returns the count."""
+        if self.tracker is None:
+            return 0
+        dirty = self.tracker.dirty_shards()
+        if not dirty:
+            return 0
+        rebuilt = self.rebuild_shards(dirty)
+        self.tracker.clear_dirty(dirty)
+        return rebuilt
+
+    def rebuild_shards(self, shard_ids: Sequence[int]) -> int:
+        """Re-invert the named shards from whatever is in the document store.
+
+        Used after an incremental refresh: the document rows changed in place,
+        so the postings that pointed at them are stale until the shard is
+        rebuilt. Only the affected shards are touched.
+        """
+        import numpy as np
+
+        wanted = {int(i) for i in shard_ids}
+        rebuilt = 0
+        for position, meta in enumerate(self._metas):
+            if meta.shard_id not in wanted:
+                continue
+            directory = self.index_dir / meta.path
+            if not (directory / "rowids.npy").exists():
+                continue
+            try:
+                rowids = [int(r) for r in np.load(directory / "rowids.npy").tolist()]
+            except (OSError, ValueError):
+                continue
+            docs = self.store.fetch_map(rowids)
+            kept = [r for r in rowids if r in docs]
+            if not kept:
+                continue
+            shard = BM25Shard().build(
+                kept, [self._index_text(docs[r]) for r in kept],
+                shard_id=meta.shard_id, source=meta.source)
+            shard.save(directory)
+            if (directory / "embeddings.npy").exists():
+                self._write_embeddings(shard, directory, [docs[r] for r in kept])
+            self._metas[position] = shard.meta
+            rebuilt += 1
+            logger.info("rebuilt shard %d (%d docs)", meta.shard_id, len(kept))
+        if rebuilt:
+            self._write_shards()
+        return rebuilt
 
     # -- reporting ------------------------------------------------------------ #
     def stats(self) -> IndexStats:
@@ -535,10 +782,28 @@ class SearchIndexBuilder:
             ready=bool(self._metas),
         )
 
+    def extras(self) -> dict:
+        """State of the optional layers: embeddings, spelling, incremental."""
+        embedded = sum(
+            1 for m in self._metas
+            if (self.index_dir / m.path / "embeddings.npy").exists())
+        return {
+            "shards": len(self._metas),
+            "shards_with_embeddings": embedded,
+            "spell": {
+                "trained": (self.index_dir / SPELL_FILE).exists(),
+                **(_load_spell_stats(self.index_dir)),
+            },
+            "incremental": (self.tracker.stats() if self.tracker is not None
+                            else {"enabled": False}),
+        }
+
     def level_info(self) -> LevelSpec:
         return level_spec(self.options.level)
 
     def close(self) -> None:
+        if self.tracker is not None:
+            self.tracker.close()
         self.store.close()
 
     def __enter__(self) -> Self:
@@ -551,6 +816,12 @@ class SearchIndexBuilder:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+def _load_spell_stats(index_dir: Path) -> dict:
+    """Read just the header of ``spell.json.gz`` (cheap enough for ``status``)."""
+    checker = SpellChecker.load(Path(index_dir) / SPELL_FILE)
+    return checker.stats() if checker is not None else {}
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 

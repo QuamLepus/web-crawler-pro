@@ -37,6 +37,10 @@ class Doc:
     quality: float = 1.0       # 0-1, from src.training.filters
     lang: str = "en"
     host: str = ""
+    #: digest of :attr:`index_text` — lets a refresh skip pages that did not change
+    content_hash: str = ""
+    #: dataset version this came from, e.g. ``CC-MAIN-2026-39``
+    snapshot: str = ""
 
     def __post_init__(self) -> None:
         if not self.host:
@@ -66,6 +70,8 @@ class Doc:
             "authority": round(self.authority, 4),
             "quality": round(self.quality, 4),
             "lang": self.lang,
+            "content_hash": self.content_hash,
+            "snapshot": self.snapshot,
         }
 
     @classmethod
@@ -81,7 +87,38 @@ class Doc:
             quality=float(row.get("quality") or 1.0),
             lang=row.get("lang", "") or "en",
             host=row.get("host", "") or "",
+            content_hash=row.get("content_hash", "") or "",
+            snapshot=row.get("snapshot", "") or "",
         )
+
+
+@dataclass(slots=True)
+class SearchResult:
+    """One hit, with the pieces that explain *why* it matched.
+
+    Lives here rather than in :mod:`src.search_index.query` so the reranker can
+    import it without pulling in the whole query stack (which would be circular:
+    query -> bm25 -> rerank -> query).
+    """
+
+    doc: Doc
+    doc_id: int = 0          # rowid in the document store
+    shard_id: int = -1       # which shard produced it (used to fetch vectors)
+    score: float = 0.0       # blended score — BM25 × authority, then reranked
+    bm25: float = 0.0
+    semantic: float = 0.0    # cosine similarity, when a reranker ran
+    rerank: float = 0.0      # cross-encoder logit, when one ran
+    snippet: str = ""
+
+    def to_dict(self) -> dict:
+        payload = self.doc.to_dict()
+        payload.update({"doc_id": self.doc_id, "shard_id": self.shard_id,
+                        "score": round(self.score, 5),
+                        "bm25": round(self.bm25, 5),
+                        "semantic": round(self.semantic, 5),
+                        "rerank": round(self.rerank, 5),
+                        "snippet": self.snippet})
+        return payload
 
 
 @dataclass(slots=True)

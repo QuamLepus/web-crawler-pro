@@ -43,7 +43,25 @@ on:
         description: "Documents per BM25 shard"
         type: string
         default: "250000"
-  # Level 0 is ~330 MB and monthly-fresh: rebuild it automatically.
+      refresh:
+        description: "Incremental: start from the last index and re-index only changed pages"
+        type: boolean
+        default: false
+      incremental:
+        description: "Track content hashes so unchanged pages are skipped"
+        type: boolean
+        default: true
+      spell:
+        description: "Train the spelling dictionary from the index vocabulary"
+        type: boolean
+        default: true
+      embeddings:
+        description: "Pre-compute semantic vectors (~154 MB per 100k docs)"
+        type: boolean
+        default: false
+  # Level 0 is ~330 MB and monthly-fresh: refresh it automatically. The monthly
+  # run sets `refresh`, so it re-downloads only the changed Curlie files and
+  # re-indexes only the pages that actually changed.
   schedule:
     - cron: "23 5 3 * *"
 
@@ -114,7 +132,27 @@ jobs:
           restore-keys: |
             si-raw-${{ needs.plan.outputs.level }}-
 
-      - name: Build shard ${{ matrix.shard }}
+      # An incremental refresh needs the *previous* index: the document store,
+      # the content-hash tracker, the resume state and the shards. The other
+      # half of the work (raw datasets) is cached separately above.
+      # Honest limits: the cache holds 10 GB per repository and is evicted after
+      # 7 days of no use, so this only pays off for level 0/1. Bigger indexes
+      # simply get rebuilt from scratch — the code detects the missing tracker
+      # and falls back to a full ingest.
+      - name: Restore the previous index (incremental refresh)
+        if: ${{ inputs.refresh }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.DATA_DIR }}/docs.sqlite3
+            ${{ env.DATA_DIR }}/incremental.sqlite3
+            ${{ env.DATA_DIR }}/state.json
+            ${{ env.DATA_DIR }}/index
+          key: si-index-${{ needs.plan.outputs.level }}-${{ github.run_id }}
+          restore-keys: |
+            si-index-${{ needs.plan.outputs.level }}-
+
+      - name: Build or refresh shard ${{ matrix.shard }}
         env:
           INPUT_LEVEL: ${{ needs.plan.outputs.level }}
           INPUT_MAX_PAGES: ${{ inputs.max_pages }}
@@ -122,6 +160,8 @@ jobs:
           INPUT_WIKI_DATE: ${{ inputs.wikipedia_date }}
           INPUT_SHARD_DOCS: ${{ inputs.shard_docs }}
           INPUT_SHARDS: ${{ inputs.shards }}
+          INPUT_REFRESH: ${{ inputs.refresh || 'false' }}
+          INPUT_INCREMENTAL: ${{ inputs.incremental || 'true' }}
         run: |
           set -euo pipefail
           args=(--level "$INPUT_LEVEL"
@@ -132,7 +172,13 @@ jobs:
           [ -n "$INPUT_MAX_PAGES" ] && args+=(--max-pages "$INPUT_MAX_PAGES")
           [ -n "$INPUT_SNAPSHOT" ]  && args+=(--snapshot "$INPUT_SNAPSHOT")
           [ -n "$INPUT_WIKI_DATE" ] && args+=(--wikipedia-date "$INPUT_WIKI_DATE")
-          python -m src.cli search-index build "${args[@]}"
+          if [ "$INPUT_INCREMENTAL" != "true" ]; then args+=(--no-incremental); fi
+          if [ "$INPUT_REFRESH" = "true" ]; then
+            echo "incremental refresh of ${{ needs.plan.outputs.level }}"
+            python -m src.cli search-index refresh "${args[@]}"
+          else
+            python -m src.cli search-index build "${args[@]}"
+          fi
 
       - name: Report size
         run: du -sh "$DATA_DIR" || true
@@ -174,6 +220,19 @@ jobs:
           echo "merging ${#parts[@]} part(s)"
           python -m src.cli search-index merge "${parts[@]}" --out merged-index
 
+      # The spelling dictionary is derived from the index vocabulary, so it has
+      # to be trained here — on the merged index — not per shard.
+      - name: Train the spelling dictionary
+        if: ${{ inputs.spell || github.event_name == 'schedule' }}
+        run: python -m src.cli search-index spell --data-dir merged-index \
+                    --check "kubernets,open sourse"
+
+      # Vectors are indexed by rowid, and merging renumbers every rowid, so
+      # they can only be written once the index is final.
+      - name: Pre-compute embeddings for semantic reranking
+        if: ${{ inputs.embeddings }}
+        run: python -m src.cli search-index embeddings --data-dir merged-index
+
       - name: Smoke test the merged index
         run: |
           python -m src.cli search-index status --data-dir merged-index
@@ -196,6 +255,9 @@ jobs:
             python -m src.cli search-index status --data-dir merged-index || true
             echo "\`\`\`"
             echo ""
+            if [ -f merged-index/index/spell.json.gz ]; then
+              echo "Spelling dictionary: trained from the index vocabulary."
+            fi
             echo "Download the \`search-index-merged-\` artifact and point the app at it:"
             echo ""
             echo '```bash'
