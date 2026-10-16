@@ -148,6 +148,12 @@ web-crawler-pro/
 │   ├── training/                    # quality filters, tokenization, MinHash/semantic dedupe
 │   ├── observability/metrics.py     # Prometheus counters/gauges/histograms + Sentry init
 │   ├── dashboard/app.py             # FastAPI + WebSocket live ops UI
+│   ├── webui/                       # the product surface: server-rendered console
+│   │   ├── app.py                   # 32 routes, Jinja2, session cookie auth
+│   │   ├── client.py                # in-process HTTP client of our own API
+│   │   ├── session.py               # httpOnly cookie helpers
+│   │   ├── static/app.css           # design system (no CDN, no build step)
+│   │   └── templates/               # 18 templates + 2 partials
 │   └── utils/logger.py
 ├── src/cli.py                       # CLI: discover / preview / crawl / status / results
 ├── workers/crawl_tasks.py           # seed / drain / fetch / process + crawl_domain Celery tasks
@@ -156,7 +162,7 @@ web-crawler-pro/
 │   ├── prometheus.yml
 │   └── k8s/manifests/               # redis, worker Deployment + HPA, dashboard + Ingress
 ├── .github/workflows/ci.yml         # test job (Redis service) + matrix image builds
-└── tests/                           # 122 tests, fakeredis-backed, no services required
+└── tests/                           # 236 tests, fakeredis-backed, no services required
 ```
 
 ---
@@ -171,7 +177,7 @@ Requires **Python 3.11+** (CI runs 3.12).
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                      # edit as needed
-pytest                                    # 75 tests, fakeredis-backed, no services required
+pytest                                    # 236 tests, fakeredis-backed, no services required
 python main.py                            # quick crawl of https://example.com
 ```
 
@@ -242,7 +248,7 @@ s.search("best data ingestion tools", top_k=5)
 
 ### 7. CI/CD
 
-`.github/workflows/ci.yml` runs lint + pytest (75 tests) against a real Redis service container on Python 3.12, then builds & pushes all four Docker targets (`worker`, `crawler`, `dashboard`, `worker-stealth`) to GHCR on merges to `main`.
+`.github/workflows/ci.yml` runs lint + pytest (236 tests) against a real Redis service container on Python 3.12, then builds & pushes all four Docker targets (`worker`, `crawler`, `dashboard`, `worker-stealth`) to GHCR on merges to `main`.
 
 ---
 
@@ -256,6 +262,38 @@ Run it locally with:
 ```bash
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
+
+### 🖥️ The web console
+
+The same process also serves a **product surface** at `/` — no separate app, no
+build step, no CDN:
+
+| Page | What it does |
+|---|---|
+| `/` `/pricing` | landing page and plans, rendered server-side |
+| `/app` | dashboard: quota, recent jobs, index size |
+| `/app/search` | Google-shaped search over **your own** index |
+| `/app/crawl` | crawl jobs, new-job modal, live progress |
+| `/app/discovery` | topic → candidate shortlist → approve → crawl |
+| `/app/index` | own-index stats, per-source shares, build commands |
+| `/app/marketplace` | Amazon-style dataset grid + bounties |
+| `/app/keys` | create and revoke API keys (shown once) |
+| `/app/billing` | usage meters, invoice lines, plan comparison |
+| `/app/settings` | webhooks, identity, environment |
+| `/app/docs` | endpoint reference with a copy-pasteable round trip |
+
+Three rules shape it:
+
+* **It is a client of its own API.** Every page calls the documented endpoints
+  with the caller's JWT, so the UI can never drift from the API — anything it
+  can do, `curl` can do.
+* **The JWT stays out of JavaScript.** It lives in an httpOnly cookie; the
+  server swaps it for `Authorization: Bearer` on each call. A browser that has
+  to poll for progress does so through `/app/poll/*`, which re-authenticates
+  server-side.
+* **It works unplugged.** One stylesheet, one script, system fonts. Set
+  `WCP_WEBUI=0` (or omit `jinja2`) for a pure-API deployment and `/` turns back
+  into the JSON index.
 
 Then:
 
@@ -736,10 +774,10 @@ CI/CD with published images.
 
 Next up:
 
-- [ ] Flesh out the dashboard (currently a live-metrics prototype)
-- [ ] Semantic (vector) reranking on top of the own index — embeddings are wired, the rerank step is not
-- [ ] Spelling correction learned from the indexed corpus itself (SymSpell-style)
-- [ ] Incremental Common Crawl updates: index only what changed since the last snapshot
+- [x] Flesh out the dashboard — the server-rendered console at `/` replaces the live-metrics prototype
+- [x] Semantic (vector) reranking on top of the own index; degrades to BM25 when no encoder is installed
+- [x] Spelling correction learned from the indexed corpus itself (SymSpell-style)
+- [x] Incremental Common Crawl updates: index only what changed since the last snapshot
 - [ ] Deeper OpenTelemetry tracing across workers
 - [ ] Exercise billing end-to-end against real Stripe
 - [ ] Split `requirements.txt` into optional extras so images stay small

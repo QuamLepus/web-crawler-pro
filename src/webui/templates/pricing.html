@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block body %}
+<nav class="land-nav">
+  <div class="row" style="gap:10px">
+    <span style="font-size:20px">🕷</span>
+    <b style="font-size:15px">WebCrawler<span style="color:var(--brand-600)">Pro</span></b>
+  </div>
+  <div class="links">
+    <a href="/#features">Features</a><a href="/#how">How it works</a>
+    <a href="/pricing">Pricing</a><a href="/app/docs">API</a>
+  </div>
+  <div class="push row" style="gap:8px">
+    <button class="icon-btn" data-theme-toggle title="Toggle dark mode">◐</button>
+    <a class="btn btn-ghost" href="/login">Sign in</a>
+    <a class="btn btn-primary" href="/signup">Start free</a>
+  </div>
+</nav>
+
+<section class="sect">
+  <div class="sect-head">
+    <h2>Pricing</h2>
+    <p>Every plan includes the own-index engine. You are paying for pages and
+      storage, not for queries.</p>
+  </div>
+  <div class="grid g-4">
+    {% for plan in plans %}
+      <div class="plan {% if plan.best %}best{% endif %}">
+        {% if plan.best %}<span class="ribbon">Most popular</span>{% endif %}
+        <h3>{{ plan.name }}</h3>
+        <p class="small muted">{{ plan.blurb }}</p>
+        <div class="amt">
+          {% if plan.price is none %}Custom{% else %}${{ plan.price }}<small>/mo</small>{% endif %}
+        </div>
+        <ul>
+          {% for f in plan.features %}<li><span class="tick">✓</span><span>{{ f }}</span></li>{% endfor %}
+        </ul>
+        <a class="btn {% if plan.best %}btn-primary{% endif %} btn-block" href="/signup?plan={{ plan.id }}">
+          {% if plan.price is none %}Talk to us{% else %}Choose {{ plan.name }}{% endif %}
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="card card-pad mt-4">
+    <h3 class="mb-2">Questions people actually ask</h3>
+    <div class="grid g-2">
+      <div>
+        <h4>Is the free tier real?</h4>
+        <p class="small dim">A thousand pages a month. Enough to build a level-0
+          index and keep it fresh — which is the part that replaces paid search.</p>
+      </div>
+      <div>
+        <h4>What does a search cost?</h4>
+        <p class="small dim">Nothing per query once the index is built. That is
+          the whole point of owning it.</p>
+      </div>
+      <div>
+        <h4>Do I need a credit card?</h4>
+        <p class="small dim">No. Overage only appears if you cross the plan
+          ceiling, and you can cap it.</p>
+      </div>
+      <div>
+        <h4>Can I run it myself?</h4>
+        <p class="small dim">Yes — it is a single FastAPI app plus Redis, and the
+          index builds from free datasets.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="land-foot">
+  <p class="center small muted">Built by SWADHIN · Free datasets: Curlie, Wikipedia, Common Crawl</p>
+</footer>
+{% endblock %}

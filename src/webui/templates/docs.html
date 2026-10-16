@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>API reference</span></div>
+  <div class="between">
+    <div>
+      <h1>API reference</h1>
+      <p class="dim">Every screen in this console is one of these calls. Nothing
+        here is console-only.</p>
+    </div>
+    <div class="row">
+      <a class="btn" href="/docs">OpenAPI UI</a>
+      <a class="btn" href="/redoc">ReDoc</a>
+      <a class="btn btn-primary" href="/app/keys">Get an API key</a>
+    </div>
+  </div>
+</div>
+
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card">
+      <div class="card-head">
+        <h3>Endpoints</h3>
+        <input class="input" style="max-width:240px" placeholder="Filter…"
+               data-filter="table.data tbody tr">
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th data-sort>Method</th><th data-sort>Path</th><th>What it does</th></tr></thead>
+          <tbody>
+            {% for method, path, blurb in endpoints %}
+              <tr>
+                <td>
+                  <span class="badge {{ 'ok' if method == 'GET' else ('info' if method == 'POST' else 'warn') }}">{{ method }}</span>
+                </td>
+                <td class="mono small">{{ path }}</td>
+                <td class="small dim">{{ blurb }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Authentication</h3>
+      <p class="small dim mb-2">Two ways in. Pick whichever fits the caller.</p>
+      <div class="code">
+<span class="c"># long-lived key, for machines</span>
+curl <span class="k">{{ request.base_url }}api/v1/jobs</span> -H "X-API-Key: $KEY"<br>
+<br>
+<span class="c"># JWT, after POST /api/auth/login</span>
+curl <span class="k">{{ request.base_url }}api/v1/jobs</span> -H "Authorization: Bearer $TOKEN"
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Errors</h3>
+      <dl class="kv small">
+        <dt><code>401</code></dt><dd>Missing or expired credentials</dd>
+        <dt><code>402</code></dt><dd>Quota exhausted — the plan ceiling or overage</dd>
+        <dt><code>404</code></dt><dd>Not yours, or not there</dd>
+        <dt><code>409</code></dt><dd>Conflict — an org or email already exists</dd>
+        <dt><code>422</code></dt><dd>Validation failed; the body says which field</dd>
+        <dt><code>429</code></dt><dd>Rate limited — honour <code>Retry-After</code></dd>
+      </dl>
+      <p class="tiny muted mt-2">
+        Every error body looks like <code>{"detail": "…"}</code>, which is what
+        the console shows in its toasts.
+      </p>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">A complete round trip</h3>
+      <div class="code" style="max-height:420px;overflow:auto">
+<span class="c"># 1 — create a workspace and grab a token</span>
+TOKEN=$(curl -s -X POST <span class="k">{{ request.base_url }}api/auth/signup</span> \<br>
+&nbsp;&nbsp;-H "Content-Type: application/json" \<br>
+&nbsp;&nbsp;-d '{"org_name":"Acme","email":"me@acme.test","password":"correct-horse"}' \<br>
+&nbsp;&nbsp;| jq -r .access_token)<br>
+<br>
+<span class="c"># 2 — see what a topic turns up, crawling nothing</span>
+curl -s -X POST <span class="k">{{ request.base_url }}api/v1/discovery/preview</span> \<br>
+&nbsp;&nbsp;-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \<br>
+&nbsp;&nbsp;-d '{"topic":"solar panel installers","count":20}' | jq<br>
+<br>
+<span class="c"># 3 — queue a real crawl</span>
+curl -s -X POST <span class="k">{{ request.base_url }}api/v1/jobs/crawl</span> \<br>
+&nbsp;&nbsp;-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \<br>
+&nbsp;&nbsp;-d '{"url":"https://example.com","max_pages":50}' | jq<br>
+<br>
+<span class="c"># 4 — ask your own index (free, offline-capable)</span>
+curl -s <span class="k">"{{ request.base_url }}api/v1/search-index/query?q=solar+energy"</span> \<br>
+&nbsp;&nbsp;-H "Authorization: Bearer $TOKEN" | jq
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">SDKs</h3>
+      <p class="small dim">
+        There is no official SDK yet — and that is deliberate. Every endpoint is
+        plain JSON over HTTP, so <code>curl</code>, <code>requests</code> or
+        <code>fetch</code> is already enough.
+      </p>
+      <a class="btn btn-block mt-2" href="https://github.com/QuamLepus/web-crawler-pro">
+        Open the repository →
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+{# Job state pill. One place, so every page renders states identically. #}
+{% set st = (job.state | string).lower().replace('jobstate.', '') %}
+{% set cls = 'ok' if st in ('completed','done','succeeded') else
+             ('danger' if st in ('failed','error','cancelled') else
+             ('warn' if st in ('running','queued','pending','awaiting_approval') else '')) %}
+<span class="badge {{ cls }}">
+  <span class="dot {% if st in ('running','queued') %}live{% endif %}"></span>{{ st }}
+</span>

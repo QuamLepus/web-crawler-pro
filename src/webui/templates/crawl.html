@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% set items = (jobs.data or {}).get('items', []) if jobs else [] %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Crawl jobs</span></div>
+  <div class="between">
+    <div>
+      <h1>Crawl jobs</h1>
+      <p class="dim small">One URL and a page budget — or start from
+        <a href="/app/discovery">topic discovery</a> if you do not have URLs yet.</p>
+    </div>
+    <button class="btn btn-primary" data-modal-open="new-crawl">+ New crawl</button>
+  </div>
+</div>
+
+<div class="grid g-main">
+  <div class="card">
+    <div class="card-head">
+      <h3>All jobs</h3>
+      <input class="input" style="max-width:230px" placeholder="Filter…"
+             data-filter="table.data tbody tr">
+    </div>
+
+    {% if error %}
+      <div class="card-pad"><div class="alert danger"><span class="ico">✕</span><span>{{ error }}</span></div></div>
+    {% endif %}
+
+    {% if items %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th data-sort>Job</th><th data-sort>State</th>
+              <th data-sort class="num">Pages</th><th data-sort class="num">Items</th>
+              <th data-sort>Created</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for job in items %}
+              <tr>
+                <td>
+                  <a class="mono" href="/app/crawl/{{ job.job_id }}">{{ job.job_id[:16] }}…</a>
+                  <div class="tiny muted truncate" style="max-width:320px">{{ job.url }}</div>
+                </td>
+                <td>{% include "partials/state.html" %}</td>
+                <td class="num tar">{{ (job.pages_done or 0)|num }} / {{ job.max_pages|num }}</td>
+                <td class="num tar">{{ (job.items_collected or 0)|num }}</td>
+                <td class="small muted nowrap">{{ job.created_at|ago }}</td>
+                <td class="right">
+                  <a class="btn btn-sm" href="/app/crawl/{{ job.job_id }}">Open</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-foot small muted">
+        {{ (jobs.data or {}).get('total', items|length) }} job(s) ·
+        pages update live while a job is running
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="ico">🕷</div>
+        <h3>No jobs yet</h3>
+        <p>A crawl is one URL plus a page budget. robots.txt and per-host
+          politeness are on by default; turn on stealth only for the sites that
+          need it.</p>
+        <button class="btn btn-primary" data-modal-open="new-crawl">Start your first crawl</button>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">Politeness defaults</h3>
+      <dl class="kv small">
+        <dt>robots.txt</dt><dd>obeyed unless you switch it off</dd>
+        <dt>Rate limit</dt><dd>adaptive per host</dd>
+        <dt>Retries</dt><dd>exponential backoff</dd>
+        <dt>Max pages</dt><dd>hard ceiling per job</dd>
+      </dl>
+      <div class="divider"></div>
+      <p class="tiny muted">
+        Stealth mode changes the TLS fingerprint and rotates egress. Use it when
+        a site blocks ordinary clients — not as a default.
+      </p>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Prefer not to pick URLs?</h3>
+      <p class="small dim mb-2">
+        Describe the topic and let discovery produce the shortlist, with the
+        reason each site was chosen.
+      </p>
+      <a class="btn btn-block" href="/app/discovery">Go to discovery →</a>
+    </div>
+  </div>
+</div>
+
+{# ------------------------------------------------------------------ modal -- #}
+<div class="modal-back" id="new-crawl" hidden>
+  <div class="modal">
+    <form method="post" action="/app/crawl">
+      <div class="head">
+        <h3 style="flex:1">New crawl job</h3>
+        <button type="button" class="icon-btn" data-modal-close>✕</button>
+      </div>
+      <div class="body stack">
+        <div class="field">
+          <label for="url">Start URL</label>
+          <input class="input" id="url" name="url" required
+                 placeholder="https://example.com/products" data-autofocus>
+          <span class="hint">Crawling follows links from here, staying on the
+            same host by default.</span>
+        </div>
+        <div class="grid g-2">
+          <div class="field">
+            <label for="max_pages">Max pages</label>
+            <input class="input" id="max_pages" name="max_pages" type="number"
+                   value="10" min="1" max="1000000">
+          </div>
+          <div class="field">
+            <label for="priority">Priority</label>
+            <select class="select" id="priority" name="priority">
+              <option value="low">low</option>
+              <option value="normal" selected>normal</option>
+              <option value="high">high</option>
+            </select>
+          </div>
+        </div>
+        <div class="check">
+          <input type="checkbox" id="obey_robots" name="obey_robots" checked>
+          <label for="obey_robots">Obey robots.txt <span class="muted">(recommended)</span></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" id="stealth" name="stealth">
+          <label for="stealth">Stealth mode
+            <span class="muted">— TLS fingerprinting and rotating egress</span></label>
+        </div>
+      </div>
+      <div class="foot">
+        <button type="button" class="btn" data-modal-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Queue the crawl</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

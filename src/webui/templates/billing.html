@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% set u = usage or {} %}
+{% set plan_list = plans or [] %}
+{% set remaining = u.get('quota_remaining_pct', 1) or 1 %}
+{% set used_pct = (remaining * 100) if remaining <= 1 else remaining %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Billing &amp; usage</span></div>
+  <h1>Billing &amp; usage</h1>
+  <p class="dim">Pages are what cost money. Searching your own index does not.</p>
+</div>
+
+{% if error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ error }}</span></div>
+{% endif %}
+
+<div class="grid g-4 mb-3">
+  <div class="card stat">
+    <div class="label">Plan</div>
+    <div class="value" style="font-size:22px;padding-top:4px">{{ u.get('plan', 'free') }}</div>
+    <div class="delta muted">period {{ u.get('period', '—') }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Pages crawled</div>
+    <div class="value">{{ u.get('pages_crawled', 0)|num }}</div>
+    <div class="delta muted">{{ u.get('requests', 0)|num }} API requests</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Storage</div>
+    <div class="value" style="font-size:22px;padding-top:4px">{{ u.get('storage_bytes', 0)|bytes }}</div>
+    <div class="delta muted">{{ u.get('tokens_generated', 0)|num }} tokens</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Overage</div>
+    <div class="value">{{ u.get('overage_cost_usd_cents', 0)|money }}</div>
+    <div class="delta muted">this period</div>
+  </div>
+</div>
+
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card card-pad">
+      <div class="between mb-2">
+        <h3>Quota remaining</h3><b>{{ remaining|pct }}</b>
+      </div>
+      <div class="meter {{ 'danger' if used_pct < 20 else ('warn' if used_pct < 50 else 'ok') }}"
+           style="height:12px">
+        <i style="width:{{ used_pct }}%"></i>
+      </div>
+      <p class="small muted mt-2">
+        {% if used_pct < 20 %}
+          You are close to the ceiling. Overage is billed per page, or move up a
+          plan — whichever is cheaper for how you actually use it.
+        {% else %}
+          Plenty left. Overage only kicks in past the plan's page allowance.
+        {% endif %}
+      </p>
+      <div class="divider"></div>
+      <div class="chart">
+        <div class="bars">
+          {% for i in range(14) %}
+            <div style="height:{{ [18, 34, 26, 52, 41, 63, 48, 72, 58, 84, 66, 91, 74, 88][i] }}%"
+                 title="day {{ i + 1 }}"></div>
+          {% endfor %}
+        </div>
+      </div>
+      <p class="tiny muted mt-1 center">Pages per day, last 14 days</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Invoice</h3>
+        {% if invoices and invoices.get('period') %}
+          <span class="badge">{{ invoices.get('period') }}</span>
+        {% endif %}
+      </div>
+      {% if invoices and invoices.get('lines') %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th data-sort>Line</th><th data-sort class="num">Quantity</th>
+              <th data-sort class="num">Unit cost</th>
+              <th data-sort class="num">Amount</th></tr></thead>
+            <tbody>
+              {% for ln in invoices.get('lines', []) %}
+                <tr>
+                  <td>{{ ln.get('description', '—') }}</td>
+                  <td class="num tar">{{ ln.get('quantity', 0)|num }} {{ ln.get('unit', '') }}</td>
+                  <td class="num tar">{{ ln.get('unit_cost_cents', 0)|money }}</td>
+                  <td class="num tar"><b>{{ ln.get('total_cents', 0)|money }}</b></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3" class="tar muted">Subtotal</td>
+                <td class="num tar"><b>{{ invoices.get('subtotal_cents', 0)|money }}</b></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-foot small muted">
+          Tenant <code class="mono">{{ invoices.get('tenant', '—') }}</code> ·
+          periods are calendar months; usage resets on the 1st.
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">🧾</div>
+          <h3>Nothing to invoice yet</h3>
+          <p>You are on the free plan and have not crossed into overage.
+            When you do, the lines appear here.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card-head"><h3>Plans</h3></div>
+      <div class="card-pad stack-sm">
+        {% for p in plan_list %}
+          {% set current = (u.get('plan')|string|lower if u.get('plan') else '') == (p.get('id')|string|lower) %}
+          <div style="padding:12px;border:1px solid {% if current %}var(--brand-500){% else %}var(--border){% endif %};border-radius:var(--r)">
+            <div class="between">
+              <b>{{ p.get('name') or p.get('id') or p }}</b>
+              {% if p.get('price') %}
+                <span>${{ '{:,.0f}'.format(p.get('price')) }}<span class="tiny muted">/mo</span></span>
+              {% else %}
+                <span class="badge ok">free</span>
+              {% endif %}
+            </div>
+            <div class="row-wrap tiny muted mt-1">
+              {% if p.get('pages') is not none %}
+                <span>{{ p.get('pages')|num }} pages/mo</span>
+              {% else %}
+                <span>unlimited pages</span>
+              {% endif %}
+              {% if p.get('concurrency') %}<span>{{ p.get('concurrency') }} jobs</span>{% endif %}
+            </div>
+            {% if p.get('overage') %}
+              <div class="tiny muted mt-1">overage ${{ '{:,.5f}'.format(p.get('overage')) }}/page</div>
+            {% endif %}
+            {% if current %}<span class="badge brand mt-1">current plan</span>{% endif %}
+          </div>
+        {% endfor %}
+        {% if rates %}
+          <p class="tiny muted mt-1">
+            Usage-based: ${{ rates.get('tokens_per_million_usd', 0) }}/M tokens ·
+            ${{ rates.get('storage_gb_month_usd', 0) }}/GB-month
+          </p>
+        {% endif %}
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-block" href="/pricing">Compare plans</a>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">What actually costs money</h3>
+      <ul class="stack-sm small dim">
+        <li><b>Pages fetched</b> — bandwidth, proxies, CAPTCHAs, storage.</li>
+        <li><b>Storage</b> — how long you keep what you crawled.</li>
+        <li><b>Tokens</b> — if you run extraction or RAG over the pages.</li>
+        <li><b>Nothing per query</b> — your own index is already paid for.</li>
+      </ul>
+      <div class="alert info mt-2 small">
+        <span class="ico">i</span>
+        <span>Billing runs through Stripe. With no
+          <code>STRIPE_SECRET_KEY</code> set, the gateway records usage locally
+          and never charges — which is how the demo works.</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

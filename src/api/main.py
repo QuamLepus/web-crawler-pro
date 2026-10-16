@@ -133,6 +133,14 @@ PUBLIC_PATHS = {"/healthz", "/livez", "/readyz", "/metrics", "/", "/docs",
 # schema context so clients get GraphQL-shaped errors there.
 AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/", "/graphql")
 
+# The console is a *client* of the API, not part of it. Its pages authenticate
+# with the session cookie inside their own handlers (and every ``/app/*``
+# handler redirects to /login when the session is gone), so the API's
+# credential gate has to let these paths through untouched — otherwise a
+# browser would get a JSON 401 instead of a sign-in page.
+WEBUI_PATHS = ("/", "/pricing", "/login", "/signup", "/logout", "/app",
+               "/static")
+
 
 class AuthContextMiddleware:
     """ASGI middleware resolving credentials into ``request.state.ctx``.
@@ -194,7 +202,8 @@ class AuthContextMiddleware:
         gql_endpoint = (path == "/graphql" or path == "/graphql/"
                         or path.startswith("/graphql?"))
         public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
-            or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES)
+            or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES) \
+            or any(path == p or path.startswith(p + "/") for p in WEBUI_PATHS)
         if ctx is None and (not public or gql_endpoint):
             from starlette.responses import JSONResponse
 
@@ -218,8 +227,16 @@ class AuthContextMiddleware:
 # App factory
 # --------------------------------------------------------------------------- #
 def create_api_app(redis_client=None, *, enable_graphql: bool = True,
-                   enable_rate_limit: bool = True) -> FastAPI:
-    """Build the fully-wired public API application."""
+                   enable_rate_limit: bool = True,
+                   enable_webui: bool = True) -> FastAPI:
+    """Build the fully-wired public API application.
+
+    ``enable_webui`` bolts the server-rendered console onto the same
+    process, so ``http://host:8000/`` is a product rather than a JSON
+    index. It is on by default but switches itself off (rather than
+    failing) when Jinja2 is not installed, and can be disabled outright
+    with ``WCP_WEBUI=0`` for a pure-API deployment.
+    """
     app = FastAPI(
         title="WebCrawlerPro Public API",
         version="2.1.0",
@@ -323,21 +340,6 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, checks)
         return {"status": "ready", "checks": checks}
 
-    # ---- root / index -------------------------------------------------------- #
-    @app.get("/", include_in_schema=False)
-    async def root():
-        return {
-            "service": "WebCrawlerPro Public API",
-            "version": app.version,
-            "docs": "/docs",
-            "graphql": "/graphql",
-            "metrics": "/metrics",
-            "health": ["/healthz", "/readyz"],
-            "endpoints": [f"{API_PREFIX}{p}" for p in
-                          ("/jobs", "/discovery", "/search", "/webhooks",
-                           "/billing", "/marketplace", "/search-index")],
-        }
-
     # ---- REST v1 routers ------------------------------------------------------ #
     from src.api.routers import (billing, discovery, jobs, marketplace,
                                  search, search_index, webhooks)
@@ -368,6 +370,35 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
             logger.info("GraphQL mounted at /graphql")
         except Exception as exc:  # pragma: no cover - strawberry missing
             logger.warning("GraphQL disabled (strawberry unavailable: %s)", exc)
+
+    # ---- web console --------------------------------------------------------- #
+    # Mounted last so it owns "/" and never shadows an API route: everything
+    # it registers is a page, and every page is a client of the routes above.
+    console_mounted = False
+    if enable_webui and os.getenv("WCP_WEBUI", "1") not in ("0", "false", "no"):
+        try:
+            from src.webui import mount_webui
+
+            console_mounted = mount_webui(app)
+        except Exception as exc:  # pragma: no cover - never break the API
+            logger.warning("web console disabled (%s)", exc)
+    app.state.webui = console_mounted
+
+    if not console_mounted:
+        # Bare API deployment: keep the machine-readable index on "/".
+        @app.get("/", include_in_schema=False)
+        async def root():
+            return {
+                "service": "WebCrawlerPro Public API",
+                "version": app.version,
+                "docs": "/docs",
+                "graphql": "/graphql",
+                "metrics": "/metrics",
+                "health": ["/healthz", "/readyz"],
+                "endpoints": [f"{API_PREFIX}{p}" for p in
+                              ("/jobs", "/discovery", "/search", "/webhooks",
+                               "/billing", "/marketplace", "/search-index")],
+            }
 
     @app.on_event("startup")
     async def _startup() -> None:  # pragma: no cover - trivial

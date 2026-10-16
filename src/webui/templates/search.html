@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% set hits = results.get('results', []) if results else [] %}
+{% set corrected = results.get('corrected_query', '') if results else '' %}
+{% set corrections = results.get('corrections', []) if results else [] %}
+
+{% block content %}
+{% if not q %}
+  {# ------------------------------------------------ Google-shaped landing -- #}
+  <div class="search-hero">
+    <div class="inner">
+      <div class="search-logo">WebCrawler<span style="opacity:.55">Pro</span></div>
+      <form action="/app/search" method="get">
+        <div class="searchbar">
+          <span style="color:var(--text-3)">🔍</span>
+          <input name="q" placeholder="Search your own index…" autofocus
+                 autocomplete="off" value="{{ q }}">
+          <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+      </form>
+      <div class="search-chips">
+        <a class="chip" href="/app/search?q=open+source+software">open source software</a>
+        <a class="chip" href="/app/search?q=renewable+energy+research">renewable energy research</a>
+        <a class="chip" href="/app/search?q=%22solar+panels%22">"solar panels"</a>
+        <a class="chip" href="/app/search?q=site%3A.org+directory">site:.org directory</a>
+      </div>
+      <p class="small muted mt-3">
+        {% if stats.ready %}
+          {{ stats.docs|num }} documents · {{ stats.shards }} shard(s) ·
+          your own index, no third-party search API
+        {% else %}
+          No index built yet — <a href="/app/index">build one from free datasets</a>.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+{% else %}
+  {# --------------------------------------------------------- results view -- #}
+  <div class="results-bar">
+    <a class="mini-logo" href="/app/search">🕷 WebCrawler<span style="color:var(--text-2)">Pro</span></a>
+    <form action="/app/search" method="get" class="sbar">
+      <div class="searchbar">
+        <span style="color:var(--text-3)">🔍</span>
+        <input name="q" value="{{ q }}" autocomplete="off" autofocus>
+        <input type="hidden" name="rerank" value="{{ rerank }}">
+        <input type="hidden" name="source" value="{{ source }}">
+        <button class="btn btn-primary" type="submit">Search</button>
+      </div>
+    </form>
+    <a class="btn btn-sm" href="/app/search">Clear</a>
+  </div>
+
+  <div class="grid g-main">
+    <div>
+      {% if results.get('_error') %}
+        <div class="alert danger"><span class="ico">✕</span><span>{{ results['_error'] }}</span></div>
+      {% endif %}
+
+      {% if corrected and corrections %}
+        <div class="spell-note">
+          Showing results for <b>{{ corrected }}</b>.
+          <a href="/app/search?q={{ q }}&amp;nospell=1">Search for “{{ q }}” instead</a>
+          {% for c in corrections %}
+            <span class="badge info">{{ c['from'] }} → {{ c['to'] }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if hits %}
+        <p class="small muted mb-3">
+          {{ hits|length }} result(s) · {{ results.get('took_ms', '?') }} ms ·
+          reranker: <b>{{ results.get('reranker', 'none') }}</b>
+        </p>
+        {% for r in hits %}
+          <article class="result">
+            <div class="url">
+              <span class="fav">{{ (r.host or r.url)[0:1]|upper }}</span>
+              <span class="truncate">{{ r.host or r.url }}</span>
+              <span class="muted">›</span>
+              <span class="truncate muted" style="max-width:340px">{{ r.url }}</span>
+            </div>
+            <h3><a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.title or r.host }}</a></h3>
+            <div class="snippet">{{ r.snippet|safe }}</div>
+            <div class="meta">
+              <span class="badge">{{ r.source or 'web' }}</span>
+              <span title="BM25 relevance">bm25 {{ r.bm25 }}</span>
+              {% if r.semantic %}<span title="Semantic score">sem {{ r.semantic }}</span>{% endif %}
+              <span title="Host authority from Open PageRank / Tranco">authority {{ r.authority }}/10</span>
+              <span>score {{ r.score }}</span>
+            </div>
+          </article>
+        {% endfor %}
+
+        {% if hits|length >= limit %}
+          <div class="pager">
+            {% if page_no > 1 %}
+              <a href="/app/search?q={{ q }}&amp;page={{ page_no - 1 }}&amp;limit={{ limit }}">‹ Prev</a>
+            {% endif %}
+            <span class="cur">{{ page_no }}</span>
+            <a href="/app/search?q={{ q }}&amp;page={{ page_no + 1 }}&amp;limit={{ limit }}">Next ›</a>
+          </div>
+        {% endif %}
+      {% elif not results.get('_error') %}
+        <div class="empty">
+          <div class="ico">🔍</div>
+          <h3>Nothing matched “{{ q }}”</h3>
+          <p>
+            {% if stats.ready %}
+              Try fewer words, a <code>"phrase"</code>, or <code>site:.edu</code>.
+              If the word is a typo, the index may not have learned it yet.
+            {% else %}
+              There is no index to search yet. Build one from free datasets —
+              it takes about 330 MB and then every query is free.
+            {% endif %}
+          </p>
+          <a class="btn btn-primary" href="/app/index">Build the index</a>
+        </div>
+      {% endif %}
+    </div>
+
+    {# ------------------------------------------------------------ sidebar -- #}
+    <div class="stack">
+      <div class="card card-pad">
+        <h3 class="mb-2">Search options</h3>
+        <form action="/app/search" method="get" class="stack-sm">
+          <input type="hidden" name="q" value="{{ q }}">
+          <div class="field">
+            <label for="source">Source</label>
+            <select class="select" id="source" name="source">
+              <option value="">All sources</option>
+              {% for s in ['curlie', 'wikipedia', 'commoncrawl', 'seed'] %}
+                <option value="{{ s }}" {% if source == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="rerank">Reranking</label>
+            <select class="select" id="rerank" name="rerank">
+              <option value="">Default</option>
+              <option value="none" {% if rerank == 'none' %}selected{% endif %}>none (BM25 only)</option>
+              <option value="embedding" {% if rerank == 'embedding' %}selected{% endif %}>embedding</option>
+              <option value="cross-encoder" {% if rerank == 'cross-encoder' %}selected{% endif %}>cross-encoder</option>
+            </select>
+            <span class="hint">Semantic reranking needs sentence-transformers;
+              without it the engine says so and falls back to BM25.</span>
+          </div>
+          <div class="field">
+            <label for="limit">Results</label>
+            <select class="select" id="limit" name="limit">
+              {% for n in [10, 20, 50] %}
+                <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="check">
+            <input type="checkbox" id="collapse" name="collapse" value="1"
+                   {% if collapse == '1' %}checked{% endif %}>
+            <label for="collapse">One result per website</label>
+          </div>
+          <button class="btn btn-primary btn-block mt-1">Apply</button>
+        </form>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="mb-2">Query syntax</h3>
+        <dl class="kv small">
+          <dt><code>solar panels</code></dt><dd>any of the words</dd>
+          <dt><code>"solar panels"</code></dt><dd>exact phrase</dd>
+          <dt><code>solar -blog</code></dt><dd>exclude a word</dd>
+          <dt><code>site:.edu</code></dt><dd>host suffix</dd>
+          <dt><code>source:wikipedia</code></dt><dd>one source only</dd>
+        </dl>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="mb-2">Index</h3>
+        <dl class="kv small">
+          <dt>Documents</dt><dd>{{ stats.get('docs', 0)|num }}</dd>
+          <dt>Shards</dt><dd>{{ stats.get('shards', 0) }}</dd>
+          <dt>Terms</dt><dd>{{ stats.get('terms', 0)|num }}</dd>
+          <dt>Level</dt><dd>{{ stats.get('level', 0) }}</dd>
+          <dt>Reranker</dt><dd>{{ stats.get('reranker', 'none') }}</dd>
+        </dl>
+        <a class="btn btn-block mt-2" href="/app/index">Manage index</a>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

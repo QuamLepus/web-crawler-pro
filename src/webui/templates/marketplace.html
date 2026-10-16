@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Marketplace</span></div>
+  <div class="between">
+    <div>
+      <h1>Data marketplace</h1>
+      <p class="dim">Sell what you crawled. Buy what you did not have to crawl.</p>
+    </div>
+    <div class="row">
+      <button class="btn" data-modal-open="new-bounty">+ Post a bounty</button>
+      <button class="btn btn-primary" data-modal-open="new-dataset">+ List a dataset</button>
+    </div>
+  </div>
+</div>
+
+<div class="card card-pad mb-3">
+  <form action="/app/marketplace" method="get" class="row">
+    <div class="input-group flex-1">
+      <span class="ico-lead">🔍</span>
+      <input class="input" name="q" value="{{ q }}" placeholder="Search datasets…">
+    </div>
+    <button class="btn btn-primary">Search</button>
+    <a class="btn btn-ghost" href="/app/marketplace">Clear</a>
+  </form>
+</div>
+
+{% if error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ error }}</span></div>
+{% endif %}
+
+<h2 class="mb-2">Datasets</h2>
+{% if datasets %}
+  <div class="grid g-4 mb-4">
+    {% for d in (datasets if datasets is sequence else datasets.get('items', [])) %}
+      <a class="product" href="#">
+        <div class="thumb">
+          {{ '📊' }}
+          <span class="tag">{{ (d.get('tags') or ['dataset'])[0] }}</span>
+        </div>
+        <div class="body">
+          <h4 class="clamp-2">{{ d.get('title') }}</h4>
+          <div class="row tiny muted">
+            <span>{{ d.get('rating')|stars if d.get('rating') else '' }}</span>
+            <span>{{ d.get('rows')|num if d.get('rows') else '' }} rows</span>
+          </div>
+          <p class="small dim clamp-2">{{ d.get('description') }}</p>
+          <div class="row between mt-1">
+            <span class="price">{{ (d.get('price_usd_cents') or 0)|money }}</span>
+            <span class="badge">{{ d.get('license', 'CC-BY-4.0') }}</span>
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card"><div class="empty">
+    <div class="ico">🛒</div>
+    <h3>No listings yet</h3>
+    <p>Crawl something useful and put it up for sale — or post a bounty and let
+      someone else do the crawling.</p>
+    <button class="btn btn-primary" data-modal-open="new-dataset">List a dataset</button>
+  </div></div>
+{% endif %}
+
+<h2 class="mb-2 mt-4">Open bounties</h2>
+{% if bounties %}
+  <div class="card">
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th data-sort>Bounty</th><th data-sort class="num">Reward</th>
+          <th data-sort>Deadline</th><th data-sort>State</th></tr></thead>
+        <tbody>
+          {% for b in (bounties if bounties is sequence else bounties.get('items', [])) %}
+            <tr>
+              <td><b>{{ b.get('title') }}</b>
+                <div class="tiny muted clamp-2">{{ b.get('description') }}</div></td>
+              <td class="num tar">{{ (b.get('reward_usd_cents') or 0)|money }}</td>
+              <td class="small muted nowrap">{{ b.get('deadline') or '—' }}</td>
+              <td><span class="badge {{ 'ok' if b.get('state') == 'open' else '' }}">{{ b.get('state', 'open') }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="card"><div class="empty">
+    <div class="ico">🎯</div>
+    <h3>No open bounties</h3>
+    <p>Need data nobody has listed? Say what you want and what it is worth.</p>
+    <button class="btn" data-modal-open="new-bounty">Post a bounty</button>
+  </div></div>
+{% endif %}
+
+{# ----------------------------------------------------------------- modals -- #}
+<div class="modal-back" id="new-dataset" hidden>
+  <div class="modal">
+    <form method="post" action="/app/marketplace/datasets">
+      <div class="head"><h3 style="flex:1">List a dataset</h3>
+        <button type="button" class="icon-btn" data-modal-close>✕</button></div>
+      <div class="body stack">
+        <div class="field">
+          <label for="d-title">Title</label>
+          <input class="input" id="d-title" name="title" required
+                 placeholder="UK solar installers, 12k rows" data-autofocus>
+        </div>
+        <div class="field">
+          <label for="d-desc">Description</label>
+          <textarea class="textarea" id="d-desc" name="description" required
+                    placeholder="What is in it, how it was collected, how fresh it is…"></textarea>
+          <span class="hint">At least 20 characters. Buyers decide from this.</span>
+        </div>
+        <div class="grid g-2">
+          <div class="field">
+            <label for="d-tags">Tags</label>
+            <input class="input" id="d-tags" name="tags" placeholder="energy, uk, csv">
+          </div>
+          <div class="field">
+            <label for="d-price">Price (USD)</label>
+            <input class="input" id="d-price" name="price_usd" type="number"
+                   value="49" min="0" step="1">
+          </div>
+        </div>
+        <div class="field">
+          <label for="d-src">Source job</label>
+          {% if jobs %}
+            <select class="select" id="d-src" name="source_job_id" required>
+              {% for job in jobs %}
+                <option value="{{ job.get('job_id') or job.get('id') }}">
+                  {{ (job.get('job_id') or job.get('id'))[:16] }} —
+                  {{ job.get('url', '') }} ({{ job.get('state', '?') }})
+                </option>
+              {% endfor %}
+            </select>
+            <span class="hint">
+              A listing is a promise about specific bytes, so it has to point at
+              a hashed crawl result. Finish a job, then list it.
+            </span>
+          {% else %}
+            <div class="alert warn">
+              <span class="ico">!</span>
+              <span>You have no crawl jobs yet. Run one first — a listing must
+                point at a hashed result.</span>
+            </div>
+            <input type="hidden" name="source_job_id" value="">
+          {% endif %}
+        </div>
+        <div class="field">
+          <label for="d-lic">License</label>
+          <select class="select" id="d-lic" name="license">
+            <option>CC-BY-4.0</option><option>CC0-1.0</option>
+            <option>ODbL-1.0</option><option>Commercial</option>
+          </select>
+        </div>
+      </div>
+      <div class="foot">
+        <button type="button" class="btn" data-modal-close>Cancel</button>
+        <button class="btn btn-primary">Publish listing</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-back" id="new-bounty" hidden>
+  <div class="modal">
+    <div class="head"><h3 style="flex:1">Post a bounty</h3>
+      <button type="button" class="icon-btn" data-modal-close>✕</button></div>
+    <div class="body">
+      <div class="alert info">
+        <span class="ico">i</span>
+        <span>Bounties go through the API today:
+          <code>POST /api/v1/marketplace/bounties</code>. The console form is on
+          the list.</span>
+      </div>
+      <div class="code">
+curl -X POST <span class="k">{{ request.base_url }}api/v1/marketplace/bounties</span> \<br>
+&nbsp;&nbsp;-H "X-API-Key: $KEY" -H "Content-Type: application/json" \<br>
+&nbsp;&nbsp;-d '{"title":"EV charging points in Bengal","reward_usd_cents":25000,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"description":"…","deadline":"2026-12-31"}'
+      </div>
+    </div>
+    <div class="foot"><button class="btn" data-modal-close>Close</button></div>
+  </div>
+</div>
+{% endblock %}
