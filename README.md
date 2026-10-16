@@ -9,6 +9,7 @@ It ships in three layers, usable independently:
 | **Single-node crawler** | Scrape a site from your laptop and export CSV/JSON | `python main.py` |
 | **Distributed crawl platform** | Celery + Redis frontier, stealth/anti-bot, quality pipeline | `workers/crawl_tasks.py` |
 | **Hosted API (SaaS)** | Multi-tenant REST + GraphQL, API keys, quotas, billing, webhooks, marketplace | `src/api/main.py` |
+| **Topic discovery** | Give it a *topic* and a number instead of URLs — it finds the websites itself | `python -m src.cli discover` |
 
 ---
 
@@ -19,11 +20,12 @@ It ships in three layers, usable independently:
 | Distributed task queue | **Celery + Redis**, 3 priority queues (`crawl.high/default/bulk`), late-ack, fair dispatch |
 | URL Frontier | **Redis**: dedupe (SET), priority (ZSET), per-domain politeness, crash-safe in-flight recovery — atomic Lua pop |
 | Horizontal workers | Stateless Celery nodes; scale by starting more pods/processes |
-| Job orchestration | Priority scheduler (`crawl_job` / `ingest_source` / `tokenize` / `dedupe`) with quota gates |
+| Job orchestration | Priority scheduler (`crawl_job` / `ingest_source` / `tokenize` / `dedupe` / `discover`) with quota gates |
 | Proxy rotation | Weighted tiers: **datacenter / residential / mobile**, failure cooldowns, provider-gateway ready |
 | Stealth browsing | **Playwright** (stealth init scripts) + **undetected-chromedriver** fallback |
 | TLS fingerprinting | **curl_cffi** Chrome JA3/H2 impersonation (Cloudflare bypass) |
 | CAPTCHA solving | **2Captcha / Anti-Captcha** reCAPTCHA v2 (incl. invisible) |
+| Topic discovery | **Give a topic + N**: searches the web, ranks sites, crawls the shortlist (`src/discovery/`, `python -m src.cli discover`) |
 | Data cleaning | Unicode/whitespace normalization, URL canonicalization, ISO timestamps (**Pandas + Polars**) |
 | Deduplication | **MinHash** (shared Redis index) + **SimHash** (Hamming ≤ 3) |
 | Language detection | **fastText** `lid.176` with heuristic fallback |
@@ -128,6 +130,7 @@ web-crawler-pro/
 │   │   ├── dedupe.py                # MinHashDeduper (Redis) + SimHashDeduper
 │   │   ├── language_pii.py          # fastText detect + Presidio redact (with fallbacks)
 │   │   └── storage/                 # json, csv, parquet+minio, elasticsearch exporters
+│   ├── discovery/                   # topic → ranked websites: providers, planner, ranker, service
 │   ├── ai/
 │   │   ├── llm_parser.py            # LangChain schema-driven HTML→JSON extraction
 │   │   ├── vector_search.py         # ChromaDB semantic search, pluggable embedders
@@ -135,7 +138,7 @@ web-crawler-pro/
 │   ├── api/
 │   │   ├── main.py                  # app factory, auth middleware, service container
 │   │   ├── graphql.py               # Strawberry schema mounted at /graphql
-│   │   └── routers/                 # jobs, search, webhooks, billing, marketplace
+│   │   └── routers/                 # jobs, discovery, search, webhooks, billing, marketplace
 │   ├── gateway/                     # auth/tokens, users, billing, quotas, rate limit, webhooks
 │   ├── compute/
 │   │   ├── scheduler.py             # priority job scheduler (Celery beat + Redis)
@@ -146,12 +149,14 @@ web-crawler-pro/
 │   ├── observability/metrics.py     # Prometheus counters/gauges/histograms + Sentry init
 │   ├── dashboard/app.py             # FastAPI + WebSocket live ops UI
 │   └── utils/logger.py
+├── src/cli.py                       # CLI: discover / preview / crawl / status / results
 ├── workers/crawl_tasks.py           # seed / drain / fetch / process + crawl_domain Celery tasks
+├── workers/discovery_tasks.py       # run_discovery / discover_then_crawl Celery tasks
 ├── deploy/
 │   ├── prometheus.yml
 │   └── k8s/manifests/               # redis, worker Deployment + HPA, dashboard + Ingress
 ├── .github/workflows/ci.yml         # test job (Redis service) + matrix image builds
-└── tests/                           # 75 tests, fakeredis-backed, no services required
+└── tests/                           # 122 tests, fakeredis-backed, no services required
 ```
 
 ---
@@ -273,6 +278,7 @@ curl -X POST localhost:8000/v1/jobs/crawl -H "X-API-Key: $KEY" \
 |---|---|
 | Auth | `POST /auth/signup`, `/auth/login`, `/auth/refresh`, `GET /auth/me`, `POST /keys` |
 | Jobs | `POST /v1/jobs/crawl`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` |
+| Discovery | `POST /v1/discovery`, `/preview`, `GET /v1/discovery`, `GET /v1/discovery/{id}`, `/candidates`, `DELETE /candidates/{domain}`, `POST /{id}/approve`, `GET /{id}/results`, `POST /{id}/cancel` |
 | Search | `POST /v1/search`, `GET /v1/search/rag` |
 | Webhooks | `GET/POST /v1/webhooks`, `POST /v1/webhooks/test`, `GET /v1/webhooks/{id}/deliveries`, `DELETE /v1/webhooks/{id}` |
 | Billing | `GET /v1/billing/plans`, `/usage`, `/invoice`, `POST /v1/billing/checkout` |
@@ -304,6 +310,142 @@ to the marketplace with `source_job_id`.
 
 ---
 
+## 🔍 Topic Discovery
+
+**Give the crawler a topic and a number instead of a list of URLs.** It searches
+the web, ranks what it finds into a shortlist of distinct websites, and crawls
+each one through the normal pipeline.
+
+```bash
+python -m src.cli discover \
+    --topic "best budget laptops 2026" \
+    --count 25 \
+    --seed https://www.rtings.com \
+    --max-pages 8 \
+    --auto
+```
+
+```
+Topic discovery
+  topic      : best budget laptops 2026
+  websites   : 25
+  seeds      : https://www.rtings.com
+  pages/site : 8
+  mode       : automatic
+
+[1/5] Searching the web and ranking what we find
+[2/5] Shortlist built  25 of 214 candidates
+[3/5] Shortlist  25 websites
+
+  1. 0.91  rtings.com      [seed, duckduckgo+brave]
+     https://www.rtings.com/laptop/reviews/best/budget
+     seeded by user; found on 2 provider(s); relevance 0.88; passed quality rules
+  2. 0.83  nytimes.com     [duckduckgo+brave]
+     ...
+
+[4/5] Crawling  23/25 sites, 187 pages
+     ok rtings.com                              22 pages    21 items
+     ok nytimes.com                              9 pages     9 items
+     !! parked-domain.example                    0 pages     0 items  fetch failed: 403
+[5/5] Report  312 items in 41.2s
+
+✓ 312 items from 23/25 websites
+   output/discovery/disc_a1b2c3d4e5f/report.json
+   output/discovery/disc_a1b2c3d4e5f/items.jsonl
+```
+
+Leave out `--auto` to stop at the shortlist and review it first; add `--approve`
+once you are happy with it.
+
+### How it works
+
+```
+topic ──plan──▶ search queries ──search──▶ raw hits ──rank──▶ top-N websites ──crawl──▶ dataset
+```
+
+1. **Plan** — one topic becomes several queries (`"best budget laptops 2026"`,
+   `+ "review"`, `+ "buying guide"`, …). LLM-generated when `DISCOVERY_USE_LLM=true`,
+   deterministic templates otherwise.
+2. **Search** — every query fans out to every configured provider.
+3. **Rank** — candidates are scored, explained and de-duplicated to one entry
+   point per domain (that is what "N websites" means).
+4. **Review** *(optional)* — the shortlist is human-readable and editable.
+5. **Crawl** — one ordinary `crawl_job` per website, so robots.txt, politeness,
+   cleaning, dedupe, PII redaction and storage all behave exactly as they do for
+   a manually submitted crawl.
+
+### Scoring
+
+| Signal | Weight | Where it comes from |
+|---|---|---|
+| Relevance | 0.40 | Cosine similarity, topic vs. title + snippet (pluggable embeddings, `hash` by default) |
+| Lexical | 0.20 | Keyword overlap via `HeuristicPlanner` — the same scorer the autonomous agent uses |
+| Cross-provider agreement | 0.20 | Independent search engines agreeing beats one engine ranking something first |
+| Position | 0.10 | Decay within each provider's result list |
+| Quality | 0.10 | C4 rules (`src/training/filters.py`): lorem-ipsum, cookie walls, symbol soup |
+| Seed boost | +0.15 | A domain you supplied explicitly always outranks a guess |
+
+Every candidate ships with the reasons behind its score, because "the best N
+websites for a topic" is a judgement call and you are entitled to override it.
+
+### Search providers
+
+| Provider | Key | Notes |
+|---|---|---|
+| `duckduckgo` | – | Default. No key, no cost. Good for personal / low volume. |
+| `brave` | `BRAVE_API_KEY` | Licensed, free tier. **Use this in production.** |
+| `serpapi` | `SERPAPI_KEY` | Google/Bing results as JSON |
+| `tavily` | `TAVILY_API_KEY` | Search API built for LLM agents |
+| `commoncrawl` | – | Historical coverage; matches a URL regex, not keywords |
+| `llm` | `OPENAI_API_KEY` | Asks a model which sites matter (model knowledge) |
+| `seed` | – | Your own `--seed` URLs, expanded via `/sitemap.xml` |
+
+Providers with a key are enabled automatically; list them explicitly with
+`DISCOVERY_PROVIDERS=duckduckgo,brave`.
+
+> **ToS:** scraping Google or Bing result pages directly violates their terms and
+> gets you blocked. The default DuckDuckGo HTML endpoint is fine for light use;
+> for anything at scale, use a licensed API (Brave / SerpAPI / Tavily).
+
+### REST API
+
+```bash
+# 1. start a discovery job (202 Accepted — a worker picks it up)
+curl -X POST localhost:8000/v1/discovery -H "X-API-Key: $KEY" \
+     -H 'content-type: application/json' \
+     -d '{"topic":"best budget laptops 2026","count":25,
+          "seeds":["https://www.rtings.com"],"auto":false}'
+# -> {"job_id":"disc_a1b2c3d4e5f","state":"queued", ...}
+
+# 2. read the ranked shortlist (state becomes awaiting_approval)
+curl localhost:8000/v1/discovery/disc_a1b2c3d4e5f/candidates?only_selected=true \
+     -H "X-API-Key: $KEY"
+
+# 3. drop one, then approve
+curl -X DELETE localhost:8000/v1/discovery/disc_a1b2c3d4e5f/candidates/spam.example \
+     -H "X-API-Key: $KEY"
+curl -X POST localhost:8000/v1/discovery/disc_a1b2c3d4e5f/approve -H "X-API-Key: $KEY"
+
+# 4. aggregated report
+curl localhost:8000/v1/discovery/disc_a1b2c3d4e5f/results -H "X-API-Key: $KEY"
+```
+
+`POST /v1/discovery/preview` does the ranking synchronously and returns the
+shortlist **without** crawling anything or creating a job — useful for tuning a
+topic before committing to it.
+
+A discovery job is charged `count` requests against the tenant quota up front, so
+a large shortlist cannot be used to bypass the crawl budget.
+
+### Degradation
+
+Nothing here is a hard dependency. With no API keys, no LLM and no network the
+whole flow still runs — it simply finds fewer candidates. Ranking falls back to
+lexical scoring, embeddings fall back to the offline hash embedder, and a dead
+provider is skipped with a warning rather than failing the job.
+
+---
+
 ## ⚙️ Configuration Reference
 
 See **`.env.example`** for the complete list. Highlights:
@@ -326,6 +468,13 @@ See **`.env.example`** for the complete list. Highlights:
 | `LLM_MODEL` | `gpt-4o-mini` | Extraction model |
 | `EMBEDDING_PROVIDER` | `hash` | `openai` \| `sentence-transformers` \| `hash` |
 | `WCP_GRAPHQL_MUTATIONS` | `0` | `1` unlocks GraphQL mutations |
+| `DISCOVERY_PROVIDERS` | `duckduckgo` | Comma-separated search backends: `duckduckgo,brave,serpapi,tavily,commoncrawl,llm` |
+| `BRAVE_API_KEY` / `SERPAPI_KEY` / `TAVILY_API_KEY` | – | Enables that provider automatically when set |
+| `DISCOVERY_MAX_CANDIDATES` | `300` | Upper bound on scored candidates per job |
+| `DISCOVERY_MAX_QUERIES` | `6` | Search queries generated per topic |
+| `DISCOVERY_MAX_PAGES_PER_SITE` | `5` | Crawl budget per discovered website |
+| `DISCOVERY_BLOCKLIST` | – | Comma-separated domains that must never be proposed |
+| `DISCOVERY_USE_LLM` / `DISCOVERY_USE_COMMONCRAWL` | `false` | Opt into the LLM / CommonCrawl discovery backends |
 | `SENTRY_DSN` | – | Error tracking (optional) |
 
 Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefix
@@ -336,7 +485,7 @@ Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefi
 ## 🧪 Testing
 
 ```bash
-pytest                      # 75 tests
+pytest                      # 122 tests
 pytest -q tests/test_worker_jobs.py tests/test_saas_billing.py
 ruff check src workers tests
 ```
@@ -350,7 +499,8 @@ services need to be running.
 ## 🗺️ Roadmap
 
 Done: distributed frontier, job orchestration, stealth/anti-bot, quality pipeline,
-multi-tenant REST + GraphQL, quotas, webhooks, marketplace, CI/CD with published images.
+multi-tenant REST + GraphQL, quotas, webhooks, marketplace, topic discovery,
+CI/CD with published images.
 
 Next up:
 

@@ -313,6 +313,10 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
         "job_id": job_id, "url": start_url, "pages_done": pages_done,
         "items": len(collected), "failures": failures[:10],
         "data_sha256": digest,
+        # Callers that need the data itself (the topic-discovery CLI, dataset
+        # exports) read it straight off the result; Celery serialises it with
+        # the task result only when a result backend is configured.
+        "collected": collected,
     }
 
     state = "failed" if (not collected and failures) else "succeeded"

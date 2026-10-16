@@ -106,16 +106,13 @@ class SchedulerService:
 
     # -- enqueue ---------------------------------------------------------------- #
     def submit(self, spec: JobSpec) -> str:
-        # per-kind quota gates
-        gates = {
-            "crawl_job": ("requests_month", spec.payload.get("max_pages", 1)),
-            "ingest_source": ("requests_month", 1),
-            "tokenize": ("tokens_processed_month", spec.payload.get("est_tokens", 1)),
-            "dedupe": ("storage_gb", 0),
-        }
-        gate = gates.get(spec.kind)
-        if gate and gate[1]:
-            self.consume(spec.tenant, gate[0], float(gate[1]))
+        # per-kind quota gates (see _QUOTA_GATES)
+        gate = self._QUOTA_GATES.get(spec.kind)
+        if gate:
+            metric, key, fallback = gate
+            amount = float(spec.payload.get(key, fallback)) if key else fallback
+            if amount:
+                self.consume(spec.tenant, metric, amount)
         state = {
             "job_id": spec.job_id, "kind": spec.kind, "tenant": spec.tenant,
             "priority": int(spec.priority), "status": "queued",
@@ -141,6 +138,22 @@ class SchedulerService:
         "ingest_source": "workers.crawl_tasks.run_source_refresh",
         "tokenize": "workers.crawl_tasks.tokenize_stage",
         "dedupe": "workers.crawl_tasks.dedupe_stage",
+        # topic discovery: "find the best N websites about X"
+        "discover": "workers.discovery_tasks.run_discovery",
+        "discover_and_crawl": "workers.discovery_tasks.discover_then_crawl",
+    }
+
+    # Per-kind quota gate: ``kind -> (metric, payload key, fallback amount)``.
+    # An empty payload key means "charge the flat fallback". Discovery is
+    # charged per site it proposes, so a large ``count`` cannot be used to
+    # burn another tenant's crawl budget for free.
+    _QUOTA_GATES: ClassVar[dict[str, tuple[str, str, float]]] = {
+        "crawl_job": ("requests_month", "max_pages", 1),
+        "ingest_source": ("requests_month", "", 1),
+        "tokenize": ("tokens_processed_month", "est_tokens", 1),
+        "dedupe": ("storage_gb", "", 0),
+        "discover": ("requests_month", "count", 1),
+        "discover_and_crawl": ("requests_month", "count", 1),
     }
 
     def _submit_celery(self, spec: JobSpec) -> None:  # pragma: no cover - needs broker
