@@ -1,0 +1,23 @@
+# Keep build contexts small and stop local state leaking into images.
+# Without this, `COPY . .` in the Dockerfile drags in the virtualenv (hundreds
+# of MB), local crawl output and the whole .git directory.
+.git
+.gitignore
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+logs
+output
+data
+cache
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.log
+.env
+.env.*
+!.env.example
+Dockerfile*
+docker-compose*.yml
