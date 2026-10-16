@@ -10,6 +10,7 @@ Mounted at ``/graphql`` by :mod:`src.api.main`.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import List, Optional
@@ -23,6 +24,8 @@ from strawberry.fastapi import GraphQLRouter
 # without this the schema has no `ID` type and queries like
 # `query ($id: ID!) { job(id: $id) { ... } }` fail with "Unknown type 'ID'".
 from strawberry.scalars import ID  # noqa: E402  canonical GraphQL `ID` scalar
+
+logger = logging.getLogger("wcp.api.graphql")
 
 # --------------------------------------------------------------------------- #
 # Types
@@ -340,31 +343,115 @@ schema = strawberry.Schema(query=Query, mutation=Mutation,
                            extensions=[AuthToHTTPStatusExtension])
 
 
+def _carries_mutation(request_data: object) -> bool:
+    """True when *request_data* holds at least one mutation operation.
+
+    ``request_data`` is whatever Strawberry parsed out of the HTTP body: a
+    :class:`~strawberry.http.types.GraphQLRequestData`, or a list of them for
+    batched requests.
+    """
+    items = request_data if isinstance(request_data, (list, tuple)) \
+        else [request_data]
+    for item in items:
+        query = getattr(item, "query", None)
+        if not query or not isinstance(query, str):
+            continue
+        try:
+            from graphql import parse
+        except ImportError:  # pragma: no cover - graphql-core ships with strawberry
+            return False
+        try:
+            document = parse(query)
+        except Exception as exc:  # noqa: BLE001 - syntax error
+            # Unparseable documents are strawberry's problem: it answers with a
+            # 400 and the GraphQL-shaped syntax error. We only need to know
+            # whether this was a mutation, and it demonstrably is not one we
+            # can recognise, so let the request through.
+            logger.debug("could not parse GraphQL query to classify it: %s",
+                         exc)
+            continue
+        for definition in getattr(document, "definitions", ()) or ():
+            operation = getattr(definition, "operation", None)
+            name = getattr(operation, "value", operation)
+            if name and str(name).lower() == "mutation":
+                return True
+    return False
+
+
+def _unauthorized(exc: PermissionError) -> JSONResponse:
+    """Shape a ``PermissionError`` as a GraphQL-flavoured 401 response."""
+    message = str(exc) or "authentication required"
+    code = ("invalid_api_key" if "api key" in message.lower()
+            else "unauthorized")
+    return JSONResponse(
+        status_code=401,
+        content={"errors": [{"message": message}], "data": None},
+        headers={"WWW-Authenticate": "Bearer", "X-Error-Code": code})
+
+
 def make_graphql_router() -> GraphQLRouter:
-    """Build the FastAPI router; per-request context carries the HTTP request."""
+    """Build the FastAPI router; per-request context carries the HTTP request.
+
+    Strawberry turns resolver exceptions into ``200 + errors[]``; we want real
+    HTTP semantics for auth failures (401), so any ``PermissionError`` raised
+    by a resolver is translated into a 401 on the way out.
+
+    The translation is installed on ``run()`` — the single execution entry
+    point shared by the POST, GET and websocket handlers — rather than on the
+    POST handler. Strawberry keeps renaming and relocating that handler
+    (``post_template`` → ``handle_http_post``) and registers it as a route
+    inside ``__init__``, so patching it by name silently stops taking effect
+    on newer releases and leaves ``/graphql`` unmounted.
+    """
 
     async def get_context(request: Request) -> dict:
         return {"request": request}
 
     router = GraphQLRouter(schema, context_getter=get_context)
 
-    # Strawberry turns resolver exceptions into 200 + errors[]; we want real
-    # HTTP semantics for auth failures (401), so translate them here.
-    original_post = router.post_template
+    # Read-only deployments must refuse mutations *before* the document is
+    # validated: ``Mutation.submit_crawl`` raises MutationLockError, but an
+    # unknown or invalid mutation (``mutation { hack }``) never reaches a
+    # resolver, so the lock has to sit on the transport, not in the schema.
+    original_execute_operation = getattr(router, "execute_operation", None)
+    if original_execute_operation is not None:
+        async def execute_operation_with_mutation_lock(*args, **kwargs):
+            request_data = kwargs.get("request_data")
+            if request_data is None and len(args) >= 3:
+                request_data = args[2]
+            if _mutations_locked() and _carries_mutation(request_data):
+                raise MutationLockError(
+                    "mutations are disabled on this read-only GraphQL surface")
+            return await original_execute_operation(*args, **kwargs)
 
-    async def post_with_auth_status(*args, **kwargs):
-        try:
-            return await original_post(*args, **kwargs)
-        except PermissionError as exc:
-            message = str(exc) or "authentication required"
-            code = ("invalid_api_key" if "api key" in message.lower()
-                    else "unauthorized")
-            return JSONResponse(
-                status_code=401,
-                content={"errors": [{"message": message}],
-                         "data": None},
-                headers={"WWW-Authenticate": "Bearer",
-                         "X-Error-Code": code})
+        router.execute_operation = (  # type: ignore[method-assign]
+            execute_operation_with_mutation_lock)
+    else:  # pragma: no cover - strawberry without AsyncBaseHTTPView
+        logger.warning("cannot enforce the GraphQL mutation lock: no "
+                       "execute_operation hook on %s", type(router).__name__)
 
-    router.post_template = post_with_auth_status  # type: ignore[assignment]
+    original_run = getattr(router, "run", None)
+    if original_run is not None:
+        async def run_with_auth_status(*args, **kwargs):
+            try:
+                return await original_run(*args, **kwargs)
+            except PermissionError as exc:
+                return _unauthorized(exc)
+
+        router.run = run_with_auth_status  # type: ignore[method-assign]
+    else:  # pragma: no cover - very old strawberry without AsyncBaseHTTPView
+        original_post = getattr(router, "post_template", None)
+        if original_post is not None:
+            async def post_with_auth_status(*args, **kwargs):
+                try:
+                    return await original_post(*args, **kwargs)
+                except PermissionError as exc:
+                    return _unauthorized(exc)
+
+            router.post_template = post_with_auth_status  # type: ignore[assignment]
+        else:
+            logger.warning(
+                "cannot install GraphQL 401 translation: no supported "
+                "handler hook found on %s", type(router).__name__)
+
     return router

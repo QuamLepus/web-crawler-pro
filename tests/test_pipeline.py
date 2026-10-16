@@ -58,6 +58,41 @@ def test_pii_redact_fallback():
     assert "[REDACTED_EMAIL]" in out
 
 
+def test_pii_redact_survives_presidio_provisioning_failure(monkeypatch):
+    """A broken Presidio install must degrade, not take the pipeline down.
+
+    ``AnalyzerEngine()`` provisions an NLP model on first use, which fails with
+    an ``OSError``/network error on hosts that cannot fetch the spaCy weights.
+    Guarding only against ``ImportError`` let that escape the constructor and
+    crash every crawl on such machines, even though the regex sweep alone is
+    enough to guarantee the ``[REDACTED_*]`` contract.
+    """
+    import builtins
+
+    from src.pipeline import language_pii
+
+    real_import = builtins.__import__
+
+    def _boom(name, *args, **kwargs):
+        module = real_import(name, *args, **kwargs)
+        if name == "presidio_analyzer":
+            def _unusable(*a, **kw):
+                raise OSError(
+                    "Can't find model 'en_core_web_lg'. It doesn't seem to be "
+                    "a shortcut link, a Python package or a valid path.")
+            module.AnalyzerEngine = _unusable
+        return module
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+    monkeypatch.setattr(language_pii, "_model_cache", None)
+
+    r = language_pii.PIIRedactor()
+    assert r._analyzer is None, "Presidio must be dropped when it cannot start"
+    out = r.redact("Contact john@example.com or call +1 555-123-4567 today")
+    assert "john@example.com" not in out
+    assert "[REDACTED_EMAIL]" in out
+
+
 def test_language_detect_fallback():
     from src.pipeline.language_pii import detect_language
 
