@@ -40,11 +40,16 @@ import numpy as np
 from src.search_index.text import ParsedQuery
 
 SHARDS_FILE = "shards.json"
+#: stem -> most common surface forms, so human-facing output can un-stem.
+SURFACE_FILE = "surface.json"
 #: Per-document vectors stored beside the BM25 arrays, aligned with rowids.npy.
 EMBEDDINGS_FILE = "embeddings.npy"
 EMBEDDINGS_META = "embeddings.json"
 MAX_TF = 0xFFFF          # tf saturates here so postings fit in uint16
 MAX_TOKENS_PER_DOC = 512  # caps postings per document; see module docstring
+#: Cap on the stem -> surface map, so a 100M-page build cannot grow without
+#: bound while we collect the words humans actually wrote.
+MAX_SURFACE_STEMS = 250_000
 
 
 class Hit(NamedTuple):
@@ -108,9 +113,17 @@ class BM25Shard:
 
     # -- build --------------------------------------------------------------- #
     def build(self, rowids: Sequence[int], texts: Sequence[str], *,
-              shard_id: int = 0, source: str = "") -> BM25Shard:
-        """Invert ``texts``; ``rowids[i]`` is the DocStore id of ``texts[i]``."""
-        from src.search_index.text import analyze
+              shard_id: int = 0, source: str = "",
+              surface: dict[str, Counter] | None = None) -> BM25Shard:
+        """Invert ``texts``; ``rowids[i]`` is the DocStore id of ``texts[i]``.
+
+        ``surface``, when given, is filled with ``stem -> Counter(surface form)``
+        as a by-product of the tokenisation we are already doing. It costs one
+        dict lookup per token and lets the spelling dictionary answer with the
+        word a human wrote ("kubernetes") instead of the stem the index stores
+        ("kubernet").
+        """
+        from src.search_index.text import iter_terms
 
         vocab: dict[str, int] = {}
         postings: list[array] = []
@@ -119,7 +132,18 @@ class BM25Shard:
         total_len = 0
 
         for text in texts:
-            tokens = analyze(text)[:MAX_TOKENS_PER_DOC]
+            tokens: list[str] = []
+            for term, form in iter_terms(text):
+                tokens.append(term)
+                if surface is not None:
+                    bucket = surface.get(term)
+                    if bucket is None:
+                        if len(surface) >= MAX_SURFACE_STEMS:
+                            continue        # bound the memory on a big build
+                        bucket = surface[term] = Counter()
+                    bucket[form] += 1
+                if len(tokens) >= MAX_TOKENS_PER_DOC:
+                    break
             ordinal = n_docs
             counts = Counter(tokens)
             doclen.append(len(tokens))
@@ -156,11 +180,17 @@ class BM25Shard:
         return (self.indptr[1:] - self.indptr[:-1]).astype(np.int32)
 
     # -- persistence --------------------------------------------------------- #
-    def save(self, directory: str | Path) -> ShardMeta:
+    def save(self, directory: str | Path, *,
+             surface: dict[str, Counter] | None = None) -> ShardMeta:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "vocab.json").write_text(
             json.dumps(self.vocab), encoding="utf-8")
+        if surface:
+            (directory / SURFACE_FILE).write_text(
+                json.dumps({stem: [form for form, _n in forms.most_common(4)]
+                            for stem, forms in surface.items()}),
+                encoding="utf-8")
         np.save(directory / "indptr.npy", self.indptr)
         np.save(directory / "indices.npy", self.indices)
         np.save(directory / "data.npy", self.data)

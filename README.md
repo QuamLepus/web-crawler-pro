@@ -583,6 +583,12 @@ it is unknown, ≥4 characters, digit-free, and the candidate is ≥8× more
 frequent. Query operators (`site:`, `source:`, `-exclude`) and quoted phrases
 are never touched.
 
+The vocabulary is stored as *stems* (that is what BM25 indexes), so each shard
+also writes a `surface.json` mapping every stem back to the word people
+actually write — collected as a by-product of the tokenisation the build is
+already doing. Without it the checker answers `kubernet` instead of
+`kubernetes`: fine for matching, wrong to show anyone.
+
 **3. Incremental refresh** — re-index only what changed.
 
 ```bash

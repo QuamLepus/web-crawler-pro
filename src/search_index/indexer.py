@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -284,12 +285,15 @@ class SearchIndexBuilder:
         pairs = [(rid, doc) for rid, doc in zip(rowids, buffer) if rid > 0]
         if not pairs:
             return 0
+        surface: dict[str, Counter] = {}
         shard = BM25Shard().build(
             [rid for rid, _ in pairs],
             [self._index_text(doc) for _, doc in pairs],
-            shard_id=self._next_shard_id(), source=source)
+            shard_id=self._next_shard_id(), source=source, surface=surface)
         directory = self.index_dir / f"{SHARD_PREFIX}{shard.meta.shard_id:05d}"
-        meta = shard.save(directory)
+        # The surface map is per shard: each shard then carries only the forms
+        # that occur in it, and the spelling dictionary merges them at the end.
+        meta = shard.save(directory, surface=surface)
         if self.options.embeddings:
             self._write_embeddings(shard, directory,
                                    [doc for _, doc in pairs])
@@ -752,10 +756,11 @@ class SearchIndexBuilder:
             kept = [r for r in rowids if r in docs]
             if not kept:
                 continue
+            surface: dict[str, Counter] = {}
             shard = BM25Shard().build(
                 kept, [self._index_text(docs[r]) for r in kept],
-                shard_id=meta.shard_id, source=meta.source)
-            shard.save(directory)
+                shard_id=meta.shard_id, source=meta.source, surface=surface)
+            shard.save(directory, surface=surface)
             if (directory / "embeddings.npy").exists():
                 self._write_embeddings(shard, directory, [docs[r] for r in kept])
             self._metas[position] = shard.meta

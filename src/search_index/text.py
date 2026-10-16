@@ -9,6 +9,7 @@ light stemmer handles fine.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 # ``\w`` with re.UNICODE matches letters in any script, so a Bengali or Arabic
@@ -45,6 +46,21 @@ def stem(token: str) -> str:
         if token.endswith(suffix) and len(token) - len(suffix) >= 4:
             return token[: -len(suffix)] + replacement
     return token
+
+
+def iter_terms(text: str) -> Iterator[tuple[str, str]]:
+    """Yield ``(stem, surface)`` pairs — the index term and the word as typed.
+
+    :func:`analyze` throws the surface form away; anything that has to *show*
+    a term to a human (the spelling dictionary, notably) needs it back, and
+    re-deriving it later means tokenising the corpus a second time.
+    """
+    for tok in tokenize(text):
+        if tok in STOPWORDS:
+            continue
+        if tok.isdigit() and len(tok) > 6:   # checksums / ids, not words
+            continue
+        yield stem(tok), tok
 
 
 def analyze(text: str, *, drop_stopwords: bool = True) -> list[str]:

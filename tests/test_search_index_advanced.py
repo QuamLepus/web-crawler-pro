@@ -284,6 +284,49 @@ def test_spell_checker_is_timid_about_rare_but_real_words():
     assert checker.suggest("solr") is None, "solr is a real term in this corpus"
 
 
+def test_spell_checker_answers_with_the_word_a_human_wrote():
+    """The dictionary is built from stems; the *answer* must not be one.
+
+    "kubernetes" is indexed as "kubernet". Searching with either works, but
+    telling someone "showing results for kubernet" is wrong.
+    """
+    from src.search_index.spell import SpellChecker
+
+    checker = SpellChecker.from_terms({"kubernet": 50, "redis": 40, "solar": 30})
+    checker.display = {"kubernet": "kubernetes", "redis": "redis"}
+    assert checker.suggest("kubernets") == "kubernetes"
+    assert checker.suggest("reddis") == "redis"
+    # a stem with no recorded surface form is returned as-is
+    assert checker.suggest("solr") == "solar"
+    assert checker.show("kubernet") == "kubernetes"
+    assert checker.show("solar") == "solar"
+
+
+def test_index_build_records_surface_forms_for_every_shard(index_dir):
+    """`surface.json` is written next to vocab.json and read back by spell."""
+    from src.search_index.bm25 import SURFACE_FILE
+    from src.search_index.indexer import BuildOptions, SearchIndexBuilder
+    from src.search_index.spell import SPELL_FILE, SpellChecker, SpellConfig
+
+    _build(index_dir)
+    shard_dirs = sorted((index_dir / "index").glob("shard-*"))
+    assert shard_dirs, "the fixture should produce at least one shard"
+    for directory in shard_dirs:
+        assert (directory / SURFACE_FILE).exists(), f"{directory} has no surfaces"
+
+    with SearchIndexBuilder(index_dir, options=BuildOptions(
+            level=0, data_dir=index_dir, download=False)) as builder:
+        stats = builder.build_spell(SpellConfig(min_freq=1))
+
+    assert stats["display_forms"] > 0
+    checker = SpellChecker.load(index_dir / "index" / SPELL_FILE)
+    assert checker is not None and checker.display
+    # "solar" is a real word in the corpus and is its own stem
+    assert checker.show("solar") == "solar"
+    # every suggestion that needs un-stemming gets the human form
+    assert checker.suggest("solr") == checker.show(checker.suggest("solr"))
+
+
 def test_spell_dictionary_comes_from_the_index_vocabulary(index_dir):
     from src.search_index.indexer import BuildOptions, SearchIndexBuilder
     from src.search_index.spell import SPELL_FILE, SpellChecker, SpellConfig
