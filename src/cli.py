@@ -368,8 +368,9 @@ def cmd_results(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m src.cli",
-        description="WebCrawlerPro command line — crawl URLs or let the "
-                    "crawler discover the websites for a topic.")
+        description="WebCrawlerPro command line — crawl URLs, let the crawler "
+                    "discover the websites for a topic, and build/query the "
+                    "platform's own search index (`search-index`).")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
@@ -439,6 +440,11 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--job", "-j", required=True)
     add_common(rs)
     rs.set_defaults(func=cmd_results)
+
+    # search-index --------------------------------------------------------- #
+    from src.search_index.cli import add_search_index_commands
+
+    add_search_index_commands(sub)
 
     return parser
 

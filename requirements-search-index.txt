@@ -1,0 +1,13 @@
+# ============================================================================
+# WebCrawler Pro — minimal dependencies for the own search index
+# ============================================================================
+# `python -m src.cli search-index ...` needs only these three packages, so the
+# GitHub Actions matrix job that builds the big levels starts in seconds
+# instead of installing the whole platform (playwright, chromadb, ...).
+#
+# Full stack:  pip install -r requirements.txt
+# Index only:  pip install -r requirements-search-index.txt
+
+requests>=2.31.0          # resumable downloads (curlie.org, dumps, commoncrawl)
+numpy>=1.24.0             # BM25 postings, shard arrays, authority maths
+python-dotenv>=1.0.0      # src/config.py loads .env

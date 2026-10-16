@@ -57,6 +57,7 @@ from src.discovery.service import (
     run_discovery,
     run_discovery_and_crawl,
 )
+from src.search_index import OwnIndexProvider
 
 __all__ = [
     "BraveSearchProvider",
@@ -67,6 +68,7 @@ __all__ = [
     "DiscoveryState",
     "DuckDuckGoHTMLProvider",
     "LLMSuggestionProvider",
+    "OwnIndexProvider",
     "QueryPlan",
     "Ranker",
     "SearchHit",

@@ -335,12 +335,12 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
             "health": ["/healthz", "/readyz"],
             "endpoints": [f"{API_PREFIX}{p}" for p in
                           ("/jobs", "/discovery", "/search", "/webhooks",
-                           "/billing", "/marketplace")],
+                           "/billing", "/marketplace", "/search-index")],
         }
 
     # ---- REST v1 routers ------------------------------------------------------ #
     from src.api.routers import (billing, discovery, jobs, marketplace,
-                                 search, webhooks)
+                                 search, search_index, webhooks)
 
     def _build_v1(prefix: str):
         r = APIRouter(prefix=prefix)
@@ -350,6 +350,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(webhooks.router)
         r.include_router(billing.router)
         r.include_router(marketplace.router)
+        r.include_router(search_index.router)
         return r
 
     app.include_router(_build_v1(API_PREFIX))   # canonical: /api/v1/*

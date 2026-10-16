@@ -19,6 +19,12 @@ Cost & legality notes
   ``/sitemap.xml``.
 * :class:`LLMSuggestionProvider` — asks a model for well-known sites on the
   topic. Off by default (``DISCOVERY_USE_LLM=true``).
+* :class:`~src.search_index.provider.OwnIndexProvider` — **the platform's own
+  index** (``src.search_index``). Built from Curlie + Open PageRank and
+  optionally Wikipedia / Common Crawl, so it needs no API key, has no rate
+  limit, and works offline. It is registered automatically as soon as an index
+  exists under ``SEARCH_INDEX_DIR`` (``DISCOVERY_USE_OWN_INDEX=false`` to opt
+  out, ``DISCOVERY_PROVIDERS=own`` to force it and use nothing else).
 
 ``WCP_OFFLINE=1`` (set by the test suite) makes every network provider return
 an empty list instead of dialling out.
@@ -514,6 +520,16 @@ def build_providers(*, names: Iterable[str] | None = None, seeds: Sequence[str] 
     # Seeds first: they are an explicit instruction and must never be dropped.
     if seeds:
         providers.append(SeedProvider(seeds, fetcher=fetcher, timeout=timeout))
+
+    # Our own index goes *first* when it exists: it is free, unlimited and
+    # offline, so there is no reason to spend a third-party query we can avoid.
+    own_requested = any(w in wanted for w in ("own", "ownindex", "own_index", "local"))
+    if own_requested or cfg.DISCOVERY_USE_OWN_INDEX:
+        from src.search_index.provider import OwnIndexProvider
+
+        own = OwnIndexProvider()
+        if own_requested or own.available:
+            providers.append(own)
 
     if "duckduckgo" in wanted or "ddg" in wanted:
         providers.append(DuckDuckGoHTMLProvider(fetcher=fetcher, timeout=timeout))

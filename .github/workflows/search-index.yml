@@ -1,0 +1,205 @@
+# Build the platform's own search index on free infrastructure.
+#
+# Why this file exists: levels 2 and 3 need tens to hundreds of gigabytes of
+# download and many hours of CPU. GitHub Actions gives *public* repositories
+# unlimited minutes, 20 concurrent jobs and a 6-hour cap per job, so the plan is
+#   plan -> N parallel `build` jobs (one index part each) -> `merge`.
+# Each job is checkpointed after every shard and caches the raw datasets, so a
+# job killed at 5h55m restarts and loses almost nothing.
+#
+# Cost: $0. The datasets are free (Curlie CC-BY, Wikipedia CC-BY-SA, Common
+# Crawl on an AWS Open Data bucket with no egress charge) and the compute is
+# free for public repositories.
+#
+# Usage: Actions -> "Build own search index" -> Run workflow -> pick a level.
+
+name: Build own search index
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "How far to go (see the table in src/search_index/models.py)"
+        type: choice
+        options: ["0", "1", "2", "3"]
+        default: "0"
+      shards:
+        description: "Parallel workers. GitHub Free allows 20 concurrent jobs."
+        type: string
+        default: "4"
+      max_pages:
+        description: "Common Crawl page budget override (blank = level default)"
+        type: string
+        default: ""
+      snapshot:
+        description: "CC-MAIN snapshot, e.g. CC-MAIN-2026-39 (blank = newest)"
+        type: string
+        default: ""
+      wikipedia_date:
+        description: "Wikipedia dump date, e.g. 20261001 (blank = newest)"
+        type: string
+        default: ""
+      shard_docs:
+        description: "Documents per BM25 shard"
+        type: string
+        default: "250000"
+  # Level 0 is ~330 MB and monthly-fresh: rebuild it automatically.
+  schedule:
+    - cron: "23 5 3 * *"
+
+concurrency:
+  group: search-index-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATA_DIR: build/search-index
+  PYTHONUNBUFFERED: "1"
+  WCP_OFFLINE: "0"
+
+jobs:
+  # --------------------------------------------------------------------- plan
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+      level: ${{ steps.matrix.outputs.level }}
+    steps:
+      - id: matrix
+        env:
+          INPUT_LEVEL: ${{ inputs.level || '0' }}
+          INPUT_SHARDS: ${{ inputs.shards || '4' }}
+        run: |
+          set -euo pipefail
+          n="${INPUT_SHARDS}"
+          if [ "$n" -gt 20 ]; then
+            echo "::warning::capping shards at 20 (GitHub concurrency limit)"
+            n=20
+          fi
+          shards=$(seq 0 $((n - 1)) | jq -R -s -c 'split("\n")[:-1] | map(tonumber)')
+          echo "shards=${shards}"        >> "$GITHUB_OUTPUT"
+          echo "level=${INPUT_LEVEL}"    >> "$GITHUB_OUTPUT"
+          echo "Building level ${INPUT_LEVEL} with ${n} shard(s): ${shards}"
+
+  # -------------------------------------------------------------------- build
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    # 350 minutes, deliberately under GitHub's 360-minute hard kill: a job that
+    # is murdered mid-write leaves a shard we would have to rebuild anyway.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-search-index.txt
+
+      - name: Install index dependencies
+        run: pip install -r requirements-search-index.txt
+
+      # Raw datasets are the expensive part of a re-run: a 27 GB Wikipedia
+      # dump costs nothing to keep between monthly builds.
+      - name: Cache raw datasets
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DATA_DIR }}/raw
+          key: si-raw-${{ needs.plan.outputs.level }}-${{ inputs.snapshot }}-${{ inputs.wikipedia_date }}
+          restore-keys: |
+            si-raw-${{ needs.plan.outputs.level }}-
+
+      - name: Build shard ${{ matrix.shard }}
+        env:
+          INPUT_LEVEL: ${{ needs.plan.outputs.level }}
+          INPUT_MAX_PAGES: ${{ inputs.max_pages }}
+          INPUT_SNAPSHOT: ${{ inputs.snapshot }}
+          INPUT_WIKI_DATE: ${{ inputs.wikipedia_date }}
+          INPUT_SHARD_DOCS: ${{ inputs.shard_docs }}
+          INPUT_SHARDS: ${{ inputs.shards }}
+        run: |
+          set -euo pipefail
+          args=(--level "$INPUT_LEVEL"
+                --data-dir "$DATA_DIR"
+                --shard-index "${{ matrix.shard }}"
+                --shard-count "$INPUT_SHARDS"
+                --shard-docs "$INPUT_SHARD_DOCS")
+          [ -n "$INPUT_MAX_PAGES" ] && args+=(--max-pages "$INPUT_MAX_PAGES")
+          [ -n "$INPUT_SNAPSHOT" ]  && args+=(--snapshot "$INPUT_SNAPSHOT")
+          [ -n "$INPUT_WIKI_DATE" ] && args+=(--wikipedia-date "$INPUT_WIKI_DATE")
+          python -m src.cli search-index build "${args[@]}"
+
+      - name: Report size
+        run: du -sh "$DATA_DIR" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: search-index-part-${{ needs.plan.outputs.level }}-${{ matrix.shard }}
+          path: ${{ env.DATA_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------- merge
+  merge:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-search-index.txt
+
+      - name: Install index dependencies
+        run: pip install -r requirements-search-index.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: search-index-part-${{ needs.plan.outputs.level }}-*
+          path: build/parts
+
+      - name: Merge parts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=(build/parts/*/)
+          echo "merging ${#parts[@]} part(s)"
+          python -m src.cli search-index merge "${parts[@]}" --out merged-index
+
+      - name: Smoke test the merged index
+        run: |
+          python -m src.cli search-index status --data-dir merged-index
+          python -m src.cli search-index query "open source software" \
+                 --data-dir merged-index --limit 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: search-index-merged-${{ needs.plan.outputs.level }}
+          path: merged-index
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "### Own search index — level ${{ needs.plan.outputs.level }}"
+            echo ""
+            echo "\`\`\`"
+            python -m src.cli search-index status --data-dir merged-index || true
+            echo "\`\`\`"
+            echo ""
+            echo "Download the \`search-index-merged-\` artifact and point the app at it:"
+            echo ""
+            echo '```bash'
+            echo 'export SEARCH_INDEX_DIR=/path/to/merged-index'
+            echo 'export DISCOVERY_PROVIDERS=own'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
