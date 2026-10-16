@@ -52,10 +52,12 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from src.search_index.bm25 import SURFACE_FILE
+
 logger = logging.getLogger(__name__)
 
 SPELL_FILE = "spell.json.gz"
-SPELL_VERSION = 1
+SPELL_VERSION = 2
 
 # Letters we are willing to substitute or insert, learned from the corpus.
 _FALLBACK_ALPHABET = "abcdefghijklmnopqrstuvwxyz'-"
@@ -104,6 +106,8 @@ class SpellChecker:
         self.config = config or SpellConfig()
         self.dictionary: dict[str, int] = {}
         self.deletes: dict[str, str] = {}
+        #: index term (stem) -> the word a human actually writes
+        self.display: dict[str, str] = {}
         self._alphabet = _FALLBACK_ALPHABET
         self._cache: dict[str, str | None] = {}
 
@@ -154,6 +158,7 @@ class SpellChecker:
         raw = payload.get("shards", []) if isinstance(payload, dict) else payload
 
         totals: Counter[str] = Counter()
+        forms: dict[str, Counter[str]] = {}
         for meta in raw:
             directory = index_dir / str(meta.get("path", ""))
             try:
@@ -166,9 +171,22 @@ class SpellChecker:
                     totals[term] += int(counts[int(tid)])
                 except (IndexError, ValueError):  # pragma: no cover - corrupt
                     continue
+            surface_file = directory / SURFACE_FILE
+            if surface_file.exists():
+                try:
+                    for stem, candidates in json.loads(
+                            surface_file.read_text()).items():
+                        bucket = forms.setdefault(stem, Counter())
+                        for rank, form in enumerate(candidates):
+                            bucket[form] += len(candidates) - rank
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
         logger.info("spell: %d distinct terms, %d usable",
                     len(totals), sum(1 for f in totals.values() if f >= 3))
-        return cls.from_terms(dict(totals), config)
+        checker = cls.from_terms(dict(totals), config)
+        checker.display = {stem: counter.most_common(1)[0][0]
+                           for stem, counter in forms.items() if counter}
+        return checker
 
     # -- persistence --------------------------------------------------------- #
     def save(self, path: str | Path) -> Path:
@@ -178,6 +196,7 @@ class SpellChecker:
             "config": asdict(self.config),
             "dictionary": self.dictionary,
             "deletes": self.deletes,
+            "display": self.display,
             "alphabet": self._alphabet,
         }
         with gzip.open(path, "wt", encoding="utf-8") as fh:
@@ -194,12 +213,13 @@ class SpellChecker:
                 blob = json.load(fh)
         except (OSError, ValueError, json.JSONDecodeError):
             return None
-        if blob.get("version") != SPELL_VERSION:
+        if blob.get("version") not in (1, SPELL_VERSION):
             return None
         config = SpellConfig(**blob.get("config", {}))
         checker = cls(config)
         checker.dictionary = dict(blob.get("dictionary", {}))
         checker.deletes = dict(blob.get("deletes", {}))
+        checker.display = dict(blob.get("display", {}))
         checker._alphabet = blob.get("alphabet", _FALLBACK_ALPHABET)
         return checker
 
@@ -261,7 +281,16 @@ class SpellChecker:
         best = max(candidates.items(), key=lambda kv: (kv[1], -len(kv[0])))
         if best[1] < max(typed_freq * cfg.min_freq_ratio, cfg.min_freq):
             return None
-        return best[0]
+        return self.show(best[0])
+
+    def show(self, term: str) -> str:
+        """The word to *display* for an index term.
+
+        The dictionary is built from stems, so "kubernetes" lives in it as
+        "kubernet". Searching with either works, but telling someone "showing
+        results for kubernet" is wrong — so every suggestion goes through this.
+        """
+        return self.display.get(term, term)
 
     def correct_terms(self, terms: list[str]
                       ) -> tuple[list[str], list[tuple[str, str]]]:
@@ -280,5 +309,6 @@ class SpellChecker:
     def stats(self) -> dict:
         return {"terms": len(self.dictionary),
                 "delete_signatures": len(self.deletes),
+                "display_forms": len(self.display),
                 "min_freq": self.config.min_freq,
                 "max_terms": self.config.max_terms}

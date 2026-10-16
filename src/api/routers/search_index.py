@@ -168,7 +168,7 @@ def _run(request: Request, query: str, limit: int, sources: str,
             effective, limit,
             sources=[s for s in sources.split(",") if s] or None,
             collapse_host=collapse_host, spell=False, rerank=rerank)
-    except Exception as exc:  # noqa: BLE001 - never leak a stack trace to a client
+    except Exception as exc:
         logger.exception("own index query failed")
         raise HTTPException(503, f"own index unavailable: {exc}") from exc
     took_ms = int((time.perf_counter() - started) * 1000)
