@@ -1,0 +1,237 @@
+"""SQLite-backed document store.
+
+Why SQLite and not Parquet or Elasticsearch:
+
+* it is in the standard library, so this package adds **no new dependency**;
+* rows are addressable by ``rowid``, which is exactly what a BM25 shard needs
+  (``rowids.npy`` in the shard maps postings back to rows here);
+* ``url TEXT NOT NULL UNIQUE`` gives de-duplication for free — re-running a
+  half-finished Common Crawl job cannot double-index anything;
+* it handles 100M rows on a single file, and WAL mode lets the builder write
+  while a query process reads.
+
+Elasticsearch would buy us distributed sharding and a query DSL we do not need,
+at the cost of a JVM and a cluster. DuckDB is used automatically for analytics
+if it happens to be installed, but nothing depends on it.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from collections.abc import Iterable, Iterator, Sequence
+from pathlib import Path
+from typing import Self
+
+from src.search_index.models import Doc, host_of
+
+COLUMNS = ("id", "url", "host", "title", "snippet", "body", "source",
+           "authority", "quality", "lang", "indexed_at")
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS docs (
+    id        INTEGER PRIMARY KEY,
+    url       TEXT    NOT NULL UNIQUE,
+    host      TEXT    NOT NULL DEFAULT '',
+    title     TEXT    NOT NULL DEFAULT '',
+    snippet   TEXT    NOT NULL DEFAULT '',
+    body      TEXT    NOT NULL DEFAULT '',
+    source    TEXT    NOT NULL DEFAULT '',
+    authority REAL    NOT NULL DEFAULT 0.0,
+    quality   REAL    NOT NULL DEFAULT 1.0,
+    lang      TEXT    NOT NULL DEFAULT '',
+    indexed_at TEXT   NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_docs_host   ON docs(host);
+CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source);
+"""
+
+_PRAGMAS = (
+    ("journal_mode", "WAL"),
+    ("synchronous", "NORMAL"),
+    ("temp_store", "MEMORY"),
+    ("cache_size", "-262144"),      # ~256 MB
+    ("mmap_size", "268435456"),     # 256 MB
+)
+
+
+class DocStore:
+    """Append-mostly document store with random access by ``rowid``."""
+
+    def __init__(self, path: str | Path, *, readonly: bool = False) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._readonly = readonly
+        self._conn: sqlite3.Connection | None = None
+        self.duplicates = 0
+        if not readonly:
+            self._connect()
+
+    # -- lifecycle ---------------------------------------------------------- #
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path), timeout=30.0,
+                               check_same_thread=False)
+        for key, value in _PRAGMAS:
+            try:
+                conn.execute(f"PRAGMA {key}={value}")
+            except sqlite3.DatabaseError:  # pragma: no cover - locked/unsupported
+                pass
+        conn.executescript(_SCHEMA)
+        conn.commit()
+        return conn
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            if self._readonly:
+                if not self.path.exists():
+                    raise FileNotFoundError(f"no document store at {self.path}")
+                uri = f"file:{self.path}?mode=ro"
+                self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+            else:
+                self._conn = self._connect()
+        return self._conn
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.commit()
+            except sqlite3.DatabaseError:  # pragma: no cover
+                pass
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    # -- writes -------------------------------------------------------------- #
+    def add_batch(self, docs: Sequence[Doc]) -> list[int]:
+        """Insert ``docs`` and return the ``rowid`` of each (``-1`` if refused).
+
+        Refused = the URL was already indexed. Callers must therefore build the
+        BM25 shard from the *returned* rowids, not from the input order.
+        """
+        conn = self.conn
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        rowids: list[int] = []
+        sql = ("INSERT OR IGNORE INTO docs "
+               "(url, host, title, snippet, body, source, authority, quality, lang, indexed_at) "
+               "VALUES (?,?,?,?,?,?,?,?,?,?)")
+        try:
+            with conn:  # one transaction per batch
+                for doc in docs:
+                    cur = conn.execute(sql, (
+                        doc.url,
+                        doc.host or host_of(doc.url),
+                        doc.title[:1024],
+                        doc.snippet,
+                        doc.body,
+                        doc.source,
+                        float(doc.authority),
+                        float(doc.quality),
+                        doc.lang,
+                        now,
+                    ))
+                    if cur.lastrowid and cur.rowcount:
+                        rowids.append(int(cur.lastrowid))
+                    else:
+                        rowids.append(-1)
+                        self.duplicates += 1
+        except sqlite3.Error as exc:  # pragma: no cover - disk full / locked
+            raise RuntimeError(f"doc store insert failed: {exc}") from exc
+        return rowids
+
+    def set_authority(self, host: str, authority: float) -> int:
+        """Backfill authority for every document of ``host`` (Open PageRank pass)."""
+        cur = self.conn.execute("UPDATE docs SET authority=? WHERE host=?",
+                                (float(authority), host.lower()))
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
+    def vacuum(self) -> None:
+        try:
+            self.conn.execute("VACUUM")
+        except sqlite3.DatabaseError:  # pragma: no cover
+            pass
+
+    # -- reads --------------------------------------------------------------- #
+    def fetch(self, rowids: Iterable[int]) -> list[Doc]:
+        """Fetch documents by ``rowid``; missing ids are skipped."""
+        ids = [int(i) for i in rowids if i and i > 0]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT {','.join(COLUMNS)} FROM docs WHERE id IN ({placeholders})", ids)
+        out = [Doc.from_mapping(dict(zip(COLUMNS, r))) for r in rows]
+        return out
+
+    def fetch_map(self, rowids: Iterable[int]) -> dict[int, Doc]:
+        """``{rowid: Doc}`` — the shape the query path needs.
+
+        ``fetch`` returns rows in sqlite's own (ascending rowid) order, which is
+        *not* the relevance order the caller asked in; mapping by id keeps the
+        caller's ordering intact.
+        """
+        ids = [int(i) for i in rowids if i and i > 0]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT {','.join(COLUMNS)} FROM docs WHERE id IN ({placeholders})", ids)
+        return {int(r[0]): Doc.from_mapping(dict(zip(COLUMNS, r))) for r in rows}
+
+    def fetch_one(self, rowid: int) -> Doc | None:
+        docs = self.fetch([rowid])
+        return docs[0] if docs else None
+
+    def get_by_url(self, url: str) -> Doc | None:
+        row = self.conn.execute(
+            f"SELECT {','.join(COLUMNS)} FROM docs WHERE url=?", (url,)).fetchone()
+        return Doc.from_mapping(dict(zip(COLUMNS, row))) if row else None
+
+    def count(self) -> int:
+        try:
+            return int(self.conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0])
+        except sqlite3.DatabaseError:
+            return 0
+
+    def source_counts(self) -> dict[str, int]:
+        try:
+            rows = self.conn.execute(
+                "SELECT source, COUNT(*) FROM docs GROUP BY source ORDER BY 2 DESC")
+        except sqlite3.DatabaseError:
+            return {}
+        return {str(src): int(n) for src, n in rows}
+
+    def iter_all(self, batch: int = 1000) -> Iterator[Doc]:
+        """Stream every document (used by the merge/compaction path)."""
+        if not self.path.exists():
+            return
+        last = 0
+        while True:
+            rows = self.conn.execute(
+                f"SELECT {','.join(COLUMNS)} FROM docs WHERE id > ? ORDER BY id LIMIT ?",
+                (last, batch)).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield Doc.from_mapping(dict(zip(COLUMNS, row)))
+            last = int(rows[-1][0])
+
+    def sample(self, limit: int = 5) -> list[Doc]:
+        rows = self.conn.execute(
+            f"SELECT {','.join(COLUMNS)} FROM docs ORDER BY id DESC LIMIT ?",
+            (int(limit),)).fetchall()
+        return [Doc.from_mapping(dict(zip(COLUMNS, r))) for r in rows]
+
+    def size_bytes(self) -> int:
+        total = 0
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(str(self.path) + suffix)
+            if candidate.exists():
+                total += candidate.stat().st_size
+        return total

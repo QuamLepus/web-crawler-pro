@@ -101,6 +101,36 @@ class Config:
     SERPAPI_KEY = _env("SERPAPI_KEY", "")
     TAVILY_API_KEY = _env("TAVILY_API_KEY", "")
 
+    # -- own search index (src/search_index) --------------------------------- #
+    # The platform's own index: Curlie + Open PageRank + (optionally) Wikipedia
+    # and Common Crawl. Free, offline-capable, no third-party search engine.
+    # Build it with `wcp search-index build --level N`.
+    SEARCH_INDEX_DIR = _env("SEARCH_INDEX_DIR", "data/search-index")
+    SEARCH_INDEX_LEVEL = int(_env("SEARCH_INDEX_LEVEL", 0))
+    # Documents per BM25 shard. Smaller = more shards, less RAM per shard.
+    SEARCH_INDEX_SHARD_DOCS = int(_env("SEARCH_INDEX_SHARD_DOCS", 100_000))
+    # How many characters of body text BM25 actually indexes.
+    SEARCH_INDEX_BODY_CHARS = int(_env("SEARCH_INDEX_BODY_CHARS", 512))
+    # Common Crawl page budget override; 0 = whatever the level says.
+    SEARCH_INDEX_MAX_PAGES = int(_env("SEARCH_INDEX_MAX_PAGES", 0))
+    SEARCH_INDEX_LANGUAGE = _env("SEARCH_INDEX_LANGUAGE", "en")
+    # Comma-separated source override, e.g. "curlie,wikipedia". Empty = level default.
+    SEARCH_INDEX_SOURCES = [
+        s for s in _env("SEARCH_INDEX_SOURCES", "").replace(" ", "").split(",") if s
+    ]
+    # Rank blend. 0.0 = pure BM25, 1.0 = authority dominates.
+    SEARCH_INDEX_AUTHORITY_WEIGHT = float(_env("SEARCH_INDEX_AUTHORITY_WEIGHT", 0.35))
+    SEARCH_INDEX_SNIPPET_WIDTH = int(_env("SEARCH_INDEX_SNIPPET_WIDTH", 240))
+    # Discovery wants websites, not pages: keep only the best page per host.
+    SEARCH_INDEX_COLLAPSE_HOST = (
+        _env("SEARCH_INDEX_COLLAPSE_HOST", "true").lower() == "true")
+    # Memory-map the shard arrays (lets the index be larger than RAM).
+    SEARCH_INDEX_MMAP = _env("SEARCH_INDEX_MMAP", "true").lower() == "true"
+    SEARCH_INDEX_MAX_LOADED_SHARDS = int(_env("SEARCH_INDEX_MAX_LOADED_SHARDS", 8))
+    # Auto-register OwnIndexProvider in discovery when an index exists.
+    DISCOVERY_USE_OWN_INDEX = (
+        _env("DISCOVERY_USE_OWN_INDEX", "true").lower() == "true")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

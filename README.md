@@ -392,6 +392,7 @@ websites for a topic" is a judgement call and you are entitled to override it.
 
 | Provider | Key | Notes |
 |---|---|---|
+| **`own`** | – | **The platform's own index** (see below). No key, no rate limit, works offline. Registered automatically once an index exists. |
 | `duckduckgo` | – | Default. No key, no cost. Good for personal / low volume. |
 | `brave` | `BRAVE_API_KEY` | Licensed, free tier. **Use this in production.** |
 | `serpapi` | `SERPAPI_KEY` | Google/Bing results as JSON |
@@ -405,7 +406,8 @@ Providers with a key are enabled automatically; list them explicitly with
 
 > **ToS:** scraping Google or Bing result pages directly violates their terms and
 > gets you blocked. The default DuckDuckGo HTML endpoint is fine for light use;
-> for anything at scale, use a licensed API (Brave / SerpAPI / Tavily).
+> for anything at scale use a licensed API (Brave / SerpAPI / Tavily) — or build
+> your own index with `src.search_index` and stop depending on anybody.
 
 ### REST API
 
@@ -446,6 +448,122 @@ provider is skipped with a warning rather than failing the job.
 
 ---
 
+## 🔎 Own Search Index — drop the third-party search engine
+
+Topic discovery used to begin with a request to somebody else's search engine.
+**`src.search_index`** removes that dependency: it builds a BM25 index over free,
+downloadable datasets and answers topic queries from it. No API key, no quota, no
+per-query cost, and it keeps working with the network unplugged.
+
+The trick that makes this cheap is that **ranking does not require crawling**.
+Three public datasets already carry the signals a crawler would otherwise have to
+rediscover the hard way:
+
+| Dataset | What it gives us | Size |
+|---|---|---|
+| [Curlie](https://curlie.org/download) (CC-BY) | ~2.9M **human-edited** sites, each with a written description *and* a category path like `Top/Science/Energy/Solar` | ~200 MB |
+| [Open PageRank](https://www.domcop.com/openpagerank/) | Authority 0–10 for the top 10M domains — we never build a link graph | 117 MB |
+| [Tranco](https://tranco-list.eu/) | Community-merged popularity list, catches what PageRank misses | ~15 MB |
+
+Put together that is **~330 MB of download** and it already beats a general
+search engine *for this narrow job*: an editor's taxonomy matches a topic
+directly (no SEO sludge), there is no rate limit and there is no terms-of-service
+question to answer.
+
+### The $0 roadmap
+
+| Level | What gets indexed | Download | Disk | Effort |
+|---|---|---|---|---|
+| **0** | Curlie + Open PageRank + Tranco | ~330 MB | ~3 GB | 2–3 days |
+| **1** | + Wikipedia (7.2M articles) | ~27 GB | ~40 GB | 3–5 days |
+| **2** | + Common Crawl, 10M pages | ~55 GB | ~150 GB | 1–2 weeks |
+| **3** | + Common Crawl, 100M pages | ~310 GB | 0.5–1 TB | 1–2 months |
+
+Compute is free the whole way: **GitHub Actions gives public repositories
+unlimited minutes**, so levels 2 and 3 run as a sharded matrix —
+`.github/workflows/search-index.yml` fans out 20 parallel jobs, each building an
+independent part, then merges them. Past level 3 the cost is disk and servers,
+not software.
+
+### Quick start
+
+```bash
+pip install -r requirements-search-index.txt      # numpy + requests + dotenv
+
+python -m src.cli search-index levels             # what each level costs
+python -m src.cli search-index sources --level 2  # exactly what gets downloaded
+python -m src.cli search-index build --level 0    # ~330 MB; Ctrl-C is safe
+python -m src.cli search-index status
+python -m src.cli search-index query "renewable energy research" --limit 10
+```
+
+Then point discovery at it and DuckDuckGo is out of the loop:
+
+```bash
+export SEARCH_INDEX_DIR=data/search-index
+export DISCOVERY_PROVIDERS=own
+python -m src.cli discover --topic "solar energy research" --count 20 --approve
+```
+
+Already have the datasets? Drop them into `$SEARCH_INDEX_DIR/raw/` and add
+`--no-download`. Downloads resume via HTTP `Range`, and the build checkpoints
+`state.json` after **every shard**, so a job killed at 5h55m restarts on the next
+shard instead of the next day.
+
+### Query syntax
+
+```
+solar panels                    # any of the words, ranked by BM25 × authority
+"exact phrase"                  # phrase, verified against the document
+solar -blog                     # exclude
+site:.edu                       # host suffix (site:example.org also works)
+source:wikipedia                # curlie | wikipedia | commoncrawl | seed
+```
+
+Ranking is `bm25 × (1 + authority_weight × authority/10)`, which is why "python"
+returns python.org instead of a scraper farm. Results are collapsed to **one per
+website** by default, because discovery wants domains, not pages.
+
+### HTTP surface
+
+```bash
+curl "localhost:8000/v1/search-index/query?q=solar%20energy&limit=5" -H "X-API-Key: $KEY"
+curl "localhost:8000/v1/search-index/stats"                          -H "X-API-Key: $KEY"
+curl "localhost:8000/v1/search-index/levels"                          -H "X-API-Key: $KEY"
+```
+
+### How it is built
+
+| Layer | File | Job |
+|---|---|---|
+| Sources | `src/search_index/sources/` | streaming readers for Curlie TSV, PageRank/Tranco CSV, Wikipedia multistream bz2, Common Crawl WET |
+| Store | `src/search_index/store.py` | SQLite — stdlib only, random access by `rowid`, `url UNIQUE` gives de-duplication for free |
+| Index | `src/search_index/bm25.py` | per-shard Okapi BM25 in CSR form, memory-mapped, top-k merged across shards like a real distributed engine |
+| Build | `src/search_index/indexer.py` | resumable, checkpointed, sharded |
+| Merge | `src/search_index/merge.py` | combines parallel parts, remapping `rowid`s and dropping duplicates |
+| Query | `src/search_index/query.py` | parse → retrieve → verify → blend → collapse |
+| Provider | `src/search_index/provider.py` | `OwnIndexProvider`, a drop-in `SearchProvider` |
+
+**Zero new hard dependencies** — numpy (already present) and the standard
+library. Phrases are verified against stored text instead of indexed with
+positions (positions would double the index), Curlie's category path is indexed
+as text so a topic matches an editor's taxonomy, and authority comes from someone
+else's link graph instead of one we have to build.
+
+### Honest limits
+
+- Curlie is 2.9M sites: excellent head, no long tail, and new sites appear only
+  when an editor adds them.
+- Curlie + Common Crawl freshness is **monthly**, not real-time.
+- GitHub Actions is free but subject to a fair-use policy and a 6-hour job cap.
+- Level 3 needs ~1 TB of disk somewhere; "free" stops at hardware.
+- This is optimised to work well *inside this platform* — find authoritative,
+  on-topic pages for a topic — not to be a general web search engine.
+
+---
+
+---
+
 ## ⚙️ Configuration Reference
 
 See **`.env.example`** for the complete list. Highlights:
@@ -475,6 +593,15 @@ See **`.env.example`** for the complete list. Highlights:
 | `DISCOVERY_MAX_PAGES_PER_SITE` | `5` | Crawl budget per discovered website |
 | `DISCOVERY_BLOCKLIST` | – | Comma-separated domains that must never be proposed |
 | `DISCOVERY_USE_LLM` / `DISCOVERY_USE_COMMONCRAWL` | `false` | Opt into the LLM / CommonCrawl discovery backends |
+| `DISCOVERY_USE_OWN_INDEX` | `true` | Auto-register `OwnIndexProvider` when an index exists |
+| `SEARCH_INDEX_DIR` | `data/search-index` | Where the own index lives (`docs.sqlite3`, `index/`, `raw/`) |
+| `SEARCH_INDEX_LEVEL` | `0` | 0 Curlie · 1 +Wikipedia · 2 +10M CC pages · 3 +100M CC pages |
+| `SEARCH_INDEX_SHARD_DOCS` | `100000` | Documents per BM25 shard |
+| `SEARCH_INDEX_BODY_CHARS` | `512` | How much body text BM25 indexes |
+| `SEARCH_INDEX_AUTHORITY_WEIGHT` | `0.35` | `score = bm25 × (1 + weight × authority/10)`; `0` = pure BM25 |
+| `SEARCH_INDEX_COLLAPSE_HOST` | `true` | One result per website |
+| `SEARCH_INDEX_MAX_PAGES` | `0` | Common Crawl page budget override (`0` = level default) |
+| `SEARCH_INDEX_SOURCES` | – | Comma-separated override, e.g. `curlie,wikipedia` |
 | `SENTRY_DSN` | – | Error tracking (optional) |
 
 Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefix
@@ -485,7 +612,8 @@ Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefi
 ## 🧪 Testing
 
 ```bash
-pytest                      # 122 tests
+pytest                      # 170 tests
+pytest -q tests/test_search_index.py          # own search index, fully offline
 pytest -q tests/test_worker_jobs.py tests/test_saas_billing.py
 ruff check src workers tests
 ```
@@ -500,11 +628,15 @@ services need to be running.
 
 Done: distributed frontier, job orchestration, stealth/anti-bot, quality pipeline,
 multi-tenant REST + GraphQL, quotas, webhooks, marketplace, topic discovery,
+**own search index (Curlie + PageRank + Wikipedia + Common Crawl, $0)**,
 CI/CD with published images.
 
 Next up:
 
 - [ ] Flesh out the dashboard (currently a live-metrics prototype)
+- [ ] Semantic (vector) reranking on top of the own index — embeddings are wired, the rerank step is not
+- [ ] Spelling correction learned from the indexed corpus itself (SymSpell-style)
+- [ ] Incremental Common Crawl updates: index only what changed since the last snapshot
 - [ ] Deeper OpenTelemetry tracing across workers
 - [ ] Exercise billing end-to-end against real Stripe
 - [ ] Split `requirements.txt` into optional extras so images stay small
@@ -515,6 +647,17 @@ Next up:
 ## 📝 License
 
 MIT — see the repository for details.
+
+Third-party data used by `src/search_index`, all free to redistribute under the
+terms below:
+
+- **Curlie** (https://curlie.org) — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
+  the successor to the DMOZ/Open Directory Project.
+- **Wikipedia** (https://dumps.wikimedia.org) — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- **Common Crawl** (https://commoncrawl.org) — public dataset on an AWS Open Data
+  bucket; no egress charge, no API key.
+- **Open PageRank** (https://www.domcop.com/openpagerank/) — free for any use.
+- **Tranco** (https://tranco-list.eu/) — free for research and commercial use.
 
 ---
 
