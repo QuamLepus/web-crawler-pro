@@ -28,7 +28,15 @@ async def list_plans() -> dict:
 
 
 def _usage_totals(svc, tenant: str, period: str | None = None) -> dict[str, float]:
-    """Meter totals as a plain dict for :func:`build_invoice`."""
+    """Meter totals as a plain dict for :func:`build_invoice`.
+
+    ``QuotaManager.month_totals()`` returns the ``_tenant`` label alongside the
+    numeric meters, because :func:`build_invoice` reads it to label the
+    invoice. That label is metadata, not a meter reading, so it must not go
+    through ``float()`` — coercing the tenant id raised ``ValueError`` and
+    turned *every* ``/billing/*`` call into a 500. Callers add the label back
+    themselves, so dropping it here loses nothing.
+    """
     try:
         totals = dict(svc.quotas.month_totals(tenant, period or current_period()))
     except Exception:
@@ -37,7 +45,8 @@ def _usage_totals(svc, tenant: str, period: str | None = None) -> dict[str, floa
         totals["storage_gb"] = svc.quotas.storage_gb(tenant)
     except Exception:
         pass
-    return {k: float(v or 0) for k, v in totals.items()}
+    return {k: float(v or 0) for k, v in totals.items()
+            if not str(k).startswith("_")}
 
 
 @router.post("/checkout", response_model=CheckoutSessionOut,
@@ -70,8 +79,13 @@ async def usage(ctx: CtxDep, request: Request) -> UsageSummary:
         st: QuotaStatus | None = snap.get(metric)
         return float(st.used) if st else 0.0
 
-    pcts = [st.pct() for st in snap.values() if st is not None and st.pct() is not None]
-    remaining = min(pcts) * 100 if pcts else 100.0
+    # `QuotaStatus.pct` is a property (percent *used*, already 0-100), not a
+    # method — calling it raised TypeError and 500'd this endpoint. The
+    # tightest quota is the one with the highest used percentage, so headroom
+    # is whatever is left below that.
+    used_pcts = [st.pct for st in snap.values()
+                 if st is not None and st.pct is not None]
+    remaining = max(0.0, 100.0 - max(used_pcts)) if used_pcts else 100.0
     invoice = build_invoice(plan, {**_usage_totals(svc, ctx["tenant"]),
                                    "_tenant": ctx["tenant"]},
                             storage_gb_avg=_used("storage_gb"),

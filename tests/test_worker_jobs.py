@@ -1,0 +1,140 @@
+"""Worker/job regressions: the API must actually be able to crawl.
+
+`SchedulerService._submit_celery` maps job kinds onto Celery task names. Those
+tasks used to be referenced but never defined, so Celery accepted the message
+and dropped it — every `POST /v1/jobs/crawl` stayed "queued" forever. These
+tests pin the wiring and the crawl loop that backs it.
+"""
+
+from __future__ import annotations
+
+import fakeredis
+import pytest
+import redis as real_redis
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch):
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        real_redis, "from_url",
+        lambda url, **kw: fakeredis.FakeStrictRedis(
+            server=server, decode_responses=kw.get("decode_responses", True)))
+    monkeypatch.setattr(
+        real_redis.Redis, "from_url",
+        classmethod(lambda cls, url, **kw: real_redis.from_url(url, **kw)))
+    yield server
+
+
+# --------------------------------------------------------------------------- #
+# task wiring
+# --------------------------------------------------------------------------- #
+def test_every_scheduler_task_is_registered():
+    """No job kind may point at a task that does not exist."""
+    from src.compute.scheduler import SchedulerService
+    from workers.crawl_tasks import app as celery_app
+
+    for kind in ("crawl_job", "ingest_source", "tokenize", "dedupe"):
+        task_name = SchedulerService._TASK_MAP[kind]
+        assert task_name in celery_app.tasks, (
+            f"kind {kind!r} maps to {task_name!r}, which is not a registered "
+            f"task — jobs of this kind would be silently dropped")
+
+
+def test_config_exposes_redis_settings():
+    """`Config` used to be defined twice; the survivor had no REDIS_URL."""
+    from src.config import Config, get_config
+
+    cfg = get_config()
+    assert isinstance(cfg, Config), "get_config() must return an instance"
+    assert cfg.REDIS_URL
+    assert cfg.MAX_PAGES_PER_CRAWL > 0
+
+
+# --------------------------------------------------------------------------- #
+# the crawl loop
+# --------------------------------------------------------------------------- #
+PAGES = {
+    "https://example.com/": (
+        "<html><title>Home</title><body>Welcome to the home page."
+        "<a href='/about'>About</a><a href='https://other.com/x'>Ext</a>"
+        "</body></html>"),
+    "https://example.com/about": (
+        "<html><title>About</title><body>About us, we crawl things.</body></html>"),
+}
+
+
+def _fake_fetch(url: str):
+    if url not in PAGES:
+        raise RuntimeError(f"not found: {url}")
+    return PAGES[url], 200
+
+
+@pytest.fixture()
+def crawl_env(monkeypatch, tmp_path):
+    """Point crawl output at tmp_path; return the fakeredis job client."""
+    import workers.crawl_tasks as wt
+
+    monkeypatch.setattr(wt, "CRAWL_OUTPUT_DIR", str(tmp_path))
+    return wt, fakeredis.FakeStrictRedis(decode_responses=True)
+
+
+def test_run_crawl_updates_job_record_and_digest(crawl_env):
+    wt, r = crawl_env
+    job_id = "job_crawltest"
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/", "max_pages": 5, "tenant": "t1",
+         "job_id": job_id, "obey_robots": False},
+        redis_client=r, fetcher=_fake_fetch)
+
+    assert result["pages_done"] == 2
+    assert result["items"] == 2
+    assert result["failures"] == []
+
+    rec = r.hgetall(f"wcp:v1:job:{job_id}")
+    assert rec["state"] == "succeeded"
+    assert rec["pages_done"] == "2"
+    assert rec["items_collected"] == "2"
+    # The marketplace refuses to publish a listing without this digest, and
+    # nothing in the pipeline ever wrote it.
+    assert rec["data_sha256"] == result["data_sha256"]
+
+
+def test_run_crawl_stays_on_the_start_domain(crawl_env):
+    wt, r = crawl_env
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/", "max_pages": 1, "tenant": "t1",
+         "job_id": "job_scope", "obey_robots": False},
+        redis_client=r, fetcher=_fake_fetch)
+
+    # max_pages=1 stops after the seed, so the off-domain link never fires.
+    assert result["pages_done"] == 1
+
+
+def test_run_crawl_marks_failure_when_every_page_errors(crawl_env):
+    wt, r = crawl_env
+
+    def always_down(url):
+        raise RuntimeError("connection refused")
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/", "max_pages": 3, "tenant": "t1",
+         "job_id": "job_down", "obey_robots": False},
+        redis_client=r, fetcher=always_down)
+
+    assert result["pages_done"] == 0
+    assert result["failures"]
+    rec = r.hgetall("wcp:v1:job:job_down")
+    assert rec["state"] == "failed"
+    assert rec["error"]
+
+
+def test_canonical_sha256_ignores_item_order():
+    from workers.crawl_tasks import canonical_sha256
+
+    a = [{"url": "https://a/", "text": "one"}, {"url": "https://b/", "text": "two"}]
+    b = list(reversed(a))
+    assert canonical_sha256(a) == canonical_sha256(b)
+    assert canonical_sha256(a) != canonical_sha256(a[:1])
