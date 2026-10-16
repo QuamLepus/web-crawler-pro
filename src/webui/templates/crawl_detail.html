@@ -1,22 +1,26 @@
 {% extends "base.html" %}
-{% set pct = ((job.pages_done or 0) / job.max_pages * 100) if job and job.max_pages else 0 %}
-{% set live = (job.state|string).lower() in ('jobstate.queued','jobstate.running','queued','running','pending') %}
+{% set j = job or {} %}
+{% set st = (j.get('state')|string).lower().replace('jobstate.', '') %}
+{% set live = st in ('running', 'queued', 'pending') %}
+{% set pages_done = j.get('pages_done', 0) or 0 %}
+{% set max_pages = j.get('max_pages', 0) or 0 %}
+{% set pct = ((pages_done / max_pages * 100) if max_pages else 0) %}
 
 {% block content %}
 <div class="page-head">
   <div class="crumbs">
     <a href="/app">Home</a><span>/</span><a href="/app/crawl">Crawl jobs</a>
-    <span>/</span><span class="mono">{{ job_id[:12] }}</span>
+    <span>/</span><span class="mono">{{ job_id[:14] }}</span>
   </div>
   <div class="between">
     <div>
-      <h1 class="mono" style="font-size:22px">{{ job.job_id }}</h1>
-      <p class="dim small truncate" style="max-width:600px">{{ job.url }}</p>
+      <h1 class="mono" style="font-size:22px">{{ job_id }}</h1>
+      <p class="dim truncate" style="max-width:70ch">{{ j.get('url') }}</p>
     </div>
     <div class="row">
       {% if live %}
         <form method="post" action="/app/crawl/{{ job_id }}/cancel">
-          <button class="btn btn-danger">Cancel job</button>
+          <button class="btn btn-danger" data-busy="Cancelling…">Cancel job</button>
         </form>
       {% endif %}
       <a class="btn" href="/app/crawl">← All jobs</a>
@@ -24,37 +28,13 @@
   </div>
 </div>
 
-<div class="grid g-4 mb-3">
-  <div class="card stat">
-    <div class="label">State</div>
-    <div class="value" style="font-size:20px;padding-top:4px">
-      {% include "partials/state.html" %}
-    </div>
-    <div class="delta muted">{{ job.state|string|replace('JobState.', '') }}</div>
-  </div>
-  <div class="card stat">
-    <div class="label">Pages</div>
-    <div class="value">{{ (job.pages_done or 0)|num }}<small> / {{ job.max_pages|num }}</small></div>
-    <div class="meter mt-2 {% if pct >= 100 %}ok{% endif %}"><i style="width:{{ [pct,100]|min }}%"></i></div>
-  </div>
-  <div class="card stat">
-    <div class="label">Items collected</div>
-    <div class="value">{{ (job.items_collected or 0)|num }}</div>
-    <div class="delta muted">{{ (job.tokens_generated or 0)|num }} tokens generated</div>
-  </div>
-  <div class="card stat">
-    <div class="label">Last update</div>
-    <div class="value" style="font-size:18px;padding-top:6px">{{ job.updated_at|ago }}</div>
-    <div class="delta muted">started {{ job.created_at|ago }}</div>
-  </div>
-</div>
-
-{# A running job keeps asking the scheduler; no websockets, no extra infra. #}
 {% if live %}
+  {# A running job re-reads its own record every few seconds — no websockets,
+     no extra infrastructure to run. #}
   <div class="alert info mb-3" data-poll="/app/poll/jobs/{{ job_id }}"
-       data-poll-render="wcpJobTick">
+       data-poll-render="wcpJobTick" style="animation:fadeUp 300ms var(--ease-out)">
     <span class="ico">◷</span>
-    <span>This page refreshes itself every few seconds while the job runs.</span>
+    <span>This page refreshes itself while the job runs.</span>
   </div>
   <script>
     function wcpJobTick(el, data) {
@@ -67,66 +47,111 @@
   </script>
 {% endif %}
 
-<div class="grid g-main">
-  <div class="stack">
-    {% if job.error %}
-      <div class="alert danger">
-        <span class="ico">✕</span>
-        <span><b>The job failed.</b> {{ job.error }}</span>
-      </div>
-    {% endif %}
+<div class="grid g-4 mb-3">
+  <div class="card stat">
+    <div class="label">State</div>
+    <div class="value" style="font-size:20px;padding-top:6px">{% include "partials/state.html" %}</div>
+    <div class="delta muted">updated {{ (j.get('updated_at') or '')|ago }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Pages</div>
+    <div class="value">{{ pages_done|num }}</div>
+    <div class="meter mt-2"><i style="width:{{ pct|round(1) }}%"></i></div>
+    <div class="delta muted mt-1">of {{ max_pages|num }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Items collected</div>
+    <div class="value">{{ j.get('items_collected', 0)|num }}</div>
+    <div class="delta muted">{{ j.get('tokens_generated', 0)|num }} tokens</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Created</div>
+    <div class="value" style="font-size:19px;padding-top:6px">{{ (j.get('created_at') or '')|ago }}</div>
+    <div class="delta muted">tenant {{ j.get('tenant', '—') }}</div>
+  </div>
+</div>
 
-    <div class="card">
-      <div class="card-head"><h3>Job record</h3></div>
-      <div class="card-pad">
-        <dl class="kv">
-          <dt>Job ID</dt><dd class="mono">{{ job.job_id }}</dd>
-          <dt>Start URL</dt><dd><a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url }}</a></dd>
-          <dt>Max pages</dt><dd>{{ job.max_pages|num }}</dd>
-          <dt>Pages done</dt><dd>{{ job.pages_done or 0 }}</dd>
-          <dt>Items</dt><dd>{{ job.items_collected or 0 }}</dd>
-          <dt>Tokens</dt><dd>{{ job.tokens_generated or 0 }}</dd>
-          <dt>Created</dt><dd>{{ job.created_at }} <span class="muted">({{ job.created_at|ago }})</span></dd>
-          <dt>Updated</dt><dd>{{ job.updated_at }} <span class="muted">({{ job.updated_at|ago }})</span></dd>
-        </dl>
-      </div>
-      <div class="card-foot row">
-        <button class="btn btn-sm" data-copy="{{ job.job_id }}">Copy job ID</button>
-        <a class="btn btn-sm" href="/app/discovery">Run discovery on this topic</a>
-        <span class="push small muted">Tenant {{ job.tenant }}</span>
-      </div>
+<div class="card" data-tabs>
+  <div class="card-head" style="padding:0;border-bottom:0">
+    <div class="tabs" style="width:100%;border-bottom:0" role="tablist">
+      <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button class="tab" role="tab" data-tab="options" aria-selected="false">Options</button>
+      <button class="tab" role="tab" data-tab="raw" aria-selected="false">Raw record</button>
+      <button class="tab" role="tab" data-tab="api" aria-selected="false">Call it yourself</button>
     </div>
+  </div>
 
-    <div class="card card-pad">
-      <h3 class="mb-2">Call it yourself</h3>
-      <div class="code">
-<span class="c"># watch this job from your own code</span>
-curl <span class="k">{{ request.base_url }}api/v1/jobs/{{ job_id }}</span> \<br>
-&nbsp;&nbsp;-H "Authorization: Bearer $TOKEN"
+  <div class="tabpanel" data-panel="overview" role="tabpanel">
+    <div class="grid g-2">
+      <div>
+        <h4 class="mb-2">What happens to each page</h4>
+        <ol class="small dim" style="padding-left:18px">
+          <li>Fetched with a per-host delay, robots.txt consulted first.</li>
+          <li>Boilerplate stripped; language detected.</li>
+          <li>PII redacted if Presidio is installed.</li>
+          <li>MinHash + SimHash check against what we already stored.</li>
+          <li>Written to the export you configured, or the object store.</li>
+        </ol>
+      </div>
+      <div>
+        <h4 class="mb-2">Record</h4>
+        <dl class="kv small">
+          <dt class="muted">Job ID</dt><dd class="mono">{{ job_id }}</dd>
+          <dt class="muted">Tenant</dt><dd class="mono">{{ j.get('tenant', '—') }}</dd>
+          <dt class="muted">Pages</dt><dd>{{ pages_done|num }} / {{ max_pages|num }}</dd>
+          <dt class="muted">Items</dt><dd>{{ j.get('items_collected', 0)|num }}</dd>
+          <dt class="muted">Tokens</dt><dd>{{ j.get('tokens_generated', 0)|num }}</dd>
+          <dt class="muted">Error</dt>
+          <dd>{% if j.get('error') %}<span class="badge danger">{{ j.get('error') }}</span>
+            {% else %}<span class="muted">none</span>{% endif %}</dd>
+        </dl>
       </div>
     </div>
   </div>
 
-  <div class="stack">
-    <div class="card card-pad">
-      <h3 class="mb-2">What happens next</h3>
-      <ol class="stack-sm small dim" style="list-style:decimal;padding-left:18px">
-        <li>The frontier seeds from your start URL.</li>
-        <li>Pages are fetched with per-host politeness.</li>
-        <li>Extracted records are deduplicated (MinHash).</li>
-        <li>Results are ingested and become searchable.</li>
-        <li>A webhook fires, if you subscribed to <code>job.completed</code>.</li>
-      </ol>
-      <a class="btn btn-block mt-2" href="/app/settings">Set up webhooks</a>
-    </div>
+  <div class="tabpanel" data-panel="options" role="tabpanel" hidden>
+    {% set opts = j.get('options') or {} %}
+    {% if opts %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th data-sort>Option</th><th>Value</th></tr></thead>
+          <tbody>
+            {% for k, v in opts.items() %}
+              <tr><td class="mono small">{{ k }}</td><td class="small">{{ v }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty"><div class="ico">⚙</div><h3>No options stored</h3>
+        <p>This job record predates option capture, or was created without any.</p></div>
+    {% endif %}
+  </div>
 
-    <div class="card card-pad">
-      <h3 class="mb-2">Export</h3>
-      <p class="small dim mb-2">
-        Finished jobs can be exported as JSONL, CSV or Parquet through the API.
-      </p>
-      <a class="btn btn-block" href="/app/docs">Export endpoints →</a>
+  <div class="tabpanel" data-panel="raw" role="tabpanel" hidden>
+    <div class="code" style="max-height:420px;overflow:auto">{{ j|tojson(indent=2) }}</div>
+    <div class="row mt-2">
+      <button class="btn btn-sm" data-copy="{{ j|tojson }}">Copy JSON</button>
     </div>
+  </div>
+
+  <div class="tabpanel" data-panel="api" role="tabpanel" hidden>
+    <div class="code">
+<span class="c"># submit</span>
+curl -X POST <span class="k">{{ request.base_url }}api/v1/jobs/crawl</span> \<br>
+&nbsp;&nbsp;-H "X-API-Key: $KEY" -H "Content-Type: application/json" \<br>
+&nbsp;&nbsp;-d '{"url":"{{ j.get('url') }}","max_pages":{{ max_pages }}}'<br>
+<br>
+<span class="c"># poll</span>
+curl <span class="k">{{ request.base_url }}api/v1/jobs/{{ job_id }}</span> -H "X-API-Key: $KEY"<br>
+<br>
+<span class="c"># cancel</span>
+curl -X POST <span class="k">{{ request.base_url }}api/v1/jobs/{{ job_id }}/cancel</span> -H "X-API-Key: $KEY"
+    </div>
+    <p class="tiny muted mt-2">
+      Or subscribe once and stop polling:
+      <code>POST /api/v1/webhooks</code> with the <code>crawl.completed</code> event.
+    </p>
   </div>
 </div>
 {% endblock %}

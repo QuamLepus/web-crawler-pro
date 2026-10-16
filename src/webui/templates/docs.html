@@ -1,50 +1,112 @@
 {% extends "base.html" %}
+{% set groups = [
+  ("Auth", ["/api/auth/", "/keys"]),
+  ("Jobs", ["/api/v1/jobs"]),
+  ("Discovery", ["/api/v1/discovery"]),
+  ("Index", ["/api/v1/search-index"]),
+  ("Search", ["/api/v1/search"]),
+  ("Data", ["/api/v1/marketplace"]),
+  ("Billing", ["/api/v1/billing"]),
+  ("Webhooks", ["/api/v1/webhooks"]),
+  ("Ops", ["/healthz", "/readyz", "/metrics"])
+] %}
+
 {% block content %}
 <div class="page-head">
   <div class="crumbs"><a href="/app">Home</a><span>/</span><span>API reference</span></div>
   <div class="between">
     <div>
       <h1>API reference</h1>
-      <p class="dim">Every screen in this console is one of these calls. Nothing
-        here is console-only.</p>
+      <p class="dim">
+        Every screen in this console is one of these calls. Nothing here is
+        console-only — anything the UI can do, <code>curl</code> can do.
+      </p>
     </div>
     <div class="row">
       <a class="btn" href="/docs">OpenAPI UI</a>
       <a class="btn" href="/redoc">ReDoc</a>
-      <a class="btn btn-primary" href="/app/keys">Get an API key</a>
+      <a class="btn btn-primary" href="/app/keys">Get a key</a>
     </div>
   </div>
 </div>
 
 <div class="grid g-main">
   <div class="stack">
-    <div class="card">
-      <div class="card-head">
-        <h3>Endpoints</h3>
-        <input class="input" style="max-width:240px" placeholder="Filter…"
-               data-filter="table.data tbody tr">
+    <div class="card" data-tabs>
+      <div class="card-head" style="padding:0;border-bottom:0">
+        <div class="tabs" style="width:100%;border-bottom:0" role="tablist">
+          {% for name, _ in groups %}
+            <button class="tab" role="tab" data-tab="{{ name|lower }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ name }}</button>
+          {% endfor %}
+          <button class="tab" role="tab" data-tab="all" aria-selected="false">All</button>
+        </div>
       </div>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th data-sort>Method</th><th data-sort>Path</th><th>What it does</th></tr></thead>
-          <tbody>
-            {% for method, path, blurb in endpoints %}
-              <tr>
-                <td>
-                  <span class="badge {{ 'ok' if method == 'GET' else ('info' if method == 'POST' else 'warn') }}">{{ method }}</span>
-                </td>
-                <td class="mono small">{{ path }}</td>
-                <td class="small dim">{{ blurb }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+
+      {% for name, prefixes in groups %}
+        <div class="tabpanel" data-panel="{{ name|lower }}" role="tabpanel" {% if not loop.first %}hidden{% endif %}>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th data-sort>Method</th><th data-sort>Path</th><th>What it does</th></tr></thead>
+              <tbody>
+                {% for method, path, blurb in endpoints %}
+                  {% if path.startswith(prefixes[0]) or (prefixes|length > 1 and path.startswith(prefixes[1])) %}
+                    <tr>
+                      <td>
+                        <span class="badge {{ 'ok' if method == 'GET' else ('info' if method == 'POST' else 'warn') }}">{{ method }}</span>
+                      </td>
+                      <td class="mono small">{{ path }}</td>
+                      <td class="small dim">{{ blurb }}</td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endfor %}
+
+      <div class="tabpanel" data-panel="all" role="tabpanel" hidden>
+        <input class="input mb-2" placeholder="Filter endpoints…"
+               data-filter="table.data tbody tr" aria-label="Filter endpoints">
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th data-sort>Method</th><th data-sort>Path</th><th>What it does</th></tr></thead>
+            <tbody>
+              {% for method, path, blurb in endpoints %}
+                <tr>
+                  <td>
+                    <span class="badge {{ 'ok' if method == 'GET' else ('info' if method == 'POST' else 'warn') }}">{{ method }}</span>
+                  </td>
+                  <td class="mono small">{{ path }}</td>
+                  <td class="small dim">{{ blurb }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <div class="card card-pad">
+      <h3 class="mb-2">Errors</h3>
+      <dl class="kv small">
+        <dt><code>401</code></dt><dd class="dim">Missing or expired credentials</dd>
+        <dt><code>402</code></dt><dd class="dim">Quota exhausted — the plan ceiling or overage</dd>
+        <dt><code>404</code></dt><dd class="dim">Not yours, or not there</dd>
+        <dt><code>409</code></dt><dd class="dim">Conflict — an org or email already exists</dd>
+        <dt><code>422</code></dt><dd class="dim">Validation failed; the body says which field</dd>
+        <dt><code>429</code></dt><dd class="dim">Rate limited — honour <code>Retry-After</code></dd>
+      </dl>
+      <p class="tiny muted mt-2">
+        Every error body is <code>{"detail": "…"}</code>, which is exactly what
+        the console shows in its toasts.
+      </p>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
       <h3 class="mb-2">Authentication</h3>
-      <p class="small dim mb-2">Two ways in. Pick whichever fits the caller.</p>
       <div class="code">
 <span class="c"># long-lived key, for machines</span>
 curl <span class="k">{{ request.base_url }}api/v1/jobs</span> -H "X-API-Key: $KEY"<br>
@@ -55,26 +117,8 @@ curl <span class="k">{{ request.base_url }}api/v1/jobs</span> -H "Authorization:
     </div>
 
     <div class="card card-pad">
-      <h3 class="mb-2">Errors</h3>
-      <dl class="kv small">
-        <dt><code>401</code></dt><dd>Missing or expired credentials</dd>
-        <dt><code>402</code></dt><dd>Quota exhausted — the plan ceiling or overage</dd>
-        <dt><code>404</code></dt><dd>Not yours, or not there</dd>
-        <dt><code>409</code></dt><dd>Conflict — an org or email already exists</dd>
-        <dt><code>422</code></dt><dd>Validation failed; the body says which field</dd>
-        <dt><code>429</code></dt><dd>Rate limited — honour <code>Retry-After</code></dd>
-      </dl>
-      <p class="tiny muted mt-2">
-        Every error body looks like <code>{"detail": "…"}</code>, which is what
-        the console shows in its toasts.
-      </p>
-    </div>
-  </div>
-
-  <div class="stack">
-    <div class="card card-pad">
       <h3 class="mb-2">A complete round trip</h3>
-      <div class="code" style="max-height:420px;overflow:auto">
+      <div class="code" style="max-height:430px;overflow:auto">
 <span class="c"># 1 — create a workspace and grab a token</span>
 TOKEN=$(curl -s -X POST <span class="k">{{ request.base_url }}api/auth/signup</span> \<br>
 &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
@@ -91,7 +135,7 @@ curl -s -X POST <span class="k">{{ request.base_url }}api/v1/jobs/crawl</span> \
 &nbsp;&nbsp;-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \<br>
 &nbsp;&nbsp;-d '{"url":"https://example.com","max_pages":50}' | jq<br>
 <br>
-<span class="c"># 4 — ask your own index (free, offline-capable)</span>
+<span class="c"># 4 — query your own index (free, offline-capable)</span>
 curl -s <span class="k">"{{ request.base_url }}api/v1/search-index/query?q=solar+energy"</span> \<br>
 &nbsp;&nbsp;-H "Authorization: Bearer $TOKEN" | jq
       </div>
@@ -100,13 +144,12 @@ curl -s <span class="k">"{{ request.base_url }}api/v1/search-index/query?q=solar
     <div class="card card-pad">
       <h3 class="mb-2">SDKs</h3>
       <p class="small dim">
-        There is no official SDK yet — and that is deliberate. Every endpoint is
+        There is no official SDK, and that is deliberate: every endpoint is
         plain JSON over HTTP, so <code>curl</code>, <code>requests</code> or
         <code>fetch</code> is already enough.
       </p>
-      <a class="btn btn-block mt-2" href="https://github.com/QuamLepus/web-crawler-pro">
-        Open the repository →
-      </a>
+      <a class="btn btn-block mt-2"
+         href="https://github.com/QuamLepus/web-crawler-pro">Open the repository →</a>
     </div>
   </div>
 </div>

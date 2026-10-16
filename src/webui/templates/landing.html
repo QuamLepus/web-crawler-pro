@@ -1,117 +1,236 @@
 {% extends "base.html" %}
+{% block bodyclass %} class="land"{% endblock %}
+
 {% block body %}
 <nav class="land-nav">
-  <div class="row" style="gap:10px">
-    <span style="font-size:20px">🕷</span>
-    <b style="font-size:15px;letter-spacing:-.02em">WebCrawler<span style="color:var(--brand-600)">Pro</span></b>
-  </div>
+  <a class="row" href="/" style="gap:10px;color:#fff">
+    <span style="font-size:19px">🕷</span>
+    <b style="font-size:15px;letter-spacing:-.02em">WebCrawler<span style="color:var(--brand-300)">Pro</span></b>
+  </a>
   <div class="links">
-    <a href="#features">Features</a>
-    <a href="#how">How it works</a>
+    <a href="#what">What it does</a>
+    <a href="#pipeline">Pipeline</a>
+    <a href="#index">Own index</a>
     <a href="#pricing">Pricing</a>
     <a href="/app/docs">API</a>
   </div>
-  <div class="push row" style="gap:8px">
-    <button class="icon-btn" data-theme-toggle title="Toggle dark mode">◐</button>
+  <div class="push">
+    <button class="icon-btn" data-theme-toggle title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
     <a class="btn btn-ghost" href="/login">Sign in</a>
     <a class="btn btn-primary" href="/signup">Start free</a>
   </div>
 </nav>
 
-<section class="hero">
-  <span class="eyebrow">🕷 Your own index · no per-query bill · works offline</span>
-  <h1>Crawl the web politely.<br>Own the <em>index</em> it builds.</h1>
-  <p class="lead">
-    A production crawler, topic discovery that turns a sentence into a ranked
-    shortlist, and a search index built from free datasets — Curlie, Wikipedia,
-    Common Crawl. No Google, no SerpAPI, no quota to buy.
+{# ─────────────────────────────────────────────────────────────── hero ── #}
+<header class="hero">
+  <span class="eyebrow" data-reveal>Polite crawler · Topic discovery · Index you own</span>
+  <h1 data-reveal>
+    Crawl the web.<br>
+    <span class="grad">Keep the data. Own the index.</span>
+  </h1>
+  <p class="lead" data-reveal>
+    A distributed crawler, a cleaning and de-duplication pipeline, and a search
+    index built from openly licensed corpora — so discovery costs you disk
+    instead of a per-query bill.
   </p>
-  <div class="cta">
-    <a class="btn btn-primary btn-lg" href="/signup">Create a free workspace →</a>
-    <a class="btn btn-lg" href="/app/docs">Read the API docs</a>
+  <div class="cta" data-reveal>
+    <a class="btn btn-primary btn-lg" href="/signup">Create a workspace</a>
+    <a class="btn btn-lg" href="#what" style="background:rgba(255,255,255,.07);
+       border-color:rgba(255,255,255,.18);color:#fff">See how it works ↓</a>
   </div>
-  <div class="row-wrap mt-4" style="justify-content:center;font-size:12.5px;color:var(--text-3)">
-    <span>✓ robots.txt respected</span><span>·</span>
-    <span>✓ resumable 100M-page builds</span><span>·</span>
-    <span>✓ Apache-2.0 datasets</span><span>·</span>
-    <span>✓ $0 to start</span>
+  <div class="hero-strip" data-reveal>
+    <span><b>robots.txt</b> honoured by default</span>
+    <span><b>Redis</b> frontier, horizontally scalable</span>
+    <span><b>$0</b> per query on your own index</span>
+    <span><b>Apache-2.0</b>, self-hostable</span>
+  </div>
+</header>
+
+{# ─────────────────────────────────────────────────── what it actually is ── #}
+<section class="sect" id="what">
+  <div class="sect-head">
+    <span class="eyebrow" data-reveal>What it is</span>
+    <h2 data-reveal>Four jobs, one platform</h2>
+    <p data-reveal>
+      This is infrastructure for turning the open web into a dataset you
+      control. It is not a search engine for the public, and it is not a
+      shop — every screen maps to one of these four jobs.
+    </p>
+  </div>
+
+  <div class="grid g-4 stagger">
+    <div class="tile" data-reveal>
+      <div class="t-ico">🕷</div>
+      <h3>Crawl</h3>
+      <p>A Redis-backed frontier with per-host politeness, priority queues and
+        an optional stealth ladder for sites that need one.</p>
+      <div class="endpoint">POST /api/v1/jobs/crawl</div>
+    </div>
+    <div class="tile" data-reveal>
+      <div class="t-ico">✦</div>
+      <h3>Discover</h3>
+      <p>Describe a topic in one sentence, get a ranked shortlist of the right
+        websites — with the reasoning shown, and nothing crawled until you
+        approve.</p>
+      <div class="endpoint">POST /api/v1/discovery</div>
+    </div>
+    <div class="tile" data-reveal>
+      <div class="t-ico">🧪</div>
+      <h3>Refine</h3>
+      <p>Cleaning, language detection, PII redaction and MinHash/SimHash
+        de-duplication, exported as JSONL, CSV, Parquet or straight to
+        object storage.</p>
+      <div class="endpoint">src/pipeline/*</div>
+    </div>
+    <div class="tile" data-reveal>
+      <div class="t-ico">🗂</div>
+      <h3>Index</h3>
+      <p>BM25 with authority boosting over Curlie, Wikipedia and Common Crawl.
+        Queried locally, offline-capable, no third-party search API.</p>
+      <div class="endpoint">GET /api/v1/search-index/query</div>
+    </div>
   </div>
 </section>
 
-<section class="sect" id="features">
+{# ─────────────────────────────────────────────────────────── the pipeline ── #}
+<section class="sect" id="pipeline" style="padding-top:0">
   <div class="sect-head">
-    <h2>Everything the crawler should have had</h2>
-    <p>Eight subsystems, one API, one console. Every one of them is a real
-      module in this repository — not a marketing bullet.</p>
+    <span class="eyebrow" data-reveal>Pipeline</span>
+    <h2 data-reveal>From a seed URL to a queryable dataset</h2>
+    <p data-reveal>Seven stages, each independently runnable from the CLI and
+      each inspectable in the console.</p>
   </div>
-  <div class="grid g-4">
-    {% for icon, title, body in features %}
-      <div class="feature">
-        <div class="ico">{{ icon }}</div>
-        <h3>{{ title }}</h3>
-        <p>{{ body }}</p>
+
+  <div class="pipeline" data-reveal>
+    {% for icon, name, note in [
+      ("🌱", "Seed", "URLs, sitemaps, RSS or a topic sentence"),
+      ("🧭", "Frontier", "Priority queue, per-host politeness"),
+      ("🌐", "Fetch", "Robots-aware, retries, optional stealth"),
+      ("🧼", "Clean", "Boilerplate removal, language, PII"),
+      ("♻️", "Dedupe", "MinHash + SimHash, near-duplicate cut"),
+      ("📦", "Store", "JSONL / CSV / Parquet / object storage"),
+      ("🔍", "Index", "BM25 + authority, sharded and queryable")
+    ] %}
+      <div class="pipe-step">
+        <div class="node">{{ icon }}</div>
+        <b>{{ name }}</b>
+        <span>{{ note }}</span>
       </div>
     {% endfor %}
   </div>
-</section>
 
-<section class="sect" id="how" style="background:var(--surface);border-block:1px solid var(--border);max-width:none;padding-inline:24px">
-  <div style="max-width:var(--maxw);margin:0 auto">
-    <div class="sect-head">
-      <h2>From a sentence to a dataset</h2>
-      <p>Four steps. Each one is independently useful, and each one is a
-        documented API call.</p>
+  <div class="card mt-4" data-reveal>
+    <div class="card-head">
+      <h3>Run the whole thing from a terminal</h3>
+      <span class="badge">no console required</span>
     </div>
-    <div class="steps">
-      <div class="step">
-        <h4>Describe it</h4>
-        <p>“best budget laptops 2026” — a topic, not a list of URLs. Seeds are
-          optional.</p>
-      </div>
-      <div class="step">
-        <h4>Get a shortlist</h4>
-        <p>Ranked candidates with the reasoning shown. Preview it for free
-          before anything is crawled.</p>
-      </div>
-      <div class="step">
-        <h4>Approve and crawl</h4>
-        <p>Pick the domains you trust. Politeness, stealth and proxies are
-          handled per host.</p>
-      </div>
-      <div class="step">
-        <h4>Query or export</h4>
-        <p>JSONL, CSV, Parquet, webhooks — or ask your own index, which costs
-          nothing per query.</p>
-      </div>
-    </div>
-
-    <div class="card card-pad mt-4">
-      <div class="grid g-2">
-        <div>
-          <h3 style="margin-bottom:8px">Discovery in one request</h3>
-          <p class="dim small">No URLs. You describe the topic; the engine finds
-            the sites and explains each score.</p>
-        </div>
-        <div class="code">
-<span class="c"># 1 — preview, crawls nothing</span>
-curl -X POST <span class="k">{{ request.base_url }}api/v1/discovery/preview</span> \<br>
-&nbsp;&nbsp;-H "X-API-Key: $KEY" -H "Content-Type: application/json" \<br>
-&nbsp;&nbsp;-d '{"topic":"open source search engine","count":20}'
-        </div>
+    <div class="card-pad">
+      <div class="code">
+<span class="c"># 1 — turn a sentence into a shortlist of sites (crawls nothing)</span>
+wcp discover <span class="k">--topic</span> "solar panel installers" <span class="k">--count</span> 20 <span class="k">--preview</span><br>
+<br>
+<span class="c"># 2 — approve and crawl them</span>
+wcp crawl <span class="k">--discovery</span> disc_9f8020bd165e<br>
+<br>
+<span class="c"># 3 — build an index you own, from free datasets</span>
+wcp search-index build <span class="k">--level 0</span>          <span class="c"># ~330 MB</span><br>
+wcp search-index query <span class="k">--q</span> "photovoltaic research"
       </div>
     </div>
   </div>
 </section>
 
-<section class="sect" id="pricing">
+{# ──────────────────────────────────────────────────────────── own index ── #}
+<section class="sect" id="index" style="padding-top:0">
   <div class="sect-head">
-    <h2>Pricing that starts at zero</h2>
-    <p>The free tier is genuinely usable: a thousand pages a month is enough to
-      build and keep a real index.</p>
+    <span class="eyebrow" data-reveal>Own the index</span>
+    <h2 data-reveal>Search that costs disk, not a subscription</h2>
+    <p data-reveal>
+      Every dataset below is free to redistribute. Build once, query forever,
+      with nothing metered and nothing leaving your network.
+    </p>
   </div>
-  <div class="grid g-4">
+
+  <div class="grid g-3 stagger">
+    <div class="tile" data-reveal>
+      <div class="t-ico">🧭</div>
+      <h3>Curlie</h3>
+      <p>~2.9M curated sites in a human-maintained taxonomy. CC-BY.</p>
+      <div class="endpoint">curlie.org — monthly</div>
+    </div>
+    <div class="tile" data-reveal>
+      <div class="t-ico">📖</div>
+      <h3>Wikipedia</h3>
+      <p>7.25M articles of clean, densely linked prose. CC-BY-SA.</p>
+      <div class="endpoint">dumps.wikimedia.org</div>
+    </div>
+    <div class="tile" data-reveal>
+      <div class="t-ico">🌊</div>
+      <h3>Common Crawl</h3>
+      <p>2.17B pages on an AWS Open Data bucket — no egress charge, no key.</p>
+      <div class="endpoint">data.commoncrawl.org</div>
+    </div>
+  </div>
+
+  <div class="card mt-4" data-reveal>
+    <div class="card-head"><h3>How ranking works</h3><span class="badge">no black box</span></div>
+    <div class="card-pad grid g-3">
+      <div>
+        <h4>1 · BM25 shortlist</h4>
+        <p class="small dim">Classic term-frequency scoring over shards, capped
+          term frequency so a keyword-stuffed page cannot win.</p>
+      </div>
+      <div>
+        <h4>2 · Authority boost</h4>
+        <p class="small dim">Open PageRank (0–10) multiplies the score, so a
+          university page outranks a scraper of that university.</p>
+      </div>
+      <div>
+        <h4>3 · Optional rerank</h4>
+        <p class="small dim">An encoder reorders the shortlist. No model
+          installed? The engine says so and hands you BM25 results.</p>
+      </div>
+    </div>
+    <div class="card-foot">
+      <code>score = bm25 × (1 + authority_weight × authority / 10)</code>
+      — and it is spelled against your own vocabulary, so
+      <code>kubernetes</code> never becomes <code>kubernets</code>.
+    </div>
+  </div>
+</section>
+
+{# ──────────────────────────────────────────────────────────── counters ── #}
+<section class="sect" style="padding-top:0">
+  <div class="counters" data-reveal>
+    <div class="counter">
+      <div class="n"><span data-count="0" data-decimals="0">0</span><span class="suf">¢</span></div>
+      <div class="l">Per query, forever</div>
+    </div>
+    <div class="counter">
+      <div class="n"><span data-count="32">0</span></div>
+      <div class="l">Documented endpoints</div>
+    </div>
+    <div class="counter">
+      <div class="n"><span data-count="3">0</span></div>
+      <div class="l">Free corpora indexed</div>
+    </div>
+    <div class="counter">
+      <div class="n"><span data-count="238">0</span></div>
+      <div class="l">Tests in the suite</div>
+    </div>
+  </div>
+</section>
+
+{# ───────────────────────────────────────────────────────────── pricing ── #}
+<section class="sect" id="pricing" style="padding-top:0">
+  <div class="sect-head">
+    <span class="eyebrow" data-reveal>Pricing</span>
+    <h2 data-reveal>You are buying pages and storage</h2>
+    <p data-reveal>Not queries. The index is already paid for.</p>
+  </div>
+  <div class="grid g-4 stagger">
     {% for plan in plans %}
-      <div class="plan {% if plan.best %}best{% endif %}">
+      <div class="plan {% if plan.best %}best{% endif %}" data-reveal>
         {% if plan.best %}<span class="ribbon">Most popular</span>{% endif %}
         <h3>{{ plan.name }}</h3>
         <p class="small muted">{{ plan.blurb }}</p>
@@ -119,68 +238,17 @@ curl -X POST <span class="k">{{ request.base_url }}api/v1/discovery/preview</spa
           {% if plan.price is none %}Custom{% else %}${{ plan.price }}<small>/mo</small>{% endif %}
         </div>
         <ul>
-          {% for f in plan.features %}
-            <li><span class="tick">✓</span><span>{{ f }}</span></li>
-          {% endfor %}
+          {% for f in plan.features %}<li><span class="tick">✓</span><span>{{ f }}</span></li>{% endfor %}
         </ul>
-        <a class="btn {% if plan.best %}btn-primary{% endif %} btn-block"
-           href="/signup?plan={{ plan.id }}">
-          {% if plan.price is none %}Talk to us{% else %}Start with {{ plan.name }}{% endif %}
+        <a class="btn {% if plan.best %}btn-primary{% else %}btn-block{% endif %} btn-block"
+           href="/signup?plan={{ plan.id }}"
+           style="{% if not plan.best %}background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:#fff{% endif %}">
+          {% if plan.price is none %}Talk to us{% else %}Choose {{ plan.name }}{% endif %}
         </a>
       </div>
     {% endfor %}
   </div>
 </section>
 
-<section class="sect">
-  <div class="card card-pad" style="text-align:center;padding:44px 24px">
-    <h2 style="font-size:26px;margin-bottom:10px">Stop renting someone else's search box</h2>
-    <p class="dim" style="max-width:560px;margin:0 auto 22px">
-      Curlie, Open PageRank and Common Crawl are free and openly licensed. Build
-      the index once and every query after that is yours.
-    </p>
-    <div class="row-wrap" style="justify-content:center">
-      <a class="btn btn-primary btn-lg" href="/signup">Create a free workspace</a>
-      <a class="btn btn-lg" href="/app/search">Try a search first</a>
-    </div>
-  </div>
-</section>
-
-<footer class="land-foot">
-  <div class="cols">
-    <div>
-      <div class="row" style="gap:9px;margin-bottom:10px">
-        <span style="font-size:19px">🕷</span>
-        <b>WebCrawler<span style="color:var(--brand-600)">Pro</span></b>
-      </div>
-      <p class="small muted" style="max-width:300px">
-        A polite, resumable crawler with topic discovery and an index you own.
-        Built by SWADHIN.
-      </p>
-    </div>
-    <div>
-      <h5>Product</h5>
-      <a href="/app/search">Search</a>
-      <a href="/app/crawl">Crawl jobs</a>
-      <a href="/app/discovery">Discovery</a>
-      <a href="/app/marketplace">Marketplace</a>
-    </div>
-    <div>
-      <h5>Developers</h5>
-      <a href="/app/docs">API reference</a>
-      <a href="/docs">OpenAPI</a>
-      <a href="/app/keys">API keys</a>
-      <a href="/app/settings">Webhooks</a>
-    </div>
-    <div>
-      <h5>Company</h5>
-      <a href="/pricing">Pricing</a>
-      <a href="/login">Sign in</a>
-      <a href="https://github.com/QuamLepus/web-crawler-pro">GitHub</a>
-    </div>
-  </div>
-  <p class="tiny muted center mt-4">
-    Free datasets: Curlie (CC-BY) · Wikipedia (CC-BY-SA) · Common Crawl (AWS Open Data).
-  </p>
-</footer>
+{% include "partials/foot.html" %}
 {% endblock %}

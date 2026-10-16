@@ -1,119 +1,116 @@
 {% extends "base.html" %}
-{% set job_items = (jobs.data or {}).get('items', []) if jobs else [] %}
-{% set usage_data = (usage.data if usage and usage.ok else {}) %}
-{% set index_data = (index.data if index and index.ok else {}) %}
-{% set key_list = (keys.data if keys and keys.ok else []) %}
+{% set u = usage.data if usage and usage.ok else {} %}
+{% set jobs_data = jobs.data if jobs and jobs.ok else {} %}
+{% set job_rows = jobs_data.get('items', []) if jobs_data is mapping else [] %}
+{% set idx = index.data if index and index.ok else {} %}
+{% set key_list = keys.data if keys and keys.ok else [] %}
+{% set remaining = (u.get('quota_remaining_pct') or 100) %}
 
 {% block content %}
 <div class="page-head">
   <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Dashboard</span></div>
   <div class="between">
     <div>
-      <h1>Good to see you{% if me and me.email %}, {{ me.email.split('@')[0] }}{% endif %}</h1>
-      <p class="dim small">Everything your workspace is doing right now.</p>
+      <h1>Dashboard</h1>
+      <p class="dim">
+        Crawl the web, discover sites from a topic, refine the result into a
+        dataset, and query an index you own. Everything below is one of those
+        four jobs.
+      </p>
     </div>
     <div class="row">
-      <a class="btn" href="/app/discovery">✦ Discover a topic</a>
-      <a class="btn btn-primary" href="/app/crawl">+ New crawl</a>
+      <a class="btn" href="/app/crawl">New crawl</a>
+      <a class="btn btn-primary" href="/app/discovery">Discover sites</a>
     </div>
   </div>
 </div>
 
-{# ------------------------------------------------------------ stat cards -- #}
-<div class="grid g-4 mb-3">
-  <div class="card stat">
-    <div class="label">Pages crawled</div>
-    <div class="value">{{ usage_data.get('pages_crawled', 0)|num }}</div>
-    <div class="delta up">this period · plan {{ usage_data.get('plan', 'free') }}</div>
-    <div class="spark">{% include "partials/spark.html" %}</div>
-  </div>
-  <div class="card stat">
-    <div class="label">Quota remaining</div>
-    <div class="value">{{ (usage_data.get('quota_remaining_pct', 0) or 0)|pct }}</div>
-    <div class="meter mt-2 {{ 'danger' if (usage_data.get('quota_remaining_pct', 1) or 1) < 0.2 else ('warn' if (usage_data.get('quota_remaining_pct', 1) or 1) < 0.5 else 'ok') }}">
-      <i style="width:{{ (usage_data.get('quota_remaining_pct', 0) or 0) * 100 if (usage_data.get('quota_remaining_pct', 0) or 0) <= 1 else (usage_data.get('quota_remaining_pct', 0) or 0) }}%"></i>
+{# ── what you can do here: four jump cards ─────────────────────────────── #}
+<div class="grid g-4 mb-4 stagger">
+  <a class="card card-pad hoverable" href="/app/crawl" style="color:inherit">
+    <div class="row" style="gap:10px">
+      <span style="font-size:20px">🕷</span>
+      <b>Crawl</b>
     </div>
-    <div class="delta muted small mt-1">{{ usage_data.get('requests', 0)|num }} requests recorded</div>
-  </div>
-  <div class="card stat">
-    <div class="label">Own index</div>
-    <div class="value">{{ index_data.get('docs', 0)|num }}</div>
-    <div class="delta muted">{{ index_data.get('shards', 0) }} shard(s) · {{ index_data.get('terms', 0)|num }} terms</div>
-    <div class="mt-2">
-      {% if index_data.get('ready') %}
-        <span class="badge ok"><span class="dot"></span>ready</span>
-      {% else %}
-        <span class="badge warn">not built</span>
-      {% endif %}
-      <a class="btn btn-sm btn-ghost" href="/app/index">Manage →</a>
+    <p class="small dim mt-1">Queue a job, watch progress, cancel, export.</p>
+  </a>
+  <a class="card card-pad hoverable" href="/app/discovery" style="color:inherit">
+    <div class="row" style="gap:10px">
+      <span style="font-size:20px">✦</span>
+      <b>Discover</b>
     </div>
-  </div>
-  <div class="card stat">
-    <div class="label">Overage this period</div>
-    <div class="value">{{ usage_data.get('overage_cost_usd_cents', 0)|money }}</div>
-    <div class="delta muted">{{ usage_data.get('storage_bytes', 0)|bytes }} stored</div>
-    <div class="mt-2"><a class="btn btn-sm btn-ghost" href="/app/billing">See invoices →</a></div>
-  </div>
+    <p class="small dim mt-1">One sentence in, a ranked site shortlist out.</p>
+  </a>
+  <a class="card card-pad hoverable" href="/app/index" style="color:inherit">
+    <div class="row" style="gap:10px">
+      <span style="font-size:20px">🗂</span>
+      <b>Index</b>
+    </div>
+    <p class="small dim mt-1">BM25 over free corpora. No per-query bill.</p>
+  </a>
+  <a class="card card-pad hoverable" href="/app/marketplace" style="color:inherit">
+    <div class="row" style="gap:10px">
+      <span style="font-size:20px">🛒</span>
+      <b>Exchange</b>
+    </div>
+    <p class="small dim mt-1">List a dataset, post a bounty, deliver signed.</p>
+  </a>
 </div>
 
 <div class="grid g-main">
   <div class="stack">
 
-    {# -------------------------------------------------------- quick start -- #}
-    {% if not job_items and not index_data.get('ready') %}
-      <div class="card card-pad">
-        <h3>Three ways to start</h3>
-        <p class="dim small mb-3">Nothing here yet — pick the one that fits what you are trying to do.</p>
-        <div class="grid g-3">
-          <a class="feature" href="/app/discovery" style="text-decoration:none">
-            <div class="ico">✦</div>
-            <h3>Describe a topic</h3>
-            <p>“renewable energy research” → a ranked shortlist of sites.</p>
-          </a>
-          <a class="feature" href="/app/crawl" style="text-decoration:none">
-            <div class="ico">🕷</div>
-            <h3>Crawl a known site</h3>
-            <p>Give one URL and a page budget. Politeness is automatic.</p>
-          </a>
-          <a class="feature" href="/app/index" style="text-decoration:none">
-            <div class="ico">🗂</div>
-            <h3>Build the index</h3>
-            <p>~330 MB of free datasets, then query with no per-search bill.</p>
-          </a>
+    {# ── the numbers that matter ────────────────────────────────────────── #}
+    <div class="grid g-4">
+      <div class="card stat">
+        <div class="label">Pages crawled</div>
+        <div class="value">{{ u.get('pages_crawled', 0)|num }}</div>
+        <div class="delta muted">{{ u.get('requests', 0)|num }} API requests</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Quota left</div>
+        <div class="value">{{ remaining|pct }}</div>
+        <div class="meter mt-2 {{ 'danger' if remaining < 20 else ('warn' if remaining < 50 else 'ok') }}">
+          <i style="width:{{ remaining }}%"></i>
         </div>
       </div>
-    {% endif %}
+      <div class="card stat">
+        <div class="label">Indexed docs</div>
+        <div class="value">{{ idx.get('docs', 0)|num }}</div>
+        <div class="delta muted">{{ idx.get('shards', 0) }} shards · {{ idx.get('terms', 0)|num }} terms</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Overage</div>
+        <div class="value">{{ u.get('overage_cost_usd_cents', 0)|money }}</div>
+        <div class="delta muted">period {{ u.get('period', '—') }}</div>
+      </div>
+    </div>
 
-    {# ----------------------------------------------------------- job table -- #}
+    {# ── recent jobs ────────────────────────────────────────────────────── #}
     <div class="card">
       <div class="card-head">
         <h3>Recent crawl jobs</h3>
-        <a class="btn btn-sm btn-ghost" href="/app/crawl">All jobs →</a>
+        <a class="btn btn-sm" href="/app/crawl">All jobs →</a>
       </div>
-      {% if job_items %}
+      {% if job_rows %}
         <div class="table-wrap">
           <table class="data">
-            <thead>
-              <tr>
-                <th data-sort>Job</th><th data-sort>State</th>
-                <th data-sort class="num">Pages</th><th data-sort>Started</th><th></th>
-              </tr>
-            </thead>
+            <thead><tr>
+              <th data-sort>Job</th><th data-sort>State</th><th>Target</th>
+              <th data-sort class="num">Pages</th><th data-sort>Created</th>
+            </tr></thead>
             <tbody>
-              {% for job in job_items %}
-                {% set pct = ((job.pages_done or 0) / job.max_pages * 100) if job.max_pages else 0 %}
+              {% for job in job_rows %}
                 <tr>
-                  <td>
-                    <a href="/app/crawl/{{ job.job_id }}" class="mono">{{ job.job_id[:14] }}…</a>
-                    <div class="tiny muted truncate" style="max-width:280px">{{ job.url }}</div>
+                  <td class="mono small">
+                    <a href="/app/crawl/{{ job.get('job_id') }}">{{ (job.get('job_id') or '')[:14] }}</a>
                   </td>
                   <td>{% include "partials/state.html" %}</td>
-                  <td class="num tar">
-                    {{ job.pages_done or 0 }}/{{ job.max_pages }}
-                    <div class="meter mt-1" style="width:80px"><i style="width:{{ [pct, 100]|min }}%"></i></div>
+                  <td class="truncate" style="max-width:280px">
+                    <span class="small dim">{{ job.get('url') }}</span>
                   </td>
-                  <td class="nowrap small muted">{{ job.created_at|ago }}</td>
-                  <td class="right"><a class="btn btn-sm" href="/app/crawl/{{ job.job_id }}">Open</a></td>
+                  <td class="num tar">{{ job.get('pages_done', 0)|num }} / {{ job.get('max_pages', 0)|num }}</td>
+                  <td class="small muted nowrap">{{ (job.get('created_at') or '')|ago }}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -123,98 +120,100 @@
         <div class="empty">
           <div class="ico">🕷</div>
           <h3>No crawl jobs yet</h3>
-          <p>Point it at one URL, or describe a topic and let the engine find the sites for you.</p>
-          <a class="btn btn-primary" href="/app/crawl">Start your first crawl</a>
+          <p>Two ways to begin: point the crawler at a URL, or describe what you
+            are looking for and let it find the sites.</p>
+          <div class="row" style="justify-content:center">
+            <a class="btn btn-primary" href="/app/crawl">Crawl a URL</a>
+            <a class="btn" href="/app/discovery">Describe a topic</a>
+          </div>
         </div>
       {% endif %}
     </div>
 
-    {# -------------------------------------------------------------- index -- #}
+    {# ── index status ───────────────────────────────────────────────────── #}
     <div class="card">
       <div class="card-head">
-        <h3>Your own search index</h3>
-        <span class="badge {% if index_data.get('ready') %}ok{% else %}warn{% endif %}">
-          level {{ index_data.get('level', 0) }}
-        </span>
+        <h3>Your search index</h3>
+        <a class="btn btn-sm" href="/app/index">Manage →</a>
       </div>
       <div class="card-pad">
-        {% if index_data.get('ready') %}
-          <div class="grid g-3">
-            <div><div class="tiny muted">DOCUMENTS</div><div style="font-size:20px;font-weight:650">{{ index_data.get('docs',0)|num }}</div></div>
-            <div><div class="tiny muted">SHARDS</div><div style="font-size:20px;font-weight:650">{{ index_data.get('shards',0) }}</div></div>
-            <div><div class="tiny muted">TERMS</div><div style="font-size:20px;font-weight:650">{{ index_data.get('terms',0)|num }}</div></div>
+        {% if idx.get('docs') %}
+          <div class="between mb-2">
+            <div>
+              <b>{{ idx.get('docs')|num }} documents</b>
+              <div class="tiny muted">{{ idx.get('shards') }} shards · reranker: {{ idx.get('reranker', 'none') }}</div>
+            </div>
+            <a class="btn btn-sm btn-primary" href="/app/search">Query it →</a>
           </div>
-          {% if index_data.get('sources') %}
-            <div class="divider"></div>
-            <div class="row-wrap">
-              {% for src, n in index_data.get('sources', {}).items() %}
-                <span class="badge brand">{{ src }} · {{ n|num }}</span>
+          {% if idx.get('sources') %}
+            <div class="stack-sm">
+              {% set total = idx.get('docs') or 1 %}
+              {% for src, n in idx.get('sources', {}).items() %}
+                <div>
+                  <div class="between tiny">
+                    <span>{{ src }}</span><span class="muted">{{ n|num }}</span>
+                  </div>
+                  <div class="meter mt-1"><i style="width:{{ (n / total * 100)|round(1) }}%"></i></div>
+                </div>
               {% endfor %}
             </div>
           {% endif %}
-          <div class="row mt-3">
-            <a class="btn btn-primary" href="/app/search">Search it →</a>
-            <a class="btn" href="/app/index">Build status</a>
-          </div>
         {% else %}
-          <div class="alert warn">
-            <span class="ico">!</span>
-            <span>No index built yet. Level 0 needs about <b>330 MB</b> of free
-              datasets and gives you a working, offline-capable search engine
-              with no per-query cost.
-              <a href="/app/index">See the levels →</a></span>
+          <div class="empty" style="padding:26px">
+            <div class="ico">🗂</div>
+            <h3>Not built yet</h3>
+            <p>Level 0 downloads about 330 MB of openly licensed data and gives
+              you a working index over ~1M curated sites. It costs disk, nothing else.</p>
+            <a class="btn btn-primary" href="/app/index">See what it takes</a>
           </div>
         {% endif %}
       </div>
     </div>
   </div>
 
-  {# ------------------------------------------------------------ side rail -- #}
+  {# ── right rail ──────────────────────────────────────────────────────── #}
   <div class="stack">
     <div class="card card-pad">
-      <h3 class="mb-2">Quick search</h3>
+      <h3 class="mb-2">Quick query</h3>
       <form action="/app/search" method="get">
         <div class="input-group">
           <span class="ico-lead">🔍</span>
-          <input class="input" name="q" placeholder="solar energy research">
+          <input class="input" name="q" placeholder="solar panels" autocomplete="off">
         </div>
-        <button class="btn btn-primary btn-block mt-2">Search the index</button>
+        <button class="btn btn-block mt-2">Search the index</button>
       </form>
-      <div class="divider"></div>
-      <div class="tiny muted mb-1">TRY</div>
-      <div class="row-wrap">
-        <a class="chip" href="/app/search?q=open+source+software">open source software</a>
-        <a class="chip" href="/app/search?q=renewable+energy">renewable energy</a>
-        <a class="chip" href="/app/search?q=site%3A.edu">site:.edu</a>
-      </div>
-    </div>
-
-    <div class="card card-pad">
-      <h3 class="mb-2">API keys</h3>
-      {% if key_list %}
-        <ul class="stack-sm">
-          {% for k in key_list[:4] %}
-            <li class="between">
-              <span class="mono small truncate">{{ k.get('key_id', k.get('name','key')) }}</span>
-              <span class="badge">{{ k.get('scopes')|join(', ') if k.get('scopes') else '—' }}</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="small muted">No keys yet. Create one to script against the API.</p>
-      {% endif %}
-      <a class="btn btn-block mt-2" href="/app/keys">Manage keys</a>
-    </div>
-
-    <div class="card card-pad">
-      <h3 class="mb-2">How the money works</h3>
-      <p class="small dim">
-        Crawling costs compute; searching your own index costs nothing per
-        query. The datasets behind it — Curlie, Wikipedia, Common Crawl — are
-        free and openly licensed, so the marginal cost of a bigger index is
-        disk, not a vendor invoice.
+      <p class="tiny muted mt-2">
+        Searches what you have indexed — not the open web.
       </p>
-      <a class="btn btn-block mt-2" href="/app/billing">Usage and invoices</a>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Your credentials</h3>
+      {% if key_list %}
+        <div class="stack-sm">
+          {% for k in key_list[:3] %}
+            <div class="between">
+              <span class="mono small truncate">{{ k.get('name') }}</span>
+              <span class="tiny muted">{{ (k.get('scopes') or [])|join(', ') }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        <a class="btn btn-block mt-2" href="/app/keys">Manage keys</a>
+      {% else %}
+        <p class="small dim">No API keys yet. Scripts and CI need one.</p>
+        <a class="btn btn-block mt-2" href="/app/keys">Create a key</a>
+      {% endif %}
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">What costs money</h3>
+      <ul class="stack-sm small dim" style="list-style:none;padding:0">
+        <li><b>Pages fetched</b> — bandwidth, proxies, storage.</li>
+        <li><b>Storage</b> — how long you keep the output.</li>
+        <li><b>Tokens</b> — if you run extraction or RAG.</li>
+        <li><b>Nothing per query</b> — the index is already paid for.</li>
+      </ul>
+      <a class="btn btn-block mt-2" href="/app/billing">Usage &amp; billing</a>
     </div>
   </div>
 </div>

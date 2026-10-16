@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="WebCrawler Pro — crawl the web politely, discover sites from a topic sentence, and run your own search index.">
+<meta name="description" content="WebCrawler Pro — a distributed web crawler, topic-discovery engine and training-data pipeline with a search index you own outright.">
+<meta name="color-scheme" content="light dark">
 <title>{{ title }}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕷️</text></svg>">
-<link rel="stylesheet" href="/static/app.css?v=2">
+<link rel="stylesheet" href="/static/app.css?v=3">
 <script>
   /* Set the theme before first paint so the page never flashes the wrong one. */
   try {
@@ -19,26 +20,26 @@
 </script>
 {% block head %}{% endblock %}
 </head>
-<body>
+<body{% block bodyclass %}{% endblock %}>
 {% block body %}
 <div class="app">
   <aside class="sidebar">
-    <div class="brand">
+    <a class="brand" href="/app" style="color:inherit">
       <mark>🕷</mark>
-      <span><b>WebCrawler</b><small>Pro</small></span>
-    </div>
-    <nav class="nav">
+      <span><b>WebCrawler</b><small>Crawl · Discover · Index</small></span>
+    </a>
+    <nav class="nav" aria-label="Console">
       {% for group in nav %}
         <div class="nav-label">{{ group.group }}</div>
         {% for item in group.pages %}
-          <a href="{{ item.href }}" {% if page == item.key %}class="active"{% endif %}>
+          <a href="{{ item.href }}" {% if page == item.key %}class="active" aria-current="page"{% endif %}>
             <span class="ico">{{ item.icon }}</span><span>{{ item.label }}</span>
           </a>
         {% endfor %}
       {% endfor %}
     </nav>
     <div class="side-foot">
-      <button data-theme-toggle title="Toggle dark mode">◐<span>Theme</span></button>
+      <button type="button" data-theme-toggle title="Toggle dark mode">◐<span>Theme</span></button>
       <a href="/app/docs">📘<span>API reference</span></a>
       <form method="post" action="/logout" style="margin:0">
         <button type="submit">⎋<span>Sign out</span></button>
@@ -48,12 +49,16 @@
 
   <div class="main">
     <header class="topbar">
-      <button class="icon-btn" data-sidebar-toggle title="Collapse sidebar">☰</button>
-      <button class="icon-btn" data-palette title="Search pages (Ctrl+K)">⌕</button>
+      <button class="icon-btn" data-sidebar-toggle title="Collapse sidebar" aria-label="Collapse sidebar">☰</button>
+      <button class="icon-btn" data-palette title="Jump to a page (Ctrl+K)" aria-label="Search pages">⌕</button>
+      {# Always answer "what is this thing?" — one glance at the topbar. #}
+      <span class="badge brand nowrap" title="What this platform does">
+        Crawler · Discovery · Own index
+      </span>
       <div class="spacer"></div>
       <div class="row" style="gap:8px">
         <span class="badge ok"><span class="dot live"></span>API online</span>
-        <button class="icon-btn" data-theme-toggle title="Toggle dark mode">◐</button>
+        <button class="icon-btn" data-theme-toggle title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
         <div class="avatar" title="{{ me.email if me else 'guest' }}">
           {{ (me.email[0] if me and me.email else '?')|upper }}
         </div>
@@ -62,20 +67,23 @@
 
     <main class="content">
       {% if flash %}
-        <div class="alert {{ 'ok' if flash_kind == 'ok' else ('warn' if flash_kind == 'warn' else 'danger') }} mb-3">
+        <div class="alert {{ 'ok' if flash_kind == 'ok' else ('warn' if flash_kind == 'warn' else 'danger') }} mb-3"
+             role="status" style="animation:fadeUp 300ms var(--ease-out)">
           <span class="ico">{{ '✓' if flash_kind == 'ok' else ('!' if flash_kind == 'warn' else '✕') }}</span>
           <span>{{ flash }}</span>
         </div>
       {% endif %}
       {% for e in errors %}
-        <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ e }}</span></div>
+        <div class="alert danger mb-3" role="alert">
+          <span class="ico">✕</span><span>{{ e }}</span>
+        </div>
       {% endfor %}
       {% block content %}{% endblock %}
     </main>
   </div>
 </div>
 {% endblock %}
-<script src="/static/app.js?v=2" defer></script>
+<script src="/static/app.js?v=3" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -25,6 +25,12 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest fakeredis[lua] ruff
+      - name: Build the optional native tokeniser
+        # Plain C, no Python headers needed. If the runner ever loses its
+        # compiler the step exits 0 and the tests fall back to the Python path.
+        run: ./scripts/build-native.sh
+      - name: Tokeniser equivalence + benchmark
+        run: python scripts/bench-tokenizer.py
       - name: Lint (ruff)
         run: ruff check src workers tests || true
       - name: Unit tests

@@ -162,7 +162,7 @@ web-crawler-pro/
 │   ├── prometheus.yml
 │   └── k8s/manifests/               # redis, worker Deployment + HPA, dashboard + Ingress
 ├── .github/workflows/ci.yml         # test job (Redis service) + matrix image builds
-└── tests/                           # 236 tests, fakeredis-backed, no services required
+└── tests/                           # 365 tests, fakeredis-backed, no services required
 ```
 
 ---
@@ -177,7 +177,7 @@ Requires **Python 3.11+** (CI runs 3.12).
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                      # edit as needed
-pytest                                    # 236 tests, fakeredis-backed, no services required
+pytest                                    # 365 tests, fakeredis-backed, no services required
 python main.py                            # quick crawl of https://example.com
 ```
 
@@ -248,7 +248,7 @@ s.search("best data ingestion tools", top_k=5)
 
 ### 7. CI/CD
 
-`.github/workflows/ci.yml` runs lint + pytest (236 tests) against a real Redis service container on Python 3.12, then builds & pushes all four Docker targets (`worker`, `crawler`, `dashboard`, `worker-stealth`) to GHCR on merges to `main`.
+`.github/workflows/ci.yml` runs lint + pytest (365 tests) against a real Redis service container on Python 3.12, then builds & pushes all four Docker targets (`worker`, `crawler`, `dashboard`, `worker-stealth`) to GHCR on merges to `main`.
 
 ---
 
@@ -272,11 +272,11 @@ build step, no CDN:
 |---|---|
 | `/` `/pricing` | landing page and plans, rendered server-side |
 | `/app` | dashboard: quota, recent jobs, index size |
-| `/app/search` | Google-shaped search over **your own** index |
+| `/app/search` | query workbench over **your own** index: levels, spelling, reranker |
 | `/app/crawl` | crawl jobs, new-job modal, live progress |
 | `/app/discovery` | topic → candidate shortlist → approve → crawl |
 | `/app/index` | own-index stats, per-source shares, build commands |
-| `/app/marketplace` | Amazon-style dataset grid + bounties |
+| `/app/marketplace` | catalogue of datasets our own crawlers produced, plus bounties |
 | `/app/keys` | create and revoke API keys (shown once) |
 | `/app/billing` | usage meters, invoice lines, plan comparison |
 | `/app/settings` | webhooks, identity, environment |
@@ -294,6 +294,12 @@ Three rules shape it:
 * **It works unplugged.** One stylesheet, one script, system fonts. Set
   `WCP_WEBUI=0` (or omit `jinja2`) for a pure-API deployment and `/` turns back
   into the JSON index.
+* **It is fast on the wire, not just in Python.** `src/webui/speed.py` gzips
+  HTML, answers `If-None-Match` with a bodiless `304`, and marks `/static/*`
+  immutable for a year (every reference carries `?v=`, so a change can never be
+  shadowed by a cached copy). No response cache: every page shows one tenant's
+  own numbers, and a shared cache is one bad key away from showing them to
+  somebody else.
 
 Then:
 
@@ -675,6 +681,36 @@ artifact.
 | Spell | `src/search_index/spell.py` | reduced SymSpell over the index vocabulary |
 | Incremental | `src/search_index/incremental.py` | SQLite content-hash tracker: new / unchanged / changed |
 | Provider | `src/search_index/provider.py` | `OwnIndexProvider`, a drop-in `SearchProvider` |
+| Tokeniser | `src/search_index/text.py` | `analyze()` — the hot loop; see below |
+
+### The tokeniser's optional C fast path
+
+`analyze()` runs once per indexed document, and a Common Crawl snapshot is
+billions of documents. `src/search_index/wcpfast.c` is the same loop in C,
+called through `ctypes`:
+
+```bash
+./scripts/build-native.sh          # needs a C compiler; entirely optional
+python scripts/bench-tokenizer.py  # proves the two paths agree, then measures
+```
+
+Measured on this tree: **4.3–4.5× faster** (~18k → ~80k documents/second).
+Three properties matter more than the multiplier:
+
+* **It cannot change an answer.** The library is ASCII-only. The first byte
+  above `0x7F` makes it decline and Python does the work, so Bengali, Arabic and
+  accented Latin keep the Unicode-correct path and the results they always had.
+* **It cannot drift.** The stopword set and the suffix rules are handed to it
+  from `text.py` at configure time — there is no second copy to fall out of
+  sync.
+* **It is genuinely optional.** No compiler, no file, or a decline: every call
+  returns `None` and the Python path runs. `tests/test_native_tokenizer.py`
+  checks the fallback unconditionally and runs the comparison only when the
+  library has been built.
+
+A plain C ABI rather than a CPython extension module, because that needs no
+Python headers at build time (slim images without `python3-dev` work fine) and
+no rebuild per interpreter version.
 
 **Zero new hard dependencies** — numpy (already present) and the standard
 library. Phrases are verified against stored text instead of indexed with
@@ -752,9 +788,11 @@ Environment variables may be given bare (`REDIS_URL`) or with a `CRAWLER_` prefi
 ## 🧪 Testing
 
 ```bash
-pytest                      # 170 tests
+pytest                                          # 365 tests
 pytest -q tests/test_search_index.py           # own search index, fully offline
 pytest -q tests/test_search_index_advanced.py  # rerank + spell + incremental refresh
+pytest -q tests/test_native_tokenizer.py       # C tokeniser vs Python, must agree
+pytest -q tests/test_webui.py                  # console, driven like a browser
 pytest -q tests/test_worker_jobs.py tests/test_saas_billing.py
 ruff check src workers tests
 ```

@@ -1,149 +1,174 @@
 {% extends "base.html" %}
-{% set job_items = (jobs.data or {}).get('items', jobs.data if jobs and jobs.data is sequence else []) if jobs else [] %}
-{% set preview_hits = (preview or {}).get('candidates', (preview or {}).get('sites', [])) if preview else [] %}
+{% set job_rows = jobs|rows %}
 
 {% block content %}
 <div class="page-head">
   <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Topic discovery</span></div>
-  <h1>Topic discovery</h1>
-  <p class="dim">Describe what you want in a sentence. Get a ranked shortlist of
-    websites — with the reason each one was chosen.</p>
-</div>
-
-<div class="card card-pad mb-3">
-  <form method="post" action="/app/discovery" class="stack">
-    <div class="field">
-      <label for="topic">Topic</label>
-      <div class="input-group">
-        <span class="ico-lead">✦</span>
-        <input class="input" id="topic" name="topic" required
-               placeholder="best budget laptops 2026"
-               value="{{ topic or '' }}" data-autofocus>
-      </div>
-      <span class="hint">A sentence, not a URL. Two words is enough to start.</span>
+  <div class="between">
+    <div>
+      <h1>Topic discovery</h1>
+      <p class="dim">
+        Describe what you want in one sentence and a number. The engine searches,
+        ranks what it finds into a shortlist of distinct websites, and shows its
+        reasoning — then waits for you before crawling anything.
+      </p>
     </div>
-
-    <div class="grid g-3">
-      <div class="field">
-        <label for="count">How many websites</label>
-        <input class="input" id="count" name="count" type="number"
-               value="{{ count or 10 }}" min="1" max="500">
-      </div>
-      <div class="field">
-        <label for="seeds">Seeds you already trust <span class="muted">(optional)</span></label>
-        <input class="input" id="seeds" name="seeds"
-               placeholder="https://rtings.com, https://wirecutter.com">
-      </div>
-      <div class="field">
-        <label for="pages">Max pages per site</label>
-        <input class="input" id="pages" name="max_pages_per_site" type="number"
-               value="5" min="1" max="10000">
-      </div>
-    </div>
-
-    <div class="row-wrap">
-      <div class="check">
-        <input type="checkbox" id="auto" name="auto">
-        <label for="auto">Crawl immediately after ranking
-          <span class="muted">— otherwise you review the shortlist first</span></label>
-      </div>
-      <div class="push row">
-        <button class="btn" name="preview" value="1">Preview (crawls nothing)</button>
-        <button class="btn btn-primary">Start discovery</button>
-      </div>
-    </div>
-  </form>
-</div>
-
-{% if preview %}
-  <div class="card mb-3">
-    <div class="card-head">
-      <h3>Preview — {{ preview_hits|length }} candidate(s)</h3>
-      <span class="badge info">dry run</span>
-    </div>
-    {% if preview_hits %}
-      <div class="table-wrap">
-        <table class="data">
-          <thead>
-            <tr>
-              <th data-sort>Domain</th><th data-sort class="num">Score</th>
-              <th>Why it was chosen</th><th>Provider</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in preview_hits %}
-              <tr>
-                <td class="mono">{{ c.get('domain') or c.get('url') }}</td>
-                <td class="num tar">{{ '{:.3f}'.format(c.get('score', 0)) if c.get('score') is number else (c.get('score') or '—') }}</td>
-                <td class="small dim">{{ c.get('reason') or c.get('why') or '—' }}</td>
-                <td><span class="badge">{{ c.get('provider') or 'own' }}</span></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <div class="card-foot small muted">
-        Nothing has been crawled. Start discovery to turn this shortlist into a job.
-      </div>
-    {% else %}
-      <div class="empty">
-        <div class="ico">✦</div>
-        <h3>Nothing came back</h3>
-        <p>Try a broader topic, or add a seed URL you already trust.</p>
-      </div>
-    {% endif %}
   </div>
+</div>
+
+{% if error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ error }}</span></div>
 {% endif %}
 
-<div class="card">
-  <div class="card-head">
-    <h3>Discovery jobs</h3>
-    <input class="input" style="max-width:220px" placeholder="Filter…"
-           data-filter="table.data tbody tr">
+<div class="grid g-main">
+  <div class="stack">
+    {# ── the form ── #}
+    <div class="card">
+      <div class="card-head"><h3>Describe a topic</h3><span class="badge">nothing crawled yet</span></div>
+      <div class="card-pad">
+        <form method="post" action="/app/discovery" class="stack">
+          <div class="field">
+            <label for="d-topic">What are you looking for?</label>
+            <input class="input" id="d-topic" name="topic" required
+                   value="{{ topic or '' }}"
+                   placeholder="solar panel installers in the UK" data-autofocus>
+            <span class="hint">A sentence works better than keywords.</span>
+          </div>
+          <div class="grid g-3">
+            <div class="field">
+              <label for="d-count">How many sites</label>
+              <input class="input" id="d-count" name="count" type="number" value="10" min="1" max="200">
+            </div>
+            <div class="field">
+              <label for="d-pages">Pages per site</label>
+              <input class="input" id="d-pages" name="max_pages_per_site" type="number" value="20" min="1" max="10000">
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <label class="check" style="padding-top:9px">
+                <input type="checkbox" name="auto">
+                <span>Crawl the best candidates without asking me</span>
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn" name="preview" value="1" data-busy="Searching…">
+              Preview the shortlist
+            </button>
+            <button class="btn btn-primary" data-busy="Starting…"
+                    {% if not has_provider %}title="No discovery provider configured"{% endif %}>
+              Start discovery
+            </button>
+            <span class="push tiny muted">
+              Preview ranks and shows you the list. Start creates a job you then approve.
+            </span>
+          </div>
+        </form>
+
+        {% if not has_provider %}
+          <div class="alert warn mt-3 small">
+            <span class="ico">!</span>
+            <span>No search provider is configured, so live discovery will return
+              nothing. Set a provider key (Brave, SerpAPI or Tavily) — or point it
+              at your own index with
+              <code>WCP_DISCOVERY_PROVIDER=own-index</code>.</span>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ── preview results ── #}
+    {% if preview_results %}
+      <div class="card" style="animation:fadeUp 320ms var(--ease-out)">
+        <div class="card-head">
+          <h3>Preview — {{ preview_results|length }} candidates</h3>
+          <span class="badge ok">nothing crawled</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th style="width:34px">#</th><th data-sort>Domain</th>
+              <th>Why it was chosen</th><th data-sort class="num">Score</th></tr></thead>
+            <tbody>
+              {% for c in preview_results %}
+                <tr style="animation:fadeUp 300ms var(--ease-out) backwards;animation-delay:{{ loop.index0 * 26 }}ms">
+                  <td class="tiny muted num">{{ loop.index }}</td>
+                  <td class="mono small">{{ c.get('domain') or c.get('url') }}</td>
+                  <td class="small dim">{{ c.get('reason') or c.get('rationale') or '—' }}</td>
+                  <td class="num tar">{{ '{:.3f}'.format(c.get('score', 0)) if c.get('score') is number else '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-foot">
+          Happy with it? Press <b>Start discovery</b> to turn this into an
+          approvable job.
+        </div>
+      </div>
+    {% endif %}
+
+    {# ── jobs ── #}
+    <div class="card">
+      <div class="card-head">
+        <h3>Discovery jobs</h3>
+        <input class="input" style="max-width:230px" placeholder="Filter…"
+               data-filter="table.data tbody tr" aria-label="Filter jobs">
+      </div>
+      {% if job_rows %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th data-sort>Job</th><th>Topic</th><th data-sort>State</th>
+              <th data-sort class="num">Wanted</th><th data-sort>Created</th><th></th></tr></thead>
+            <tbody>
+              {% for j in job_rows %}
+                <tr>
+                  <td class="mono small">
+                    <a href="/app/discovery/{{ j.get('job_id') or j.get('id') }}">
+                      {{ (j.get('job_id') or j.get('id') or '')[:14] }}</a>
+                  </td>
+                  <td class="truncate" style="max-width:280px">{{ j.get('topic') }}</td>
+                  <td>{% include "partials/state.html" %}</td>
+                  <td class="num tar">{{ j.get('count') or j.get('max_sites') or '—' }}</td>
+                  <td class="small muted nowrap">{{ (j.get('created_at') or '')|ago }}</td>
+                  <td class="right">
+                    <a class="btn btn-sm" href="/app/discovery/{{ j.get('job_id') or j.get('id') }}">Open</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">✦</div>
+          <h3>No discovery jobs yet</h3>
+          <p>Describe a topic above. Preview first if you would rather see the
+            shortlist before committing any quota.</p>
+        </div>
+      {% endif %}
+    </div>
   </div>
-  {% if error %}
-    <div class="card-pad"><div class="alert danger"><span class="ico">✕</span><span>{{ error }}</span></div></div>
-  {% endif %}
-  {% if job_items %}
-    <div class="table-wrap">
-      <table class="data">
-        <thead>
-          <tr>
-            <th data-sort>Topic</th><th data-sort>State</th>
-            <th data-sort class="num">Sites</th><th data-sort>Created</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for job in job_items %}
-            <tr>
-              <td>
-                <a href="/app/discovery/{{ job.get('job_id') or job.get('id') }}">{{ job.get('topic') }}</a>
-                <div class="tiny muted mono">{{ (job.get('job_id') or job.get('id') or '')[:16] }}</div>
-              </td>
-              <td>
-                {% set st = (job.get('state') or '?')|string|lower %}
-                <span class="badge {{ 'ok' if st in ('completed','done') else ('danger' if st in ('failed','cancelled') else 'warn') }}">
-                  <span class="dot {% if st in ('running','queued','pending') %}live{% endif %}"></span>{{ st }}
-                </span>
-              </td>
-              <td class="num tar">{{ job.get('sites_total') or job.get('count') or 0 }}</td>
-              <td class="small muted nowrap">{{ (job.get('created_at') or '')|ago }}</td>
-              <td class="right">
-                <a class="btn btn-sm" href="/app/discovery/{{ job.get('job_id') or job.get('id') }}">Open</a>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">How ranking works</h3>
+      <ol class="small dim stack-sm" style="padding-left:18px">
+        <li>The topic is expanded into several search queries.</li>
+        <li>Results are fetched from the configured provider — or from your own
+          index, which costs nothing.</li>
+        <li>Each candidate domain is scored on relevance, authority, diversity
+          and whether it looks like a directory or a shop.</li>
+        <li>Near-duplicate sites are collapsed so the shortlist is distinct.</li>
+        <li>You approve. Only then does anything get crawled.</li>
+      </ol>
     </div>
-  {% else %}
-    <div class="empty">
-      <div class="ico">✦</div>
-      <h3>No discovery jobs yet</h3>
-      <p>Type a topic above and hit <b>Preview</b> — it costs one search and
-        crawls nothing, so you can see whether the shortlist is any good before
-        committing a job.</p>
+    <div class="card card-pad">
+      <h3 class="mb-2">Cost control</h3>
+      <p class="small dim">Preview ranks without crawling. Approval is per-job,
+        and you can reject individual candidates before anything is fetched.</p>
+      <p class="tiny muted mt-2">Pages are only consumed once you approve — that
+        is the step that touches the quota.</p>
     </div>
-  {% endif %}
+  </div>
 </div>
 {% endblock %}

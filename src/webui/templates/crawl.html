@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set items = (jobs.data or {}).get('items', []) if jobs else [] %}
+{% set job_rows = jobs|rows %}
 
 {% block content %}
 <div class="page-head">
@@ -7,141 +7,148 @@
   <div class="between">
     <div>
       <h1>Crawl jobs</h1>
-      <p class="dim small">One URL and a page budget — or start from
-        <a href="/app/discovery">topic discovery</a> if you do not have URLs yet.</p>
+      <p class="dim">
+        A job walks one start URL breadth-first, honouring robots.txt and
+        per-host politeness, then runs every page through clean → dedupe →
+        store. Progress is written live.
+      </p>
     </div>
     <button class="btn btn-primary" data-modal-open="new-crawl">+ New crawl</button>
   </div>
 </div>
 
+{% if error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ error }}</span></div>
+{% endif %}
+
 <div class="grid g-main">
-  <div class="card">
-    <div class="card-head">
-      <h3>All jobs</h3>
-      <input class="input" style="max-width:230px" placeholder="Filter…"
-             data-filter="table.data tbody tr">
-    </div>
-
-    {% if error %}
-      <div class="card-pad"><div class="alert danger"><span class="ico">✕</span><span>{{ error }}</span></div></div>
-    {% endif %}
-
-    {% if items %}
-      <div class="table-wrap">
-        <table class="data">
-          <thead>
-            <tr>
-              <th data-sort>Job</th><th data-sort>State</th>
+  <div class="stack">
+    <div class="card">
+      <div class="card-head">
+        <h3>Jobs</h3>
+        <input class="input" style="max-width:230px" placeholder="Filter…"
+               data-filter="table.data tbody tr" aria-label="Filter jobs">
+      </div>
+      {% if job_rows %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr>
+              <th data-sort>Job</th><th data-sort>State</th><th>Target</th>
               <th data-sort class="num">Pages</th><th data-sort class="num">Items</th>
               <th data-sort>Created</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for job in items %}
-              <tr>
-                <td>
-                  <a class="mono" href="/app/crawl/{{ job.job_id }}">{{ job.job_id[:16] }}…</a>
-                  <div class="tiny muted truncate" style="max-width:320px">{{ job.url }}</div>
-                </td>
-                <td>{% include "partials/state.html" %}</td>
-                <td class="num tar">{{ (job.pages_done or 0)|num }} / {{ job.max_pages|num }}</td>
-                <td class="num tar">{{ (job.items_collected or 0)|num }}</td>
-                <td class="small muted nowrap">{{ job.created_at|ago }}</td>
-                <td class="right">
-                  <a class="btn btn-sm" href="/app/crawl/{{ job.job_id }}">Open</a>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </tr></thead>
+            <tbody>
+              {% for job in job_rows %}
+                <tr>
+                  <td class="mono small">
+                    <a href="/app/crawl/{{ job.get('job_id') }}">{{ (job.get('job_id') or '')[:14] }}</a>
+                  </td>
+                  <td>{% include "partials/state.html" %}</td>
+                  <td class="truncate" style="max-width:260px">
+                    <span class="small dim">{{ job.get('url') }}</span>
+                  </td>
+                  <td class="num tar">{{ job.get('pages_done', 0)|num }} / {{ job.get('max_pages', 0)|num }}</td>
+                  <td class="num tar">{{ job.get('items_collected', 0)|num }}</td>
+                  <td class="small muted nowrap">{{ (job.get('created_at') or '')|ago }}</td>
+                  <td class="right">
+                    <a class="btn btn-sm" href="/app/crawl/{{ job.get('job_id') }}">Open</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-foot">
+          {{ job_rows|length }} job(s) — click any row for
+          live progress, options and the raw record.
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">🕷</div>
+          <h3>No crawl jobs</h3>
+          <p>Point the crawler at a start URL. It will stay inside that host,
+            respect robots.txt, and stop at the page limit you set.</p>
+          <button class="btn btn-primary" data-modal-open="new-crawl">New crawl</button>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Lifecycle of one job</h3>
+      <div class="code">
+POST <span class="k">/api/v1/jobs/crawl</span>  →  quota gate  →  scheduler<br>
+     →  BFS inside the start domain, robots.txt honoured<br>
+     →  per page: clean → dedupe → store<br>
+     →  progress written to <span class="g">wcp:v1:job:{id}</span><br>
+     →  on finish: <span class="y">data_sha256</span> stamped, webhook emitted
       </div>
-      <div class="card-foot small muted">
-        {{ (jobs.data or {}).get('total', items|length) }} job(s) ·
-        pages update live while a job is running
-      </div>
-    {% else %}
-      <div class="empty">
-        <div class="ico">🕷</div>
-        <h3>No jobs yet</h3>
-        <p>A crawl is one URL plus a page budget. robots.txt and per-host
-          politeness are on by default; turn on stealth only for the sites that
-          need it.</p>
-        <button class="btn btn-primary" data-modal-open="new-crawl">Start your first crawl</button>
-      </div>
-    {% endif %}
+      <p class="tiny muted mt-2">
+        Because the digest is written to the job record, a finished crawl can be
+        listed on the data exchange directly.
+      </p>
+    </div>
   </div>
 
   <div class="stack">
     <div class="card card-pad">
-      <h3 class="mb-2">Politeness defaults</h3>
+      <h3 class="mb-2">Defaults</h3>
       <dl class="kv small">
-        <dt>robots.txt</dt><dd>obeyed unless you switch it off</dd>
-        <dt>Rate limit</dt><dd>adaptive per host</dd>
-        <dt>Retries</dt><dd>exponential backoff</dd>
-        <dt>Max pages</dt><dd>hard ceiling per job</dd>
+        <dt class="muted">robots.txt</dt><dd>obeyed</dd>
+        <dt class="muted">Politeness</dt><dd>per-host delay + adaptive</dd>
+        <dt class="muted">Retries</dt><dd>3, exponential backoff</dd>
+        <dt class="muted">Max pages</dt><dd>your limit, hard stop</dd>
+        <dt class="muted">Stealth</dt><dd>off unless asked</dd>
       </dl>
-      <div class="divider"></div>
-      <p class="tiny muted">
-        Stealth mode changes the TLS fingerprint and rotates egress. Use it when
-        a site blocks ordinary clients — not as a default.
-      </p>
     </div>
-
     <div class="card card-pad">
-      <h3 class="mb-2">Prefer not to pick URLs?</h3>
-      <p class="small dim mb-2">
-        Describe the topic and let discovery produce the shortlist, with the
-        reason each site was chosen.
-      </p>
-      <a class="btn btn-block" href="/app/discovery">Go to discovery →</a>
+      <h3 class="mb-2">Want sites, not a URL?</h3>
+      <p class="small dim">Describe the topic and let discovery rank candidate
+        websites first. Nothing is crawled until you approve the shortlist.</p>
+      <a class="btn btn-block mt-2" href="/app/discovery">Open topic discovery</a>
     </div>
   </div>
 </div>
 
-{# ------------------------------------------------------------------ modal -- #}
+{# ── new crawl ── #}
 <div class="modal-back" id="new-crawl" hidden>
   <div class="modal">
-    <form method="post" action="/app/crawl">
-      <div class="head">
-        <h3 style="flex:1">New crawl job</h3>
-        <button type="button" class="icon-btn" data-modal-close>✕</button>
-      </div>
+    <form method="post" action="/app/crawl" data-confirm="Queue this crawl? It consumes page quota.">
+      <div class="head"><h3 style="flex:1">New crawl job</h3>
+        <button type="button" class="icon-btn" data-modal-close aria-label="Close">✕</button></div>
       <div class="body stack">
         <div class="field">
-          <label for="url">Start URL</label>
-          <input class="input" id="url" name="url" required
-                 placeholder="https://example.com/products" data-autofocus>
-          <span class="hint">Crawling follows links from here, staying on the
-            same host by default.</span>
+          <label for="c-url">Start URL</label>
+          <input class="input" id="c-url" name="url" required placeholder="https://example.com/products"
+                 data-autofocus>
+          <span class="hint">The crawl stays inside this host.</span>
         </div>
         <div class="grid g-2">
           <div class="field">
-            <label for="max_pages">Max pages</label>
-            <input class="input" id="max_pages" name="max_pages" type="number"
-                   value="10" min="1" max="1000000">
+            <label for="c-max">Max pages</label>
+            <input class="input" id="c-max" name="max_pages" type="number" value="50" min="1" max="1000000">
           </div>
           <div class="field">
-            <label for="priority">Priority</label>
-            <select class="select" id="priority" name="priority">
+            <label for="c-prio">Priority</label>
+            <select class="select" id="c-prio" name="priority">
               <option value="low">low</option>
               <option value="normal" selected>normal</option>
               <option value="high">high</option>
             </select>
           </div>
         </div>
-        <div class="check">
-          <input type="checkbox" id="obey_robots" name="obey_robots" checked>
-          <label for="obey_robots">Obey robots.txt <span class="muted">(recommended)</span></label>
-        </div>
-        <div class="check">
-          <input type="checkbox" id="stealth" name="stealth">
-          <label for="stealth">Stealth mode
-            <span class="muted">— TLS fingerprinting and rotating egress</span></label>
-        </div>
+        <label class="check">
+          <input type="checkbox" name="obey_robots" checked>
+          <span><b>Obey robots.txt</b> — leave this on unless you own the site.</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="stealth">
+          <span><b>Stealth mode</b> — TLS fingerprinting and browser fallback.
+            Slower, and only for sites that block plain requests.</span>
+        </label>
       </div>
       <div class="foot">
         <button type="button" class="btn" data-modal-close>Cancel</button>
-        <button class="btn btn-primary" type="submit">Queue the crawl</button>
+        <button class="btn btn-primary" data-busy="Queueing…">Queue crawl</button>
       </div>
     </form>
   </div>

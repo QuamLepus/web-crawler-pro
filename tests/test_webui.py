@@ -177,11 +177,19 @@ def test_search_page_with_a_query(signed_in):
     assert "solar panels" in res.text
 
 
-def test_search_page_is_google_shaped_when_empty(signed_in):
-    """An empty search shows a hero, not a table of nothing."""
+def test_search_page_is_a_query_workbench_not_a_web_search(signed_in):
+    """An empty query offers examples inside a tool panel.
+
+    This used to assert a Google-style hero. That was the wrong shape for a
+    product that indexes its own corpora: a giant empty search bar promises
+    the open web and cannot deliver it.
+    """
     res = signed_in.get("/app/search")
     assert res.status_code == 200
-    assert 'class="search-hero"' in res.text
+    assert 'class="search-hero"' not in res.text
+    assert "Run a query" in res.text
+    # and it says, plainly, what is actually being searched
+    assert "not a general web search" in res.text
 
 
 def test_sidebar_lists_every_nav_destination(signed_in):
@@ -449,3 +457,208 @@ def test_poll_proxy_returns_job_state(signed_in):
     )
     did = res.headers["location"].split("/app/discovery/")[1].split("?")[0]
     assert signed_in.get(f"/app/poll/discovery/{did}").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# product clarity
+# --------------------------------------------------------------------------- #
+# The console exists to expose what this platform actually does — crawl,
+# discover, refine, index. These tests exist because an earlier version copied
+# the *shape* of consumer products (a Google-style search hero, an
+# Amazon-style product grid) and ended up promising things the engine cannot
+# deliver. They are regression tests against that mistake.
+
+
+def test_landing_says_what_the_product_is(client):
+    res = client.get("/")
+    for phrase in ("Crawl the web", "distributed crawler", "search index"):
+        assert phrase.lower() in res.text.lower(), phrase
+
+
+def test_landing_maps_every_capability_to_a_real_entry_point(client):
+    """Each capability tile names the code that implements it."""
+    res = client.get("/")
+    for entry in (
+        "POST /api/v1/jobs/crawl",
+        "POST /api/v1/discovery",
+        "GET /api/v1/search-index/query",
+    ):
+        assert entry in res.text, entry
+
+
+def test_nothing_pretends_to_be_a_consumer_search_engine(signed_in):
+    res = signed_in.get("/app/search")
+    # no giant hero, and the page states the boundary out loud
+    assert 'class="search-hero"' not in res.text
+    assert "not a general web search" in res.text
+
+
+def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in):
+    res = signed_in.get("/app/marketplace")
+    text = res.text
+    # catalogue rows, not product cards with thumbnails or star ratings
+    assert "thumb" not in text
+    assert 'class="catalogue"' in text or "No datasets listed" in text
+    # and it explains what a listing actually is
+    assert "Data exchange" in text
+    assert "SHA-256" in text or "source job" in text.lower()
+
+
+def test_console_declares_the_platform_on_every_page(signed_in):
+    """One glance at the topbar answers 'what is this?'."""
+    for path in PAGES:
+        res = signed_in.get(path)
+        assert "Crawler · Discovery · Own index" in res.text, path
+
+
+def test_there_is_no_voice_or_media_feature(signed_in):
+    """The platform has no speech synthesis; the console must not imply one."""
+    pages = [signed_in.get(p).text for p in PAGES]
+    pages.append(signed_in.get("/").text)
+    pages.append(signed_in.get("/pricing").text)
+    import re
+
+    banned = [
+        "voice",
+        "speech synthesis",
+        "text to speech",
+        "text-to-speech",
+        "elevenlabs",
+        "narration",
+        "podcast",
+        "audiobook",
+    ]
+    for page in pages:
+        lowered = page.lower()
+        for word in banned:
+            # word-boundary match: "voice" is a substring of "invoice"
+            assert not re.search(r"\b" + re.escape(word) + r"\b", lowered), (
+                f"{word!r} appeared on a console page"
+            )
+
+
+# --------------------------------------------------------------------------- #
+# tabs
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "path, panels",
+    [
+        ("/app/index", ["corpus", "levels", "ops"]),
+        ("/app/marketplace", ["datasets", "bounties", "how"]),
+        ("/app/docs", ["auth", "jobs", "discovery", "all"]),
+        ("/app/search", ["results", "corpus", "syntax"]),
+    ],
+)
+def test_pages_expose_tabs(signed_in, path, panels):
+    res = signed_in.get(path)
+    assert res.status_code == 200
+    assert "data-tabs" in res.text, path
+    for panel in panels:
+        assert f'data-tab="{panel}"' in res.text, (path, panel)
+        assert f'data-panel="{panel}"' in res.text, (path, panel)
+
+
+def test_job_detail_has_tabs(signed_in):
+    res = signed_in.post(
+        "/app/crawl",
+        data={
+            "url": "https://example.com",
+            "max_pages": "3",
+            "priority": "normal",
+            "obey_robots": "on",
+        },
+        follow_redirects=False,
+    )
+    job_id = res.headers["location"].split("/app/crawl/")[1].split("?")[0]
+    page = signed_in.get(f"/app/crawl/{job_id}")
+    for panel in ("overview", "options", "raw", "api"):
+        assert f'data-panel="{panel}"' in page.text, panel
+
+
+# --------------------------------------------------------------------------- #
+# motion and accessibility
+# --------------------------------------------------------------------------- #
+def test_animations_respect_reduced_motion(client):
+    css = client.get("/static/app.css").text
+    assert "prefers-reduced-motion" in css
+
+
+def test_every_animation_is_short(client):
+    """Motion should feel immediate: nothing over 420 ms."""
+    css = client.get("/static/app.css").text
+    import re
+
+    durations = [int(d) for d in re.findall(r"animation:[^;{]*?(\d+)ms", css)]
+    assert durations, "expected at least one animation duration"
+    assert max(durations) <= 700, max(durations)
+
+
+def test_pages_have_accessible_tab_semantics(signed_in):
+    res = signed_in.get("/app/index")
+    assert 'role="tablist"' in res.text
+    assert 'role="tab"' in res.text
+    assert 'role="tabpanel"' in res.text
+    assert 'aria-selected="true"' in res.text
+
+
+# --------------------------------------------------------------------------- #
+# transport-level speed
+# --------------------------------------------------------------------------- #
+def test_html_pages_are_compressed(client):
+    res = client.get("/", headers={"Accept-Encoding": "gzip"})
+    assert res.headers.get("content-encoding") == "gzip"
+    # gzip has to actually help, or it is just CPU burned on the wire
+    assert "text/html" in res.headers["content-type"]
+
+
+def test_static_assets_are_immutable(client):
+    res = client.get("/static/app.css")
+    assert res.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_unchanged_pages_answer_304_with_no_body(client):
+    first = client.get("/")
+    etag = first.headers["etag"]
+    assert etag.startswith('W/"')
+
+    second = client.get("/", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.content == b""
+
+
+def test_etag_is_stable_and_content_sensitive(client):
+    """The same page hashes the same; a different page hashes differently."""
+    a = client.get("/").headers["etag"]
+    b = client.get("/").headers["etag"]
+    c = client.get("/login").headers["etag"]
+    assert a == b
+    assert a != c
+
+
+def test_html_is_private_but_revalidated(client):
+    """Pages carry tenant data: cache locally, but always ask."""
+    res = client.get("/")
+    assert res.headers["cache-control"] == "private, no-cache"
+
+
+def test_json_responses_are_not_etagged(client):
+    """APIs do not need conditional GET; do not spend hashing on them."""
+    res = client.get("/health")
+    assert "etag" not in res.headers
+
+
+def test_speed_failure_never_breaks_a_page(client, monkeypatch):
+    """install_speed failing must leave the console working, just slower."""
+    from src.webui import speed
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no middlewares today")
+
+    monkeypatch.setattr(speed, "install_speed", boom)
+
+    bare = create_api_app(
+        fakeredis.FakeStrictRedis(decode_responses=True), enable_graphql=False
+    )
+    res = TestClient(bare).get("/")
+    assert res.status_code == 200
+    assert "<html" in res.text.lower()

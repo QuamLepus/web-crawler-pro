@@ -47,3 +47,7 @@ data/
 output/
 cache/
 *.log
+
+# Optional native tokeniser, built by scripts/build-native.sh
+src/search_index/libwcpfast.so
+*.so

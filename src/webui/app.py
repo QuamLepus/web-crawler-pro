@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,7 +49,12 @@ NAV: list[dict] = [
         "group": "Workspace",
         "pages": [
             {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
-            {"href": "/app/search", "icon": "🔍", "label": "Search", "key": "search"},
+            {
+                "href": "/app/search",
+                "icon": "🔍",
+                "label": "Query the index",
+                "key": "search",
+            },
             {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
             {
                 "href": "/app/discovery",
@@ -70,7 +76,7 @@ NAV: list[dict] = [
             {
                 "href": "/app/marketplace",
                 "icon": "🛒",
-                "label": "Marketplace",
+                "label": "Data exchange",
                 "key": "marketplace",
             },
         ],
@@ -243,6 +249,7 @@ def _env():
             "pct": human_pct,
             "money": human_money,
             "stars": human_stars,
+            "rows": as_rows,
         }
     )
     env.globals.update(nav=NAV, now=time.time)
@@ -319,6 +326,33 @@ def human_money(cents) -> str:
         return f"${int(cents) / 100:,.2f}"
     except (TypeError, ValueError):
         return "—"
+
+
+def as_rows(value) -> list:
+    """Normalise a list endpoint's payload into a list of rows.
+
+    List endpoints answer ``{"items": [...], "total": n}``, but a couple
+    answer with a bare list, and Jinja's ``is sequence`` test is true for a
+    dict too — which silently turns a for-loop into an iteration over the
+    dict's keys. One filter, used everywhere, keeps that class of bug out.
+    """
+    if isinstance(value, dict):
+        for key in (
+            "items",
+            "results",
+            "data",
+            "datasets",
+            "bounties",
+            "candidates",
+            "levels",
+        ):
+            found = value.get(key)
+            if isinstance(found, list):
+                return found
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
 
 
 def human_stars(value) -> str:
@@ -662,6 +696,36 @@ async def crawl_cancel(request: Request, job_id: str):
     )
 
 
+def _has_discovery_provider() -> bool:
+    """Is any discovery provider actually able to reach the network?
+
+    Discovery is the one feature that genuinely needs an outbound search. With
+    no provider configured the endpoint still answers — with an empty
+    shortlist, which reads like a bug unless the page says otherwise. So the
+    form warns instead of pretending.
+    """
+    import os
+
+    configured = any(
+        os.getenv(k)
+        for k in (
+            "BRAVE_API_KEY",
+            "SERPAPI_KEY",
+            "TAVILY_API_KEY",
+            "SERPER_API_KEY",
+            "GOOGLE_CSE_KEY",
+        )
+    )
+    own_index = os.getenv("WCP_DISCOVERY_PROVIDER", "").lower() in (
+        "own-index",
+        "own_index",
+        "ownindex",
+        "internal",
+    )
+    offline = os.getenv("WCP_OFFLINE", "").lower() in ("1", "true", "yes")
+    return (configured or own_index) and not offline
+
+
 @router.get("/app/discovery", response_class=HTMLResponse, name="discovery")
 async def discovery_list(request: Request):
     api, me, redirect = await _guard(request)
@@ -675,6 +739,7 @@ async def discovery_list(request: Request):
         me=me,
         jobs=(jobs.data if jobs.ok else None),
         error=jobs.error,
+        has_provider=_has_discovery_provider(),
         title="Topic discovery — WebCrawler Pro",
     )
 
@@ -684,6 +749,7 @@ async def discovery_create(
     request: Request,
     topic: str = Form(""),
     count: int = Form(10),
+    max_pages_per_site: int = Form(20),
     auto: str = Form(""),
     seeds: str = Form(""),
     preview: str = Form(""),
@@ -695,6 +761,7 @@ async def discovery_create(
     body = {
         "topic": topic.strip(),
         "count": max(1, min(int(count), 500)),
+        "max_pages_per_site": max(1, min(int(max_pages_per_site), 10000)),
         "auto": bool(auto),
         "seeds": seed_list,
     }
@@ -702,16 +769,20 @@ async def discovery_create(
     if preview:  # dry run: show the shortlist, crawl nothing
         res = await api.discovery_preview(**body)
         jobs = await api.discovery_list()
+        data = res.data if res.ok and isinstance(res.data, dict) else {}
         return render(
             request,
             "discovery.html",
             page="discovery",
             me=me,
             jobs=(jobs.data if jobs.ok else None),
-            preview=(res.data if res.ok else None),
+            preview_results=data.get("candidates") or [],
+            preview_queries=data.get("queries") or [],
+            preview_providers=data.get("providers") or [],
             errors=[] if res.ok else [res.error],
             topic=topic,
             count=count,
+            has_provider=_has_discovery_provider(),
             title="Topic discovery — WebCrawler Pro",
         )
 
@@ -726,6 +797,7 @@ async def discovery_create(
             jobs=(jobs.data if jobs.ok else None),
             errors=[res.error],
             topic=topic,
+            has_provider=_has_discovery_provider(),
             title="Topic discovery — WebCrawler Pro",
         )
     job_id = res.get("job_id", "")
@@ -824,7 +896,7 @@ async def index_page(request: Request):
         me=me,
         stats=(stats.data if stats.ok else {}),
         stats_error=stats.error,
-        levels=(levels.data if levels.ok else {}).get("levels", []),
+        levels=levels,
         title="Own search index — WebCrawler Pro",
     )
 
@@ -1038,6 +1110,8 @@ async def settings_page(request: Request):
         hooks=(hooks.data if hooks.ok else None),
         error=hooks.error,
         events=webhook_events(),
+        has_provider=_has_discovery_provider(),
+        stripe_ready=bool(os.getenv("STRIPE_SECRET_KEY")),
         title="Settings — WebCrawler Pro",
     )
 
@@ -1178,5 +1252,11 @@ def mount_webui(app) -> bool:
     app.state.webui_target = app
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="webui-static")
     app.include_router(router)
+    try:
+        from src.webui.speed import install_speed
+
+        install_speed(app)
+    except Exception as exc:  # noqa: BLE001 - speed is never worth a 500
+        logger.warning("console speed middleware disabled (%s)", exc)
     logger.info("web console mounted at /")
     return True
