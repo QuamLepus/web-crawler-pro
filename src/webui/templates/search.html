@@ -1,188 +1,273 @@
 {% extends "base.html" %}
 {% set hits = results.get('results', []) if results else [] %}
-{% set corrected = results.get('corrected_query', '') if results else '' %}
-{% set corrections = results.get('corrections', []) if results else [] %}
+{% set took = results.get('took_ms') if results else none %}
 
 {% block content %}
-{% if not q %}
-  {# ------------------------------------------------ Google-shaped landing -- #}
-  <div class="search-hero">
-    <div class="inner">
-      <div class="search-logo">WebCrawler<span style="opacity:.55">Pro</span></div>
-      <form action="/app/search" method="get">
-        <div class="searchbar">
-          <span style="color:var(--text-3)">🔍</span>
-          <input name="q" placeholder="Search your own index…" autofocus
-                 autocomplete="off" value="{{ q }}">
-          <button class="btn btn-primary" type="submit">Search</button>
-        </div>
-      </form>
-      <div class="search-chips">
-        <a class="chip" href="/app/search?q=open+source+software">open source software</a>
-        <a class="chip" href="/app/search?q=renewable+energy+research">renewable energy research</a>
-        <a class="chip" href="/app/search?q=%22solar+panels%22">"solar panels"</a>
-        <a class="chip" href="/app/search?q=site%3A.org+directory">site:.org directory</a>
-      </div>
-      <p class="small muted mt-3">
-        {% if stats.ready %}
-          {{ stats.docs|num }} documents · {{ stats.shards }} shard(s) ·
-          your own index, no third-party search API
-        {% else %}
-          No index built yet — <a href="/app/index">build one from free datasets</a>.
-        {% endif %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Query the index</span></div>
+  <div class="between">
+    <div>
+      <h1>Query the index</h1>
+      <p class="dim">
+        This searches the corpus <b>you</b> indexed — Curlie, Wikipedia, Common
+        Crawl and anything you crawled. It is not a general web search: no
+        third-party API is called, and it keeps working with the network
+        unplugged.
       </p>
     </div>
+    <a class="btn" href="/app/index">Index status</a>
   </div>
-{% else %}
-  {# --------------------------------------------------------- results view -- #}
-  <div class="results-bar">
-    <a class="mini-logo" href="/app/search">🕷 WebCrawler<span style="color:var(--text-2)">Pro</span></a>
-    <form action="/app/search" method="get" class="sbar">
-      <div class="searchbar">
-        <span style="color:var(--text-3)">🔍</span>
-        <input name="q" value="{{ q }}" autocomplete="off" autofocus>
-        <input type="hidden" name="rerank" value="{{ rerank }}">
-        <input type="hidden" name="source" value="{{ source }}">
-        <button class="btn btn-primary" type="submit">Search</button>
+</div>
+
+{# ── the query bar: a tool, not a homepage ──────────────────────────────── #}
+<div class="card card-pad mb-3" style="animation:fadeUp 320ms var(--ease-out)">
+  <form action="/app/search" method="get" id="qform">
+    <div class="row" style="gap:10px">
+      <div class="input-group flex-1">
+        <span class="ico-lead">🔍</span>
+        <input class="input" name="q" id="q" value="{{ q }}" autocomplete="off"
+               placeholder='solar panels "installation cost" -blog site:.edu'
+               aria-label="Query">
       </div>
-    </form>
-    <a class="btn btn-sm" href="/app/search">Clear</a>
-  </div>
-
-  <div class="grid g-main">
-    <div>
-      {% if results.get('_error') %}
-        <div class="alert danger"><span class="ico">✕</span><span>{{ results['_error'] }}</span></div>
-      {% endif %}
-
-      {% if corrected and corrections %}
-        <div class="spell-note">
-          Showing results for <b>{{ corrected }}</b>.
-          <a href="/app/search?q={{ q }}&amp;nospell=1">Search for “{{ q }}” instead</a>
-          {% for c in corrections %}
-            <span class="badge info">{{ c['from'] }} → {{ c['to'] }}</span>
-          {% endfor %}
-        </div>
-      {% endif %}
-
-      {% if hits %}
-        <p class="small muted mb-3">
-          {{ hits|length }} result(s) · {{ results.get('took_ms', '?') }} ms ·
-          reranker: <b>{{ results.get('reranker', 'none') }}</b>
-        </p>
-        {% for r in hits %}
-          <article class="result">
-            <div class="url">
-              <span class="fav">{{ (r.host or r.url)[0:1]|upper }}</span>
-              <span class="truncate">{{ r.host or r.url }}</span>
-              <span class="muted">›</span>
-              <span class="truncate muted" style="max-width:340px">{{ r.url }}</span>
-            </div>
-            <h3><a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.title or r.host }}</a></h3>
-            <div class="snippet">{{ r.snippet|safe }}</div>
-            <div class="meta">
-              <span class="badge">{{ r.source or 'web' }}</span>
-              <span title="BM25 relevance">bm25 {{ r.bm25 }}</span>
-              {% if r.semantic %}<span title="Semantic score">sem {{ r.semantic }}</span>{% endif %}
-              <span title="Host authority from Open PageRank / Tranco">authority {{ r.authority }}/10</span>
-              <span>score {{ r.score }}</span>
-            </div>
-          </article>
+      <select class="select" name="source" style="width:150px" aria-label="Source">
+        <option value="">All sources</option>
+        {% for s in ['curlie', 'wikipedia', 'commoncrawl', 'seed'] %}
+          <option value="{{ s }}" {% if source == s %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
+      </select>
+      <select class="select" name="limit" style="width:110px" aria-label="Result limit">
+        {% for n in [10, 20, 50, 100] %}
+          <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }} results</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" data-busy="Searching…">Run query</button>
+    </div>
+    <div class="row-wrap mt-2 tiny muted">
+      <label class="check" style="font-size:12px">
+        <input type="checkbox" name="collapse" value="1" {% if collapse == '1' %}checked{% endif %}>
+        <span>One result per host</span>
+      </label>
+      <label class="check" style="font-size:12px">
+        <input type="checkbox" name="rerank" value="1" {% if rerank == '1' %}checked{% endif %}>
+        <span>Semantic rerank</span>
+      </label>
+      {% if q %}
+        <a href="/app/search">Clear query</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
 
-        {% if hits|length >= limit %}
-          <div class="pager">
-            {% if page_no > 1 %}
-              <a href="/app/search?q={{ q }}&amp;page={{ page_no - 1 }}&amp;limit={{ limit }}">‹ Prev</a>
-            {% endif %}
-            <span class="cur">{{ page_no }}</span>
-            <a href="/app/search?q={{ q }}&amp;page={{ page_no + 1 }}&amp;limit={{ limit }}">Next ›</a>
+<div class="grid g-main">
+  <div class="stack">
+
+    {% if results and results.get('_error') %}
+      <div class="alert danger"><span class="ico">✕</span><span>{{ results['_error'] }}</span></div>
+    {% endif %}
+
+    {% if results and results.get('corrected_query') and results.get('corrected_query') != q %}
+      <div class="alert info" style="animation:fadeUp 300ms var(--ease-out)">
+        <span class="ico">i</span>
+        <span>
+          Spelling was corrected from your own vocabulary —
+          {% for c in results.get('corrections', []) %}
+            <code>{{ c['from'] }}</code> → <code>{{ c['to'] }}</code>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+          <a href="/app/search?q={{ q }}&amp;limit={{ limit }}">search exactly as typed</a>
+        </span>
+      </div>
+    {% endif %}
+
+    {# ── tabs ───────────────────────────────────────────────────────────── #}
+    <div class="card" data-tabs>
+      <div class="card-head" style="padding:0;border-bottom:0">
+        <div class="tabs" style="width:100%;border-bottom:0" role="tablist">
+          <button class="tab" role="tab" data-tab="results" aria-selected="true">
+            Results{% if q %} <span class="badge">{{ hits|length }}</span>{% endif %}
+          </button>
+          <button class="tab" role="tab" data-tab="corpus" aria-selected="false">In the index</button>
+          <button class="tab" role="tab" data-tab="syntax" aria-selected="false">Query syntax</button>
+        </div>
+      </div>
+
+      {# ── results ── #}
+      <div class="tabpanel" data-panel="results" role="tabpanel">
+        {% if q %}
+          <div class="between mb-2">
+            <span class="tiny muted">
+              {{ hits|length }} result{{ 's' if hits|length != 1 else '' }}
+              {% if took is not none %}· {{ took }} ms{% endif %}
+              · reranker: {{ results.get('reranker', 'none') }}
+            </span>
+          </div>
+
+          {% if hits %}
+            <div class="table-wrap">
+              <table class="data">
+                <thead><tr>
+                  <th style="width:34px">#</th>
+                  <th data-sort>Document</th>
+                  <th data-sort class="num">BM25</th>
+                  <th data-sort class="num">Semantic</th>
+                  <th data-sort class="num">Authority</th>
+                  <th data-sort class="num">Score</th>
+                </tr></thead>
+                <tbody>
+                  {% for r in hits %}
+                    <tr style="animation:fadeUp 300ms var(--ease-out) backwards;animation-delay:{{ loop.index0 * 28 }}ms">
+                      <td class="tiny muted num">{{ r.get('rank', loop.index) }}</td>
+                      <td>
+                        <div class="row" style="gap:7px">
+                          <span class="badge brand">{{ r.get('source') or '—' }}</span>
+                          <b class="truncate" style="max-width:420px">{{ r.get('title') or r.get('host') }}</b>
+                        </div>
+                        <div class="tiny muted truncate" style="max-width:620px">{{ r.get('url') }}</div>
+                        {% if r.get('snippet') %}
+                          <div class="small dim mt-1 clamp-2">{{ r.get('snippet') }}</div>
+                        {% endif %}
+                      </td>
+                      <td class="num tar small">{{ '{:.3f}'.format(r.get('bm25', 0)) }}</td>
+                      <td class="num tar small">
+                        {% if r.get('semantic') %}{{ '{:.3f}'.format(r.get('semantic')) }}
+                        {% else %}<span class="muted">—</span>{% endif %}
+                      </td>
+                      <td class="num tar small">{{ '{:.2f}'.format(r.get('authority', 0)) }}</td>
+                      <td class="num tar"><b>{{ '{:.4f}'.format(r.get('score', 0)) }}</b></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="card-foot">
+              Ranked <code>bm25 × (1 + 0.35 × authority/10)</code>
+              {% if results.get('reranker') != 'none' %}then reranked by
+                <code>{{ results.get('reranker') }}</code>{% endif %}.
+            </div>
+          {% else %}
+            <div class="empty">
+              <div class="ico">∅</div>
+              <h3>Nothing matched “{{ q }}”</h3>
+              <p>Either the term is not in the indexed corpus, or the index has
+                not been built yet. Check <b>In the index</b> to see what is loaded.</p>
+              <a class="btn" href="/app/index">Look at the index</a>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="empty">
+            <div class="ico">🔍</div>
+            <h3>Run a query</h3>
+            <p>Type above and press enter. Try one of these:</p>
+            <div class="row-wrap" style="justify-content:center">
+              {% for example in ['solar panels', 'kubernetes orchestration', 'photovoltaic research', 'site:.edu machine learning'] %}
+                <a class="btn btn-sm" href="/app/search?q={{ example|urlencode }}">{{ example }}</a>
+              {% endfor %}
+            </div>
           </div>
         {% endif %}
-      {% elif not results.get('_error') %}
-        <div class="empty">
-          <div class="ico">🔍</div>
-          <h3>Nothing matched “{{ q }}”</h3>
-          <p>
-            {% if stats.ready %}
-              Try fewer words, a <code>"phrase"</code>, or <code>site:.edu</code>.
-              If the word is a typo, the index may not have learned it yet.
-            {% else %}
-              There is no index to search yet. Build one from free datasets —
-              it takes about 330 MB and then every query is free.
-            {% endif %}
-          </p>
-          <a class="btn btn-primary" href="/app/index">Build the index</a>
+      </div>
+
+      {# ── what is in the index ── #}
+      <div class="tabpanel" data-panel="corpus" role="tabpanel" hidden>
+        {% if stats and stats.get('docs') %}
+          <div class="grid g-3 mb-3">
+            <div class="card stat"><div class="label">Documents</div>
+              <div class="value">{{ stats.get('docs')|num }}</div></div>
+            <div class="card stat"><div class="label">Shards</div>
+              <div class="value">{{ stats.get('shards', 0) }}</div></div>
+            <div class="card stat"><div class="label">Distinct terms</div>
+              <div class="value">{{ stats.get('terms', 0)|num }}</div></div>
+          </div>
+          {% if stats.get('sources') %}
+            <h4 class="mb-2">Sources</h4>
+            <div class="table-wrap">
+              <table class="data">
+                <thead><tr><th data-sort>Source</th><th data-sort class="num">Documents</th>
+                  <th>Share</th></tr></thead>
+                <tbody>
+                  {% set total = stats.get('docs') or 1 %}
+                  {% for src, n in stats.get('sources', {}).items() %}
+                    <tr><td><span class="badge brand">{{ src }}</span></td>
+                      <td class="num tar">{{ n|num }}</td>
+                      <td style="width:45%"><div class="meter">
+                        <i style="width:{{ (n / total * 100)|round(1) }}%"></i></div></td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="empty">
+            <div class="ico">🗂</div>
+            <h3>The index is empty</h3>
+            <p>Nothing to query until a level is built.</p>
+            <a class="btn btn-primary" href="/app/index">Build it</a>
+          </div>
+        {% endif %}
+      </div>
+
+      {# ── syntax ── #}
+      <div class="tabpanel" data-panel="syntax" role="tabpanel" hidden>
+        <div class="grid g-2">
+          <div>
+            <h4 class="mb-2">Operators</h4>
+            <table class="data">
+              <tbody>
+                <tr><td><code>solar panels</code></td><td class="small dim">both terms, either order</td></tr>
+                <tr><td><code>"exact phrase"</code></td><td class="small dim">the words in that order</td></tr>
+                <tr><td><code>solar -blog</code></td><td class="small dim">exclude a term</td></tr>
+                <tr><td><code>site:.edu</code></td><td class="small dim">restrict by host or TLD</td></tr>
+                <tr><td><code>source:wikipedia</code></td><td class="small dim">restrict to one corpus</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4 class="mb-2">How a score is built</h4>
+            <ol class="small dim" style="padding-left:18px">
+              <li><b>BM25</b> shortlists candidates across every shard.</li>
+              <li><b>Phrase and exclusion</b> filters are verified against the
+                real document, which is why they are not stored in the index.</li>
+              <li><b>Authority</b> (Open PageRank 0–10) multiplies the score.</li>
+              <li><b>Reranker</b>, if one is loaded, reorders the shortlist.</li>
+              <li><b>Host collapse</b> keeps one result per site so discovery
+                returns websites, not pages.</li>
+            </ol>
+            <div class="code mt-2">score = bm25 × (1 + 0.35 × authority / 10)</div>
+          </div>
         </div>
-      {% endif %}
-    </div>
-
-    {# ------------------------------------------------------------ sidebar -- #}
-    <div class="stack">
-      <div class="card card-pad">
-        <h3 class="mb-2">Search options</h3>
-        <form action="/app/search" method="get" class="stack-sm">
-          <input type="hidden" name="q" value="{{ q }}">
-          <div class="field">
-            <label for="source">Source</label>
-            <select class="select" id="source" name="source">
-              <option value="">All sources</option>
-              {% for s in ['curlie', 'wikipedia', 'commoncrawl', 'seed'] %}
-                <option value="{{ s }}" {% if source == s %}selected{% endif %}>{{ s }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="field">
-            <label for="rerank">Reranking</label>
-            <select class="select" id="rerank" name="rerank">
-              <option value="">Default</option>
-              <option value="none" {% if rerank == 'none' %}selected{% endif %}>none (BM25 only)</option>
-              <option value="embedding" {% if rerank == 'embedding' %}selected{% endif %}>embedding</option>
-              <option value="cross-encoder" {% if rerank == 'cross-encoder' %}selected{% endif %}>cross-encoder</option>
-            </select>
-            <span class="hint">Semantic reranking needs sentence-transformers;
-              without it the engine says so and falls back to BM25.</span>
-          </div>
-          <div class="field">
-            <label for="limit">Results</label>
-            <select class="select" id="limit" name="limit">
-              {% for n in [10, 20, 50] %}
-                <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="check">
-            <input type="checkbox" id="collapse" name="collapse" value="1"
-                   {% if collapse == '1' %}checked{% endif %}>
-            <label for="collapse">One result per website</label>
-          </div>
-          <button class="btn btn-primary btn-block mt-1">Apply</button>
-        </form>
-      </div>
-
-      <div class="card card-pad">
-        <h3 class="mb-2">Query syntax</h3>
-        <dl class="kv small">
-          <dt><code>solar panels</code></dt><dd>any of the words</dd>
-          <dt><code>"solar panels"</code></dt><dd>exact phrase</dd>
-          <dt><code>solar -blog</code></dt><dd>exclude a word</dd>
-          <dt><code>site:.edu</code></dt><dd>host suffix</dd>
-          <dt><code>source:wikipedia</code></dt><dd>one source only</dd>
-        </dl>
-      </div>
-
-      <div class="card card-pad">
-        <h3 class="mb-2">Index</h3>
-        <dl class="kv small">
-          <dt>Documents</dt><dd>{{ stats.get('docs', 0)|num }}</dd>
-          <dt>Shards</dt><dd>{{ stats.get('shards', 0) }}</dd>
-          <dt>Terms</dt><dd>{{ stats.get('terms', 0)|num }}</dd>
-          <dt>Level</dt><dd>{{ stats.get('level', 0) }}</dd>
-          <dt>Reranker</dt><dd>{{ stats.get('reranker', 'none') }}</dd>
-        </dl>
-        <a class="btn btn-block mt-2" href="/app/index">Manage index</a>
       </div>
     </div>
   </div>
-{% endif %}
+
+  {# ── side rail ── #}
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">Why own it</h3>
+      <ul class="stack-sm small dim" style="list-style:none;padding:0">
+        <li>✓ <b>$0 per query</b> — the cost is disk and one build</li>
+        <li>✓ Works with the network unplugged</li>
+        <li>✓ You can explain every result, because you chose the corpus</li>
+        <li>✓ Nobody can change ranking underneath you</li>
+      </ul>
+      <div class="alert warn mt-2 small">
+        <span class="ico">!</span>
+        <span>It is not Google. It is an index of openly licensed datasets —
+          strong for discovery, not for long-tail freshness.</span>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Index</h3>
+      <dl class="kv small">
+        <dt class="muted">Documents</dt><dd>{{ stats.get('docs', 0)|num }}</dd>
+        <dt class="muted">Shards</dt><dd>{{ stats.get('shards', 0) }}</dd>
+        <dt class="muted">Terms</dt><dd>{{ stats.get('terms', 0)|num }}</dd>
+        <dt class="muted">Reranker</dt><dd>{{ stats.get('reranker', 'none') }}</dd>
+        <dt class="muted">Ready</dt>
+        <dd>{% if stats.get('ready') %}<span class="badge ok">yes</span>
+          {% else %}<span class="badge warn">not built</span>{% endif %}</dd>
+      </dl>
+      <a class="btn btn-block mt-2" href="/app/index">Index operations</a>
+    </div>
+  </div>
+</div>
 {% endblock %}

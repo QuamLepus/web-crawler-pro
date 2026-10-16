@@ -1,61 +1,85 @@
 {% extends "base.html" %}
+{% block bodyclass %} class="land"{% endblock %}
+
 {% block body %}
-<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:
-  radial-gradient(60% 60% at 20% 10%, rgba(99,102,241,.18), transparent 70%),
-  radial-gradient(50% 50% at 85% 20%, rgba(6,182,212,.14), transparent 70%)">
-  <div style="width:100%;max-width:420px">
-    <div class="center mb-3">
-      <div style="font-size:34px">🕷</div>
-      <h1 style="font-size:23px;margin-top:6px">
-        WebCrawler<span style="color:var(--brand-600)">Pro</span>
-      </h1>
-      <p class="small muted mt-1">
-        {% if mode == 'signup' %}Create a workspace — the free tier is real.{% else %}Welcome back.{% endif %}
-      </p>
-    </div>
+<nav class="land-nav">
+  <a class="row" href="/" style="gap:10px;color:#fff">
+    <span style="font-size:19px">🕷</span>
+    <b style="font-size:15px;letter-spacing:-.02em">WebCrawler<span style="color:var(--brand-300)">Pro</span></b>
+  </a>
+  <div class="push">
+    <button class="icon-btn" data-theme-toggle title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+    <a class="btn btn-ghost" href="{% if mode == 'login' %}/signup{% else %}/login{% endif %}">
+      {% if mode == 'login' %}Create an account{% else %}Sign in{% endif %}
+    </a>
+  </div>
+</nav>
 
-    <div class="card card-pad">
-      {% for e in errors %}
-        <div class="alert danger mb-2"><span class="ico">✕</span><span>{{ e }}</span></div>
-      {% endfor %}
+<div style="display:grid;place-items:center;min-height:calc(100vh - 62px);padding:40px 20px;position:relative;overflow:hidden">
+  <div style="position:absolute;inset:0;pointer-events:none;
+       background:radial-gradient(50% 40% at 50% 0%, rgba(99,102,241,.28), transparent 65%)"></div>
 
-      <form method="post" class="stack" autocomplete="on">
-        {% if mode == 'signup' %}
+  <div style="width:min(430px,100%);position:relative;z-index:1;animation:scaleIn 320ms var(--ease-out)">
+    <div class="card" style="background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.1)">
+      <div class="card-pad" style="padding:26px">
+        <div class="center mb-3">
+          <div style="width:46px;height:46px;border-radius:13px;display:grid;place-items:center;
+               margin:0 auto 12px;font-size:22px;
+               background:linear-gradient(135deg,var(--brand-500),var(--accent-500));
+               box-shadow:0 8px 26px rgba(99,102,241,.45)">🕷</div>
+          <h1 style="font-size:21px;color:#fff">
+            {% if mode == 'login' %}Sign in to your workspace{% else %}Create a workspace{% endif %}
+          </h1>
+          <p class="small" style="color:#8a93ad">
+            {% if mode == 'login' %}
+              Crawl, discover and query the index you own.
+            {% else %}
+              Free tier: 1,000 pages a month and a level-0 index at no cost.
+            {% endif %}
+          </p>
+        </div>
+
+        {% for e in errors %}
+          <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ e }}</span></div>
+        {% endfor %}
+
+        <form method="post" action="{% if mode == 'login' %}/login{% else %}/signup{% endif %}"
+              class="stack">
+          {% if mode == 'signup' %}
+            <div class="field">
+              <label for="org_name">Organisation</label>
+              <input class="input" id="org_name" name="org_name" required
+                     value="{{ org_name or '' }}" placeholder="Acme Labs" data-autofocus>
+            </div>
+          {% endif %}
           <div class="field">
-            <label for="org_name">Workspace name</label>
-            <input class="input" id="org_name" name="org_name" required
-                   value="{{ org_name or '' }}" placeholder="Acme Data" autofocus>
+            <label for="email">Email</label>
+            <input class="input" id="email" name="email" type="email" required
+                   value="{{ email or '' }}" placeholder="you@example.com"
+                   {% if mode == 'login' %}data-autofocus{% endif %}>
           </div>
-        {% endif %}
-        <div class="field">
-          <label for="email">Email</label>
-          <input class="input" id="email" name="email" type="email" required
-                 value="{{ email or '' }}" placeholder="you@example.com"
-                 {% if mode != 'signup' %}autofocus{% endif %}>
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input class="input" id="password" name="password" type="password" required
-                 minlength="8" placeholder="at least 8 characters">
-          {% if mode == 'signup' %}<span class="hint">Minimum 8 characters.</span>{% endif %}
-        </div>
-        <button class="btn btn-primary btn-block btn-lg" type="submit">
-          {% if mode == 'signup' %}Create workspace{% else %}Sign in{% endif %}
-        </button>
-      </form>
-
-      <div class="divider"></div>
-      <p class="small muted center">
-        {% if mode == 'signup' %}
-          Already have an account? <a href="/login">Sign in</a>
-        {% else %}
-          New here? <a href="/signup">Create a free workspace</a>
-        {% endif %}
-      </p>
+          <div class="field">
+            <label for="password">Password</label>
+            <input class="input" id="password" name="password" type="password" required
+                   minlength="8" placeholder="at least 8 characters">
+            <span class="hint">Eight characters minimum. It is hashed, never stored in plain text.</span>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" data-busy="One moment…">
+            {% if mode == 'login' %}Sign in{% else %}Create the workspace{% endif %}
+          </button>
+        </form>
+      </div>
     </div>
 
-    <p class="tiny muted center mt-3">
-      <a href="/">← Back to the overview</a>
+    <p class="center small mt-3" style="color:#7c86a1">
+      {% if mode == 'login' %}
+        No account yet? <a href="/signup">Create one</a> — the free tier needs no card.
+      {% else %}
+        Already have one? <a href="/login">Sign in</a>.
+      {% endif %}
+    </p>
+    <p class="center tiny mt-2" style="color:#5f6883">
+      Built by SWADHIN · Apache-2.0 · self-hostable
     </p>
   </div>
 </div>

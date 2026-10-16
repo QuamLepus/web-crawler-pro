@@ -1,14 +1,21 @@
 {% extends "base.html" %}
 {% set u = usage or {} %}
 {% set plan_list = plans or [] %}
-{% set remaining = u.get('quota_remaining_pct', 1) or 1 %}
-{% set used_pct = (remaining * 100) if remaining <= 1 else remaining %}
+{% set remaining = (u.get('quota_remaining_pct') if u.get('quota_remaining_pct') is not none else 100) %}
 
 {% block content %}
 <div class="page-head">
-  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Billing &amp; usage</span></div>
-  <h1>Billing &amp; usage</h1>
-  <p class="dim">Pages are what cost money. Searching your own index does not.</p>
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Usage &amp; billing</span></div>
+  <div class="between">
+    <div>
+      <h1>Usage &amp; billing</h1>
+      <p class="dim">
+        Pages are what cost money. Querying your own index does not — that is
+        the whole point of owning it.
+      </p>
+    </div>
+    <a class="btn" href="/pricing">Compare plans</a>
+  </div>
 </div>
 
 {% if error %}
@@ -18,7 +25,7 @@
 <div class="grid g-4 mb-3">
   <div class="card stat">
     <div class="label">Plan</div>
-    <div class="value" style="font-size:22px;padding-top:4px">{{ u.get('plan', 'free') }}</div>
+    <div class="value" style="font-size:21px;padding-top:5px">{{ u.get('plan', 'free') }}</div>
     <div class="delta muted">period {{ u.get('period', '—') }}</div>
   </div>
   <div class="card stat">
@@ -28,7 +35,7 @@
   </div>
   <div class="card stat">
     <div class="label">Storage</div>
-    <div class="value" style="font-size:22px;padding-top:4px">{{ u.get('storage_bytes', 0)|bytes }}</div>
+    <div class="value" style="font-size:21px;padding-top:5px">{{ u.get('storage_bytes', 0)|bytes }}</div>
     <div class="delta muted">{{ u.get('tokens_generated', 0)|num }} tokens</div>
   </div>
   <div class="card stat">
@@ -44,43 +51,27 @@
       <div class="between mb-2">
         <h3>Quota remaining</h3><b>{{ remaining|pct }}</b>
       </div>
-      <div class="meter {{ 'danger' if used_pct < 20 else ('warn' if used_pct < 50 else 'ok') }}"
-           style="height:12px">
-        <i style="width:{{ used_pct }}%"></i>
+      <div class="meter {{ 'danger' if remaining < 20 else ('warn' if remaining < 50 else 'ok') }}"
+           style="height:11px">
+        <i style="width:{{ remaining }}%"></i>
       </div>
       <p class="small muted mt-2">
-        {% if used_pct < 20 %}
-          You are close to the ceiling. Overage is billed per page, or move up a
-          plan — whichever is cheaper for how you actually use it.
+        {% if remaining < 20 %}
+          Close to the ceiling. Overage is billed per page, or move up a plan —
+          whichever is cheaper for how you actually use it.
         {% else %}
           Plenty left. Overage only kicks in past the plan's page allowance.
         {% endif %}
       </p>
-      <div class="divider"></div>
-      <div class="chart">
-        <div class="bars">
-          {% for i in range(14) %}
-            <div style="height:{{ [18, 34, 26, 52, 41, 63, 48, 72, 58, 84, 66, 91, 74, 88][i] }}%"
-                 title="day {{ i + 1 }}"></div>
-          {% endfor %}
-        </div>
-      </div>
-      <p class="tiny muted mt-1 center">Pages per day, last 14 days</p>
-    </div>
 
-    <div class="card">
-      <div class="card-head">
-        <h3>Invoice</h3>
-        {% if invoices and invoices.get('period') %}
-          <span class="badge">{{ invoices.get('period') }}</span>
-        {% endif %}
-      </div>
+      <div class="divider"></div>
+
+      <h3 class="mb-2">Invoice</h3>
       {% if invoices and invoices.get('lines') %}
         <div class="table-wrap">
           <table class="data">
             <thead><tr><th data-sort>Line</th><th data-sort class="num">Quantity</th>
-              <th data-sort class="num">Unit cost</th>
-              <th data-sort class="num">Amount</th></tr></thead>
+              <th data-sort class="num">Unit cost</th><th data-sort class="num">Amount</th></tr></thead>
             <tbody>
               {% for ln in invoices.get('lines', []) %}
                 <tr>
@@ -99,16 +90,17 @@
             </tfoot>
           </table>
         </div>
-        <div class="card-foot small muted">
-          Tenant <code class="mono">{{ invoices.get('tenant', '—') }}</code> ·
-          periods are calendar months; usage resets on the 1st.
-        </div>
+        <p class="tiny muted mt-2">
+          Period {{ invoices.get('period', '—') }} ·
+          tenant <code class="mono">{{ invoices.get('tenant', '—') }}</code> ·
+          usage resets on the 1st.
+        </p>
       {% else %}
-        <div class="empty">
+        <div class="empty" style="padding:26px">
           <div class="ico">🧾</div>
-          <h3>Nothing to invoice yet</h3>
-          <p>You are on the free plan and have not crossed into overage.
-            When you do, the lines appear here.</p>
+          <h3>Nothing to invoice</h3>
+          <p>You are on the free plan and have not crossed into overage. When
+            you do, every line appears here with its unit cost.</p>
         </div>
       {% endif %}
     </div>
@@ -135,7 +127,7 @@
               {% else %}
                 <span>unlimited pages</span>
               {% endif %}
-              {% if p.get('concurrency') %}<span>{{ p.get('concurrency') }} jobs</span>{% endif %}
+              {% if p.get('concurrency') %}<span>{{ p.get('concurrency') }} jobs at once</span>{% endif %}
             </div>
             {% if p.get('overage') %}
               <div class="tiny muted mt-1">overage ${{ '{:,.5f}'.format(p.get('overage')) }}/page</div>
@@ -150,15 +142,12 @@
           </p>
         {% endif %}
       </div>
-      <div class="card-foot">
-        <a class="btn btn-block" href="/pricing">Compare plans</a>
-      </div>
     </div>
 
     <div class="card card-pad">
       <h3 class="mb-2">What actually costs money</h3>
-      <ul class="stack-sm small dim">
-        <li><b>Pages fetched</b> — bandwidth, proxies, CAPTCHAs, storage.</li>
+      <ul class="stack-sm small dim" style="list-style:none;padding:0">
+        <li><b>Pages fetched</b> — bandwidth, proxies, storage.</li>
         <li><b>Storage</b> — how long you keep what you crawled.</li>
         <li><b>Tokens</b> — if you run extraction or RAG over the pages.</li>
         <li><b>Nothing per query</b> — your own index is already paid for.</li>
@@ -167,7 +156,7 @@
         <span class="ico">i</span>
         <span>Billing runs through Stripe. With no
           <code>STRIPE_SECRET_KEY</code> set, the gateway records usage locally
-          and never charges — which is how the demo works.</span>
+          and never charges — which is how this demo runs.</span>
       </div>
     </div>
   </div>

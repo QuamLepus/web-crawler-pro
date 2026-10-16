@@ -25,11 +25,26 @@ _SUFFIXES = (
     ("est", ""), ("edly", ""), ("ly", ""), ("ed", ""), ("es", ""), ("s", ""),
 )
 
+# The optional C fast path. Configured from the constants above rather than
+# carrying its own copy of them, and used only for ASCII input — see
+# src/search_index/native.py for the reasoning.
+try:  # pragma: no cover - exercised via scripts/bench-tokenizer.py
+    from src.search_index import native as _native
+
+    _NATIVE = _native.configure(STOPWORDS, _SUFFIXES)
+except Exception:  # noqa: BLE001 - a missing .so must never break indexing
+    _native = None  # type: ignore[assignment]
+    _NATIVE = False
+
 
 def tokenize(text: str) -> list[str]:
     """Split ``text`` into lower-cased word tokens."""
     if not text:
         return []
+    if _NATIVE:
+        fast = _native.tokenize(text)
+        if fast is not None:
+            return fast
     return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 
@@ -55,6 +70,12 @@ def iter_terms(text: str) -> Iterator[tuple[str, str]]:
     a term to a human (the spelling dictionary, notably) needs it back, and
     re-deriving it later means tokenising the corpus a second time.
     """
+    if _NATIVE:
+        flat = _native.analyze_pairs(text)
+        if flat is not None:
+            for i in range(0, len(flat) - 1, 2):
+                yield flat[i], flat[i + 1]
+            return
     for tok in tokenize(text):
         if tok in STOPWORDS:
             continue
@@ -65,6 +86,10 @@ def iter_terms(text: str) -> Iterator[tuple[str, str]]:
 
 def analyze(text: str, *, drop_stopwords: bool = True) -> list[str]:
     """Tokenise + stem, optionally dropping stopwords."""
+    if _NATIVE:
+        fast = _native.analyze(text, drop_stopwords)
+        if fast is not None:
+            return fast
     out: list[str] = []
     for tok in tokenize(text):
         if drop_stopwords and tok in STOPWORDS:
