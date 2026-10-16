@@ -32,11 +32,26 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 
 def _load_stripe() -> Any:
+    """Return the real Stripe SDK, or ``None`` to use the :class:`FakeStripe` shim.
+
+    The shim exists for *unconfigured* deployments, not merely for missing
+    packages. Previously any host with the SDK installed but no key set got the
+    real client back with ``stripe.api_key`` unset, so every call died with
+    "No API key provided" and ``/billing/checkout`` answered 502 on a freshly
+    self-hosted box. Requiring the key here makes local/dev flows work
+    end-to-end, which is what the module docstring already promises.
+
+    The key is read at call time (not captured at import) so it can be
+    configured or patched after this module is imported.
+    """
+    secret_key = os.getenv("STRIPE_SECRET_KEY", STRIPE_SECRET_KEY)
+    if not secret_key:
+        logger.warning("STRIPE_SECRET_KEY not set - using FakeStripe shim")
+        return None
     try:
         import stripe  # type: ignore
 
-        if STRIPE_SECRET_KEY:
-            stripe.api_key = STRIPE_SECRET_KEY
+        stripe.api_key = secret_key
         return stripe
     except ImportError:
         logger.warning("stripe SDK not installed - using FakeStripe shim")

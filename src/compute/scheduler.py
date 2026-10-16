@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -132,14 +132,19 @@ class SchedulerService:
         logger.info("submitted job %s (%s, prio=%s)", spec.job_id, spec.kind, spec.priority.name)
         return spec.job_id
 
+    # Job kind -> Celery task name. Declared at class level (not buried in the
+    # dispatch helper) so tests can assert every mapped task really exists:
+    # a stale name here is accepted by the broker and silently dropped, leaving
+    # jobs stuck in "queued" with no error anywhere.
+    _TASK_MAP: ClassVar[dict[str, str]] = {
+        "crawl_job": "workers.crawl_tasks.crawl_domain",
+        "ingest_source": "workers.crawl_tasks.run_source_refresh",
+        "tokenize": "workers.crawl_tasks.tokenize_stage",
+        "dedupe": "workers.crawl_tasks.dedupe_stage",
+    }
+
     def _submit_celery(self, spec: JobSpec) -> None:  # pragma: no cover - needs broker
-        task_map = {
-            "crawl_job": "workers.crawl_tasks.crawl_domain",
-            "ingest_source": "workers.crawl_tasks.run_source_refresh",
-            "tokenize": "workers.crawl_tasks.tokenize_stage",
-            "dedupe": "workers.crawl_tasks.dedupe_stage",
-        }
-        name = task_map.get(spec.kind)
+        name = self._TASK_MAP.get(spec.kind)
         if not name:
             raise ValueError(f"no celery task mapped for kind {spec.kind}")
         self.app.send_task(name, args=[spec.payload], queue=spec.priority.queue,

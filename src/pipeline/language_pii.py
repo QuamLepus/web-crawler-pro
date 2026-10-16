@@ -55,13 +55,23 @@ class PIIRedactor:
     )):
         self.entities = entities
         self._nlp = None
+        self._analyzer = self._anonymizer = None
         try:
             from presidio_analyzer import AnalyzerEngine
             from presidio_anonymizer import AnonymizerEngine
 
             self._analyzer = AnalyzerEngine()
             self._anonymizer = AnonymizerEngine()
-        except ImportError:
+        except Exception as exc:  # noqa: BLE001 - optional dependency
+            # Presidio is *optional*. A missing package is only one of the ways
+            # this can fail: ``AnalyzerEngine()`` also provisions an NLP model
+            # (downloading spaCy weights on first use), which raises OSError /
+            # requests exceptions on air-gapped or offline hosts. Swallowing
+            # only ImportError let those failures escape the constructor and
+            # took the whole pipeline down on machines where the regex sweep
+            # would have been perfectly adequate.
+            logger.warning("presidio unavailable (%s); falling back to "
+                           "regex-only PII redaction", exc)
             self._analyzer = self._anonymizer = None
 
     def redact(self, text: str) -> str:
