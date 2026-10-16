@@ -33,14 +33,30 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
 from src.search_index.text import ParsedQuery
 
 SHARDS_FILE = "shards.json"
+#: Per-document vectors stored beside the BM25 arrays, aligned with rowids.npy.
+EMBEDDINGS_FILE = "embeddings.npy"
+EMBEDDINGS_META = "embeddings.json"
 MAX_TF = 0xFFFF          # tf saturates here so postings fit in uint16
 MAX_TOKENS_PER_DOC = 512  # caps postings per document; see module docstring
+
+
+class Hit(NamedTuple):
+    """One candidate: the document's rowid, its BM25 score, and its shard.
+
+    ``shard_id`` is carried along so a vector reranker can fetch that document's
+    precomputed embedding straight out of the shard that produced it.
+    """
+
+    rowid: int
+    score: float
+    shard_id: int = -1
 
 
 @dataclass(slots=True)
@@ -169,6 +185,39 @@ class BM25Shard:
         shard.doclen = np.load(directory / "doclen.npy", mmap_mode=mode)
         shard.rowids = np.load(directory / "rowids.npy", mmap_mode=mode)
         return shard
+
+    # -- embeddings ---------------------------------------------------------- #
+    def save_embeddings(self, directory: str | Path, vectors: np.ndarray, *,
+                        model: str = "", dim: int | None = None) -> Path:
+        """Store per-document vectors aligned row-for-row with ``rowids.npy``."""
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        array = np.ascontiguousarray(vectors, dtype="float32")
+        if array.ndim != 2 or array.shape[0] != self.meta.doc_count:
+            raise ValueError(
+                f"expected ({self.meta.doc_count}, dim) vectors, got {array.shape}")
+        np.save(directory / EMBEDDINGS_FILE, array)
+        meta = {"model": model, "dim": int(array.shape[1]),
+                "docs": int(array.shape[0]), "dtype": "float32",
+                "shard_id": self.meta.shard_id}
+        (directory / EMBEDDINGS_META).write_text(
+            json.dumps(meta), encoding="utf-8")
+        return directory / EMBEDDINGS_FILE
+
+    @staticmethod
+    def load_embeddings(directory: str | Path
+                        ) -> tuple[np.ndarray, dict] | None:
+        """Memory-mapped ``(vectors, meta)`` for one shard, or ``None``."""
+        directory = Path(directory)
+        path = directory / EMBEDDINGS_FILE
+        if not path.exists():
+            return None
+        try:
+            vectors = np.load(path, mmap_mode="r")
+            meta = json.loads((directory / EMBEDDINGS_META).read_text())
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        return vectors, meta
 
     # -- search -------------------------------------------------------------- #
     def search(self, terms: Sequence[str], top_k: int, *,
@@ -327,8 +376,8 @@ class ShardedBM25:
     # -- search -------------------------------------------------------------- #
     def search(self, parsed: ParsedQuery, top_k: int = 10, *,
                sources: Sequence[str] | None = None,
-               oversample: int = 4) -> list[tuple[int, float]]:
-        """Return ``[(rowid, bm25_score), ...]`` best-first across all shards."""
+               oversample: int = 4) -> list[Hit]:
+        """Return :class:`Hit` candidates best-first across all shards."""
         if not self._metas or parsed.is_empty:
             return []
         self._ensure_global_idf()
@@ -337,7 +386,7 @@ class ShardedBM25:
         # ask each shard for more than we need: phrase/exclusion checks and
         # host collapsing both prune afterwards
         per_shard = max(top_k * oversample, 20)
-        merged: list[tuple[int, float]] = []
+        best: dict[int, Hit] = {}
         for meta in self._metas:
             if wanted and meta.source.lower() not in wanted:
                 continue
@@ -350,20 +399,23 @@ class ShardedBM25:
                     global_idf=self._global_idf, global_avgdl=self._global_avgdl)
             except (ValueError, IndexError, OSError):
                 continue
-            merged.extend(zip(rowids.tolist(), scores.tolist()))
+            for rowid, score in zip(rowids.tolist(), scores.tolist()):
+                # the same document can be reached through two shards (two parts
+                # of a merged build both indexed it) — keep its best score
+                previous = best.get(rowid)
+                if previous is None or score > previous.score:
+                    best[rowid] = Hit(rowid, float(score), meta.shard_id)
 
-        # The same document can be reached through two shards (e.g. two parts
-        # of a merged build both indexed it) — keep its best score only.
-        best: dict[int, float] = {}
-        for rowid, score in merged:
-            if score > best.get(rowid, -1.0):
-                best[rowid] = score
-        merged = sorted(best.items(), key=lambda pair: pair[1], reverse=True)
+        merged = sorted(best.values(), key=lambda hit: hit.score, reverse=True)
         return merged[: max(top_k * oversample, top_k)]
 
     def stats(self) -> dict:
+        embedded = sum(
+            1 for m in self._metas
+            if (self.index_dir / m.path / EMBEDDINGS_FILE).exists())
         return {
             "shards": self.shard_count,
+            "shards_with_embeddings": embedded,
             "docs": self.doc_count,
             "terms": self.term_count,
             "loaded_shards": len(self._loaded),

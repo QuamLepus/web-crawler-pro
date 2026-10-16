@@ -139,15 +139,21 @@ def best_window(text: str, terms: list[str], width: int = 240) -> str:
     if not wanted:
         return text[:width]
 
-    # positions in *character* space, so we can slice the original string
+    # Positions in *character* space, so we can slice the original string.
+    # ``tokenize`` normalises (lower-cases, splits on punctuation), so a token
+    # is not guaranteed to be findable in the raw text; when that happens we
+    # fall back to the running offset instead of dropping the token — the
+    # spans must stay the same length as ``stems`` or the window maths below
+    # walks off the end.
     spans: list[tuple[int, int]] = []
     idx = 0
-    for tok in tokenize(text):
+    for tok in toks:
         pos = text.find(tok, idx)
+        end = (pos + len(tok)) if pos >= 0 else min(len(text), idx + len(tok))
         if pos < 0:
-            break
-        spans.append((pos, pos + len(tok)))
-        idx = pos + len(tok)
+            pos = min(idx, len(text))
+        spans.append((pos, end))
+        idx = end
 
     hits = [i for i, s in enumerate(stems) if s in wanted]
     if not hits:

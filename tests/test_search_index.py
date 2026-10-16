@@ -318,11 +318,11 @@ def test_sharded_bm25_merges_across_shards(tmp_path):
     index = ShardedBM25(root)
     assert index.shard_count == 2 and index.doc_count == 4
     hits = index.search(parse_query("solar"), 10)
-    assert next(rid for rid, _ in hits) == 3      # two mentions beats one
-    assert 1 in [rid for rid, _ in hits]
+    assert next(hit.rowid for hit in hits) == 3    # two mentions beats one
+    assert 1 in [hit.rowid for hit in hits]
 
     only_b = index.search(parse_query("solar"), 10, sources=["b"])
-    assert [rid for rid, _ in only_b] == [3]
+    assert [hit.rowid for hit in only_b] == [3]
 
 
 # --------------------------------------------------------------------------- #

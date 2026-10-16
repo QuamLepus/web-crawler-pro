@@ -44,6 +44,10 @@ class OwnIndexProvider:
 
         cfg = get_config()
         self.index_dir = Path(index_dir or cfg.SEARCH_INDEX_DIR) / "index"
+        self.rerank = cfg.SEARCH_INDEX_RERANK
+        self.rerank_weight = cfg.SEARCH_INDEX_RERANK_WEIGHT
+        self.embed_model = cfg.SEARCH_INDEX_EMBED_MODEL
+        self.spell = cfg.SEARCH_INDEX_SPELL
         self.collapse_host = (cfg.SEARCH_INDEX_COLLAPSE_HOST
                               if collapse_host is None else collapse_host)
         self.authority_weight = (cfg.SEARCH_INDEX_AUTHORITY_WEIGHT
@@ -64,7 +68,9 @@ class OwnIndexProvider:
                     self.index_dir, mmap=self._mmap,
                     collapse_host=self.collapse_host,
                     authority_weight=self.authority_weight,
-                    snippet_width=self.snippet_width)
+                    snippet_width=self.snippet_width,
+                    rerank=self.rerank, rerank_weight=self.rerank_weight,
+                    embed_model=self.embed_model, spell=self.spell)
             except Exception as exc:  # noqa: BLE001 - "no index" is a normal state
                 self._unavailable = True
                 logger.debug("own index unavailable at %s: %s", self.index_dir, exc)

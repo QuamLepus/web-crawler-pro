@@ -127,6 +127,22 @@ class Config:
     # Memory-map the shard arrays (lets the index be larger than RAM).
     SEARCH_INDEX_MMAP = _env("SEARCH_INDEX_MMAP", "true").lower() == "true"
     SEARCH_INDEX_MAX_LOADED_SHARDS = int(_env("SEARCH_INDEX_MAX_LOADED_SHARDS", 8))
+
+    # -- own index, optional layers ---------------------------------------- #
+    # Second-stage reranking: none | embedding | cross-encoder.
+    # "embedding" needs sentence-transformers (pip install sentence-transformers);
+    # without it the reranker switches itself off rather than pretending.
+    SEARCH_INDEX_RERANK = _env("SEARCH_INDEX_RERANK", "none").lower()
+    SEARCH_INDEX_RERANK_WEIGHT = float(_env("SEARCH_INDEX_RERANK_WEIGHT", 0.35))
+    SEARCH_INDEX_RERANK_CANDIDATES = int(_env("SEARCH_INDEX_RERANK_CANDIDATES", 100))
+    SEARCH_INDEX_EMBED_MODEL = _env("SEARCH_INDEX_EMBED_MODEL", "all-MiniLM-L6-v2")
+    # Write per-document vectors at index time (fast reranking, extra disk).
+    SEARCH_INDEX_EMBEDDINGS = _env("SEARCH_INDEX_EMBEDDINGS", "false").lower() == "true"
+    # Spelling correction trained on the index's own vocabulary.
+    SEARCH_INDEX_SPELL = _env("SEARCH_INDEX_SPELL", "true").lower() == "true"
+    SEARCH_INDEX_SPELL_MAX_TERMS = int(_env("SEARCH_INDEX_SPELL_MAX_TERMS", 30_000))
+    # Skip pages that have not changed when re-ingesting a crawl.
+    SEARCH_INDEX_INCREMENTAL = _env("SEARCH_INDEX_INCREMENTAL", "true").lower() == "true"
     # Auto-register OwnIndexProvider in discovery when an index exists.
     DISCOVERY_USE_OWN_INDEX = (
         _env("DISCOVERY_USE_OWN_INDEX", "true").lower() == "true")

@@ -31,7 +31,12 @@ from typing import Self
 
 import numpy as np
 
-from src.search_index.bm25 import SHARDS_FILE, ShardMeta
+from src.search_index.bm25 import (
+    EMBEDDINGS_FILE,
+    EMBEDDINGS_META,
+    SHARDS_FILE,
+    ShardMeta,
+)
 from src.search_index.indexer import STATE_FILE, STATE_VERSION, _now
 from src.search_index.models import IndexStats
 from src.search_index.store import COLUMNS, DocStore
@@ -40,8 +45,9 @@ logger = logging.getLogger(__name__)
 
 _COPY_BATCH = 20_000
 _INSERT_SQL = ("INSERT OR IGNORE INTO docs "
-               "(url, host, title, snippet, body, source, authority, quality, lang, indexed_at) "
-               "VALUES (?,?,?,?,?,?,?,?,?,?)")
+               "(url, host, title, snippet, body, source, authority, quality, "
+               "lang, indexed_at, content_hash, snapshot) "
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
 
 
 @dataclass
@@ -246,6 +252,11 @@ class IndexMerger:
     def finalize(self) -> IndexStats:
         """Write ``shards.json`` / ``state.json`` and return the final stats."""
         self._write_shards()
+        # Merging renumbers every rowid, which is precisely what the per-shard
+        # embedding vectors are indexed by. Stale vectors would silently score
+        # the wrong documents, so they are dropped here and rebuilt on the
+        # merged index with `wcp search-index embeddings`.
+        self._drop_embeddings()
         level = max(self._levels) if self._levels else 0
         state = {
             "version": STATE_VERSION,
@@ -267,6 +278,21 @@ class IndexMerger:
             json.dumps(state, indent=2), encoding="utf-8")
         self.store.vacuum()
         return self.stats()
+
+    def _drop_embeddings(self) -> int:
+        """Delete embedding vectors whose rowids no longer line up."""
+        dropped = 0
+        for meta in self._metas:
+            directory = (self.out_dir / meta.path).parent \
+                if (self.out_dir / meta.path).is_file() else self.out_dir / meta.path
+            for name in (EMBEDDINGS_FILE, EMBEDDINGS_META):
+                target = directory / name
+                if target.exists():
+                    target.unlink()
+                    dropped += 1
+        if dropped:
+            logger.info("merge: dropped %d stale embedding file(s)", dropped)
+        return dropped
 
     def stats(self) -> IndexStats:
         return IndexStats(

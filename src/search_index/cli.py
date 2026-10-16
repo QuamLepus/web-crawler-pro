@@ -8,6 +8,9 @@
     wcp search-index query  "renewable energy"   # does it actually work
     wcp search-index authority                   # backfill PageRank scores
     wcp search-index merge part0 part1 --out all # combine parallel builds
+    wcp search-index embeddings                # vectors for reranking
+    wcp search-index spell --check solr        # train on our vocabulary
+    wcp search-index refresh --snapshot CC-MAIN-2026-40
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from pathlib import Path
 
 from src.search_index.download import human_bytes
 from src.search_index.models import LEVELS, LevelSpec, level_spec
@@ -113,6 +117,9 @@ def cmd_build(args: argparse.Namespace) -> int:
         quality_filter=not args.no_quality_filter,
         authority=not args.no_authority,
         keep_body=not args.drop_body,
+        incremental=not args.no_incremental,
+        embeddings=bool(getattr(args, "embeddings", False)),
+        embed_model=getattr(args, "embed_model", "") or "",
         wikipedia_date=args.wikipedia_date or "",
         commoncrawl_snapshot=args.snapshot or "",
     )
@@ -158,17 +165,16 @@ def cmd_status(args: argparse.Namespace) -> int:
     from src.search_index.indexer import SearchIndexBuilder
 
     path = args.data_dir
-    builder = SearchIndexBuilder(path, options=_options_from_args(args))
-    try:
+    with SearchIndexBuilder(path, options=_options_from_args(args)) as builder:
         stats = builder.stats()
-    finally:
-        builder.close()
+        if not stats.ready:
+            print(_yellow(f"No index at {path} yet."))
+            print(_dim("Build one with:  python -m src.cli search-index build --level 0"))
+            return 1
+        return _print_status(builder, stats, path)
 
-    if not stats.ready:
-        print(_yellow(f"No index at {path} yet."))
-        print(_dim("Build one with:  python -m src.cli search-index build --level 0"))
-        return 1
 
+def _print_status(builder, stats, path: str) -> int:
     print(_bold("Own search index"))
     print(f"  directory : {stats.index_dir}")
     print(f"  level     : {stats.level}")
@@ -182,10 +188,33 @@ def cmd_status(args: argparse.Namespace) -> int:
     if stats.state:
         print("  progress  :")
         for name, data in sorted(stats.state.items()):
-            flag = data.get("status", "?")
+            flag = str(data.get("status", "?"))
             extra = f" ({data['error']})" if data.get("error") else ""
-            print(f"      {name:<14}{flag:<9}{data.get('docs', 0):>10,}{extra}")
+            docs = data.get("docs", 0)
+            print(f"      {name:<14}{flag:<9}{docs:>10,}{extra}"
+                  if isinstance(docs, int) else
+                  f"      {name:<14}{flag:<9}{docs}")
     print(f"  doc store : {human_bytes(_docstore_bytes(path))}")
+    try:
+        extras = builder.extras()
+    except Exception:  # noqa: BLE001 - status must stay readable
+        extras = None
+    if extras:
+        print("  extras    :")
+        print(f"      embeddings : {extras['shards_with_embeddings']}"
+              f"/{extras['shards']} shard(s)")
+        spell = extras["spell"] or {}
+        if spell.get("trained"):
+            print(f"      spelling   : {spell.get('terms', 0):,} terms")
+        else:
+            print(_dim("      spelling   : not trained "
+                       "(`search-index spell`)"))
+        inc = extras.get("incremental") or {}
+        if inc.get("enabled", True) and "tracked_documents" in inc:
+            print(f"      incremental: {inc['tracked_documents']:,} tracked, "
+                  f"{len(inc.get('snapshots') or [])} snapshot(s)")
+        else:
+            print(_dim("      incremental: off"))
     return 0
 
 
@@ -200,8 +229,91 @@ def _docstore_bytes(data_dir: str) -> int:
     return total
 
 
-# ---------------------------------------------------------------------------- #
-# merge
+# --------------------------------------------------------------------------- #
+# embeddings
+# --------------------------------------------------------------------------- #
+def cmd_embeddings(args: argparse.Namespace) -> int:
+    from src.search_index.indexer import BuildOptions, SearchIndexBuilder
+
+    options = BuildOptions(level=int(args.level), data_dir=args.data_dir,
+                           download=False, embed_model=args.model or "")
+    with SearchIndexBuilder(args.data_dir, options=options) as builder:
+        if not builder.stats().ready:
+            print(_yellow(f"No index at {args.data_dir} yet."))
+            return 1
+        done = builder.build_embeddings(
+            [int(i) for i in args.shard.split(",")] if args.shard else None)
+    if not done:
+        print(_yellow("No embeddings written."))
+        print(_dim("sentence-transformers is required: "
+                   "pip install sentence-transformers"))
+        return 1
+    print(_green(f"Wrote embeddings for {done} shard(s)"))
+    print(_dim("Then:  SEARCH_INDEX_RERANK=embedding"))
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# spell
+# --------------------------------------------------------------------------- #
+def cmd_spell(args: argparse.Namespace) -> int:
+    from src.search_index.indexer import BuildOptions, SearchIndexBuilder
+    from src.search_index.spell import SpellConfig
+
+    options = BuildOptions(level=int(args.level), data_dir=args.data_dir,
+                           download=False)
+    with SearchIndexBuilder(args.data_dir, options=options) as builder:
+        if not builder.stats().ready:
+            print(_yellow(f"No index at {args.data_dir} yet."))
+            return 1
+        stats = builder.build_spell(SpellConfig(
+            min_freq=int(args.min_freq), max_terms=int(args.max_terms)))
+    print(_green("Trained spelling dictionary from the index vocabulary"))
+    print(f"  terms             : {stats['terms']:,}")
+    print(f"  delete signatures : {stats['delete_signatures']:,}")
+    if args.check:
+        from src.search_index.spell import SPELL_FILE, SpellChecker
+
+        checker = SpellChecker.load(Path(args.data_dir) / "index" / SPELL_FILE)
+        for word in args.check.split(","):
+            word = word.strip()
+            suggestion = checker.suggest(word) if checker else None
+            mark = f"-> {suggestion}" if suggestion else "(no change)"
+            print(f"  {word:<20}{mark}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# refresh
+# --------------------------------------------------------------------------- #
+def cmd_refresh(args: argparse.Namespace) -> int:
+    from src.search_index.indexer import BuildOptions, SearchIndexBuilder
+
+    options = BuildOptions(level=int(args.level), data_dir=args.data_dir,
+                           shard_docs=int(args.shard_docs),
+                           shard_index=int(args.shard_index),
+                           shard_count=int(args.shard_count),
+                           commoncrawl_snapshot=args.snapshot or "",
+                           download=not args.no_download,
+                           incremental=not args.no_incremental,
+                           keep_body=not args.drop_body)
+    started = time.time()
+    with SearchIndexBuilder(args.data_dir, options=options,
+                            progress=lambda m: print(f"  · {m}", flush=True)) as builder:
+        stats = builder.refresh(args.snapshot or None)
+        counters = (builder.tracker.counters if builder.tracker else None)
+    print()
+    if counters is not None:
+        print(_green(f"Refresh finished in {(time.time() - started) / 60:.1f} min"))
+        print(f"  new        : {counters.new:,}")
+        print(f"  changed    : {counters.changed:,}")
+        print(f"  unchanged  : {counters.unchanged:,}  (skipped, not re-indexed)")
+        print(f"  shards rebuilt: {stats.state.get('refresh', {}).get('shards_rebuilt', 0)}")
+    print(_dim("Next:  wcp search-index spell --data-dir "
+               f"{args.data_dir}   (retrain after new vocabulary)"))
+    return 0
+
+
 # ---------------------------------------------------------------------------- #
 def cmd_merge(args: argparse.Namespace) -> int:
     from pathlib import Path as _Path
@@ -294,6 +406,22 @@ def cmd_authority(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # wiring
 # --------------------------------------------------------------------------- #
+def _cfg(name: str, default):
+    """Config value used as a CLI default.
+
+    Flags still win; this only decides what happens when they are absent, so
+    ``SEARCH_INDEX_INCREMENTAL=false python -m src.cli search-index build``
+    behaves the same as passing ``--no-incremental``. Never fatal: a broken
+    environment must not stop ``--help`` from working.
+    """
+    try:
+        from src.config import get_config
+
+        return getattr(get_config(), name, default)
+    except Exception:  # noqa: BLE001 - a CLI default must never be fatal
+        return default
+
+
 def _options_from_args(args: argparse.Namespace):
     from src.search_index.indexer import BuildOptions
 
@@ -350,6 +478,15 @@ def add_search_index_commands(sub: argparse._SubParsersAction) -> None:
                    help="delete the directory and start over")
     b.add_argument("--wikipedia-date", default="", help="e.g. 20261001")
     b.add_argument("--snapshot", default="", help="CC-MAIN snapshot, e.g. CC-MAIN-2026-39")
+    b.add_argument("--embeddings", action="store_true",
+                   default=_cfg("SEARCH_INDEX_EMBEDDINGS", False),
+                   help="also write per-document vectors (needs sentence-transformers)")
+    b.add_argument("--embed-model",
+                   default=_cfg("SEARCH_INDEX_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                   help="sentence-transformers model (default all-MiniLM-L6-v2)")
+    b.add_argument("--no-incremental", action="store_true",
+                   help="re-index everything even if a page did not change "
+                        "(default: SEARCH_INDEX_INCREMENTAL)")
     b.add_argument("--probe", default="open source search engine",
                    help="example query printed at the end")
     b.set_defaults(func=cmd_build)
@@ -367,6 +504,10 @@ def add_search_index_commands(sub: argparse._SubParsersAction) -> None:
                    help="return pages instead of one result per website")
     q.add_argument("--authority-weight", type=float, default=0.35)
     q.add_argument("--snippet-width", type=int, default=240)
+    q.add_argument("--rerank", default=None,
+                   help="none | embedding | cross-encoder (default: config)")
+    q.add_argument("--no-spell", action="store_true",
+                   help="do not correct typos in the query")
     q.add_argument("--json", action="store_true")
     q.set_defaults(func=cmd_query)
 
@@ -376,6 +517,41 @@ def add_search_index_commands(sub: argparse._SubParsersAction) -> None:
                     help="index directories produced by parallel `build` runs")
     mg.add_argument("--out", required=True, help="merged index directory")
     mg.set_defaults(func=cmd_merge)
+
+    em = si_sub.add_parser("embeddings",
+                           help="add vector embeddings to existing shards")
+    em.add_argument("--data-dir", default="data/search-index")
+    em.add_argument("--shard", default="", help="comma-separated shard ids")
+    em.add_argument("--model", default="", help="sentence-transformers model name")
+    em.add_argument("--level", type=int, default=0)
+    em.set_defaults(func=cmd_embeddings)
+
+    sp = si_sub.add_parser("spell",
+                           help="train spell checking on the index vocabulary")
+    sp.add_argument("--data-dir", default="data/search-index")
+    sp.add_argument("--check", default="",
+                    help="comma-separated words to test, e.g. solr,kubernets")
+    sp.add_argument("--min-freq", type=int, default=3,
+                    help="ignore terms rarer than this (small indexes: use 1)")
+    sp.add_argument("--max-terms", type=int,
+                    default=_cfg("SEARCH_INDEX_SPELL_MAX_TERMS", 30_000),
+                    help="cap the dictionary (default SEARCH_INDEX_SPELL_MAX_TERMS)")
+    sp.add_argument("--level", type=int, default=0)
+    sp.set_defaults(func=cmd_spell)
+
+    rf = si_sub.add_parser("refresh",
+                           help="re-ingest a Common Crawl snapshot incrementally")
+    rf.add_argument("--data-dir", default="data/search-index")
+    rf.add_argument("--snapshot", default="", help="CC-MAIN-2026-40 (blank = newest)")
+    rf.add_argument("--shard-docs", type=int, default=100_000)
+    rf.add_argument("--shard-index", type=int, default=0)
+    rf.add_argument("--shard-count", type=int, default=1)
+    rf.add_argument("--no-download", action="store_true")
+    rf.add_argument("--no-incremental", action="store_true",
+                    help="re-index every page even when unchanged")
+    rf.add_argument("--drop-body", action="store_true")
+    rf.add_argument("--level", type=int, default=2)
+    rf.set_defaults(func=cmd_refresh)
 
     au = si_sub.add_parser("authority",
                            help="backfill Open PageRank / Tranco scores")
