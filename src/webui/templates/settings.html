@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% set hook_list = (hooks.data if hooks and hooks.ok else (hooks if hooks is sequence else [])) %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Settings</span></div>
+  <div class="between">
+    <div>
+      <h1>Settings</h1>
+      <p class="dim">Identity, webhooks and how the console talks to the API.</p>
+    </div>
+    <button class="btn btn-primary" data-modal-open="new-hook">+ Add webhook</button>
+  </div>
+</div>
+
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card">
+      <div class="card-head"><h3>Webhooks</h3><span class="badge">{{ hook_list|length }}</span></div>
+      {% if error %}
+        <div class="card-pad"><div class="alert danger"><span class="ico">✕</span><span>{{ error }}</span></div></div>
+      {% endif %}
+      {% if hook_list %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th data-sort>URL</th><th>Events</th>
+              <th data-sort>State</th><th></th></tr></thead>
+            <tbody>
+              {% for h in hook_list %}
+                <tr>
+                  <td>
+                    <span class="mono small truncate" style="max-width:280px;display:block">{{ h.get('url') }}</span>
+                    <span class="tiny muted">{{ h.get('description') or '' }}</span>
+                  </td>
+                  <td>
+                    {% for e in (h.get('events') or []) %}<span class="badge">{{ e }}</span>{% endfor %}
+                  </td>
+                  <td>
+                    <span class="badge {{ 'ok' if h.get('enabled', True) else '' }}">
+                      {{ 'active' if h.get('enabled', True) else 'paused' }}</span>
+                  </td>
+                  <td class="right">
+                    <form method="post" action="/app/settings/webhooks/{{ h.get('id') or h.get('sub_id') }}/delete"
+                          onsubmit="return confirm('Remove this webhook?')">
+                      <button class="btn btn-sm btn-danger">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-foot small muted">
+          Deliveries are signed — verify the
+          <code>X-WCP-Signature</code> header with your endpoint secret.
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">🔗</div>
+          <h3>No webhooks</h3>
+          <p>Push events instead of polling: a job finishes, and your endpoint
+            hears about it within seconds.</p>
+          <button class="btn btn-primary" data-modal-open="new-hook">Add your first webhook</button>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Environment</h3>
+      <dl class="kv">
+        <dt>Console</dt><dd>server-rendered, no build step, no CDN</dd>
+        <dt>API base</dt><dd class="mono">{{ request.base_url }}</dd>
+        <dt>Redis</dt><dd><span class="badge ok"><span class="dot live"></span>connected</span></dd>
+        <dt>Billing</dt><dd>{{ 'Stripe live' if false else 'local ledger (no STRIPE_SECRET_KEY)' }}</dd>
+        <dt>Offline mode</dt><dd>{{ 'on' if request.app.state.__dict__.get('offline') else 'off' }}</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">Identity</h3>
+      <dl class="kv small">
+        <dt>Email</dt><dd>{{ me.get('email', '—') if me else '—' }}</dd>
+        <dt>Name</dt><dd>{{ me.get('name', '—') if me else '—' }}</dd>
+        <dt>Tenant</dt><dd class="mono">{{ me.get('tenant', '—') if me else '—' }}</dd>
+        <dt>Role</dt><dd><span class="badge brand">{{ me.get('role', 'member') if me else '—' }}</span></dd>
+        <dt>Scopes</dt><dd>{{ (me.get('scopes') or [])|join(', ') or '—' }}</dd>
+      </dl>
+      <div class="divider"></div>
+      <form method="post" action="/logout">
+        <button class="btn btn-block">Sign out of this workspace</button>
+      </form>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Keyboard</h3>
+      <div class="stack-sm small">
+        <div class="between"><span>Command palette</span><span><span class="kbd">⌘</span> <span class="kbd">K</span></span></div>
+        <div class="between"><span>Toggle theme</span><span class="kbd">click ◐</span></div>
+        <div class="between"><span>Collapse sidebar</span><span class="kbd">☰</span></div>
+        <div class="between"><span>Close a dialog</span><span class="kbd">Esc</span></div>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Rate limits</h3>
+      <p class="small dim">
+        Requests are throttled per tenant and per key, with
+        <code>X-RateLimit-*</code> headers on every response. Exceed it and you
+        get a 429 with <code>Retry-After</code>.
+      </p>
+      <a class="btn btn-block mt-2" href="/app/docs">Read the API reference</a>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="new-hook" hidden>
+  <div class="modal">
+    <form method="post" action="/app/settings/webhooks">
+      <div class="head"><h3 style="flex:1">Add a webhook</h3>
+        <button type="button" class="icon-btn" data-modal-close>✕</button></div>
+      <div class="body stack">
+        <div class="field">
+          <label for="h-url">Endpoint URL</label>
+          <input class="input" id="h-url" name="url" required
+                 placeholder="https://example.com/hooks/wcp" data-autofocus>
+          <span class="hint">Must be https. Answer 2xx quickly; we retry the rest.</span>
+        </div>
+        <div class="field">
+          <label for="h-desc">Description</label>
+          <input class="input" id="h-desc" name="description" placeholder="Notify the ETL pipeline">
+        </div>
+        <div class="field">
+          <label>Events</label>
+          <div class="stack-sm">
+            {% for e in events %}
+              <label class="check">
+                <input type="checkbox" name="events" value="{{ e }}"
+                       {% if loop.first %}checked{% endif %}>
+                <span><code>{{ e }}</code></span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <button type="button" class="btn" data-modal-close>Cancel</button>
+        <button class="btn btn-primary">Subscribe</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

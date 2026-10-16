@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="WebCrawler Pro — crawl the web politely, discover sites from a topic sentence, and run your own search index.">
+<title>{{ title }}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕷️</text></svg>">
+<link rel="stylesheet" href="/static/app.css?v=2">
+<script>
+  /* Set the theme before first paint so the page never flashes the wrong one. */
+  try {
+    var t = localStorage.getItem('wcp.theme');
+    if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+    if (localStorage.getItem('wcp.sidebar') === '1')
+      document.documentElement.classList.add('pre-collapsed');
+  } catch (e) {}
+</script>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% block body %}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <mark>🕷</mark>
+      <span><b>WebCrawler</b><small>Pro</small></span>
+    </div>
+    <nav class="nav">
+      {% for group in nav %}
+        <div class="nav-label">{{ group.group }}</div>
+        {% for item in group.pages %}
+          <a href="{{ item.href }}" {% if page == item.key %}class="active"{% endif %}>
+            <span class="ico">{{ item.icon }}</span><span>{{ item.label }}</span>
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <button data-theme-toggle title="Toggle dark mode">◐<span>Theme</span></button>
+      <a href="/app/docs">📘<span>API reference</span></a>
+      <form method="post" action="/logout" style="margin:0">
+        <button type="submit">⎋<span>Sign out</span></button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" data-sidebar-toggle title="Collapse sidebar">☰</button>
+      <button class="icon-btn" data-palette title="Search pages (Ctrl+K)">⌕</button>
+      <div class="spacer"></div>
+      <div class="row" style="gap:8px">
+        <span class="badge ok"><span class="dot live"></span>API online</span>
+        <button class="icon-btn" data-theme-toggle title="Toggle dark mode">◐</button>
+        <div class="avatar" title="{{ me.email if me else 'guest' }}">
+          {{ (me.email[0] if me and me.email else '?')|upper }}
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      {% if flash %}
+        <div class="alert {{ 'ok' if flash_kind == 'ok' else ('warn' if flash_kind == 'warn' else 'danger') }} mb-3">
+          <span class="ico">{{ '✓' if flash_kind == 'ok' else ('!' if flash_kind == 'warn' else '✕') }}</span>
+          <span>{{ flash }}</span>
+        </div>
+      {% endif %}
+      {% for e in errors %}
+        <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ e }}</span></div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}
+<script src="/static/app.js?v=2" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

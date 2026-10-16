@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% set pct = ((job.pages_done or 0) / job.max_pages * 100) if job and job.max_pages else 0 %}
+{% set live = (job.state|string).lower() in ('jobstate.queued','jobstate.running','queued','running','pending') %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs">
+    <a href="/app">Home</a><span>/</span><a href="/app/crawl">Crawl jobs</a>
+    <span>/</span><span class="mono">{{ job_id[:12] }}</span>
+  </div>
+  <div class="between">
+    <div>
+      <h1 class="mono" style="font-size:22px">{{ job.job_id }}</h1>
+      <p class="dim small truncate" style="max-width:600px">{{ job.url }}</p>
+    </div>
+    <div class="row">
+      {% if live %}
+        <form method="post" action="/app/crawl/{{ job_id }}/cancel">
+          <button class="btn btn-danger">Cancel job</button>
+        </form>
+      {% endif %}
+      <a class="btn" href="/app/crawl">← All jobs</a>
+    </div>
+  </div>
+</div>
+
+<div class="grid g-4 mb-3">
+  <div class="card stat">
+    <div class="label">State</div>
+    <div class="value" style="font-size:20px;padding-top:4px">
+      {% include "partials/state.html" %}
+    </div>
+    <div class="delta muted">{{ job.state|string|replace('JobState.', '') }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Pages</div>
+    <div class="value">{{ (job.pages_done or 0)|num }}<small> / {{ job.max_pages|num }}</small></div>
+    <div class="meter mt-2 {% if pct >= 100 %}ok{% endif %}"><i style="width:{{ [pct,100]|min }}%"></i></div>
+  </div>
+  <div class="card stat">
+    <div class="label">Items collected</div>
+    <div class="value">{{ (job.items_collected or 0)|num }}</div>
+    <div class="delta muted">{{ (job.tokens_generated or 0)|num }} tokens generated</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Last update</div>
+    <div class="value" style="font-size:18px;padding-top:6px">{{ job.updated_at|ago }}</div>
+    <div class="delta muted">started {{ job.created_at|ago }}</div>
+  </div>
+</div>
+
+{# A running job keeps asking the scheduler; no websockets, no extra infra. #}
+{% if live %}
+  <div class="alert info mb-3" data-poll="/app/poll/jobs/{{ job_id }}"
+       data-poll-render="wcpJobTick">
+    <span class="ico">◷</span>
+    <span>This page refreshes itself every few seconds while the job runs.</span>
+  </div>
+  <script>
+    function wcpJobTick(el, data) {
+      if (!data) return;
+      var st = String(data.state || '').toLowerCase().replace('jobstate.', '');
+      if (st !== 'running' && st !== 'queued' && st !== 'pending') {
+        window.location.reload();
+      }
+    }
+  </script>
+{% endif %}
+
+<div class="grid g-main">
+  <div class="stack">
+    {% if job.error %}
+      <div class="alert danger">
+        <span class="ico">✕</span>
+        <span><b>The job failed.</b> {{ job.error }}</span>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-head"><h3>Job record</h3></div>
+      <div class="card-pad">
+        <dl class="kv">
+          <dt>Job ID</dt><dd class="mono">{{ job.job_id }}</dd>
+          <dt>Start URL</dt><dd><a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url }}</a></dd>
+          <dt>Max pages</dt><dd>{{ job.max_pages|num }}</dd>
+          <dt>Pages done</dt><dd>{{ job.pages_done or 0 }}</dd>
+          <dt>Items</dt><dd>{{ job.items_collected or 0 }}</dd>
+          <dt>Tokens</dt><dd>{{ job.tokens_generated or 0 }}</dd>
+          <dt>Created</dt><dd>{{ job.created_at }} <span class="muted">({{ job.created_at|ago }})</span></dd>
+          <dt>Updated</dt><dd>{{ job.updated_at }} <span class="muted">({{ job.updated_at|ago }})</span></dd>
+        </dl>
+      </div>
+      <div class="card-foot row">
+        <button class="btn btn-sm" data-copy="{{ job.job_id }}">Copy job ID</button>
+        <a class="btn btn-sm" href="/app/discovery">Run discovery on this topic</a>
+        <span class="push small muted">Tenant {{ job.tenant }}</span>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Call it yourself</h3>
+      <div class="code">
+<span class="c"># watch this job from your own code</span>
+curl <span class="k">{{ request.base_url }}api/v1/jobs/{{ job_id }}</span> \<br>
+&nbsp;&nbsp;-H "Authorization: Bearer $TOKEN"
+      </div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">What happens next</h3>
+      <ol class="stack-sm small dim" style="list-style:decimal;padding-left:18px">
+        <li>The frontier seeds from your start URL.</li>
+        <li>Pages are fetched with per-host politeness.</li>
+        <li>Extracted records are deduplicated (MinHash).</li>
+        <li>Results are ingested and become searchable.</li>
+        <li>A webhook fires, if you subscribed to <code>job.completed</code>.</li>
+      </ol>
+      <a class="btn btn-block mt-2" href="/app/settings">Set up webhooks</a>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Export</h3>
+      <p class="small dim mb-2">
+        Finished jobs can be exported as JSONL, CSV or Parquet through the API.
+      </p>
+      <a class="btn btn-block" href="/app/docs">Export endpoints →</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

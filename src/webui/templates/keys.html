@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% set key_list = (keys.data if keys and keys.ok else (keys if keys is sequence else [])) %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>API keys</span></div>
+  <div class="between">
+    <div>
+      <h1>API keys</h1>
+      <p class="dim">Long-lived credentials for scripts and workers. They carry
+        your tenant and their scopes, nothing else.</p>
+    </div>
+    <button class="btn btn-primary" data-modal-open="new-key">+ Create key</button>
+  </div>
+</div>
+
+{% if issued %}
+  <div class="alert ok mb-3">
+    <span class="ico">✓</span>
+    <span style="flex:1">
+      <b>Copy it now.</b> The key is shown once and stored only as a hash.
+      <div class="row mt-1" style="gap:8px">
+        <code class="mono" style="background:var(--bg-sunken);padding:5px 9px;border-radius:6px;word-break:break-all">{{ issued }}</code>
+        <button class="btn btn-sm" data-copy="{{ issued }}">Copy</button>
+      </div>
+    </span>
+  </div>
+{% endif %}
+
+{% if error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ error }}</span></div>
+{% endif %}
+
+<div class="grid g-main">
+  <div class="card">
+    <div class="card-head"><h3>Your keys</h3><span class="badge">{{ key_list|length }}</span></div>
+    {% if key_list %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr>
+            <th data-sort>Name</th><th>Key ID</th><th>Scopes</th>
+            <th data-sort>Created</th><th>Last used</th>
+          </tr></thead>
+          <tbody>
+            {% for k in key_list %}
+              <tr>
+                <td><b>{{ k.get('name', '—') }}</b></td>
+                <td class="mono small">{{ k.get('key_id', k.get('id', '—')) }}</td>
+                <td>
+                  {% for s in (k.get('scopes') or []) %}
+                    <span class="badge">{{ s }}</span>
+                  {% endfor %}
+                </td>
+                <td class="small muted nowrap">{{ (k.get('created_at') or '')|ago }}</td>
+                <td class="small muted nowrap">{{ (k.get('last_used_at') or '')|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-foot small muted">
+        Revoke a key by deleting it through the API. Rotate anything that may have leaked.
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="ico">🔑</div>
+        <h3>No keys yet</h3>
+        <p>Create one to script crawls, wire up CI, or run the CLI as this tenant.</p>
+        <button class="btn btn-primary" data-modal-open="new-key">Create your first key</button>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card card-pad">
+      <h3 class="mb-2">Using a key</h3>
+      <div class="code">
+curl <span class="k">{{ request.base_url }}api/v1/jobs</span> \<br>
+&nbsp;&nbsp;-H <span class="k">"X-API-Key: wcp_live_…"</span>
+      </div>
+      <p class="tiny muted mt-2">
+        Bearer JWTs work too. Keys are better for machines, JWTs for browsers.
+      </p>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Scopes</h3>
+      <dl class="kv small">
+        <dt><code>read</code></dt><dd>Read jobs, datasets, usage</dd>
+        <dt><code>crawl</code></dt><dd>Submit and cancel crawls</dd>
+        <dt><code>discovery</code></dt><dd>Run topic discovery</dd>
+        <dt><code>marketplace</code></dt><dd>Buy, sell, deliver</dd>
+        <dt><code>admin</code></dt><dd>Manage keys and webhooks</dd>
+      </dl>
+      <div class="alert warn mt-2 small">
+        <span class="ico">!</span>
+        <span>Give each integration the narrowest scope that works.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="new-key" hidden>
+  <div class="modal">
+    <form method="post" action="/app/keys">
+      <div class="head"><h3 style="flex:1">Create an API key</h3>
+        <button type="button" class="icon-btn" data-modal-close>✕</button></div>
+      <div class="body stack">
+        <div class="field">
+          <label for="k-name">Name</label>
+          <input class="input" id="k-name" name="name" value="console-key"
+                 placeholder="ci-pipeline" data-autofocus>
+          <span class="hint">Call it after whatever will use it.</span>
+        </div>
+        <div class="field">
+          <label>Scopes</label>
+          <div class="stack-sm">
+            {% for s, desc in [('read','Read jobs, datasets and usage'),
+                               ('crawl','Submit and cancel crawls'),
+                               ('discovery','Run topic discovery'),
+                               ('marketplace','Buy, sell and deliver data'),
+                               ('admin','Manage keys and webhooks')] %}
+              <label class="check">
+                <input type="checkbox" name="scopes" value="{{ s }}"
+                       {% if s in ('read','crawl') %}checked{% endif %}>
+                <span><code>{{ s }}</code> — <span class="muted">{{ desc }}</span></span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <button type="button" class="btn" data-modal-close>Cancel</button>
+        <button class="btn btn-primary">Create key</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

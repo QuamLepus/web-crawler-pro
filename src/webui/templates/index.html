@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% set extras = stats.get('extras', {}) if stats else {} %}
+{% set spell_x = extras.get('spell', {}) if extras else {} %}
+{% set inc_x = extras.get('incremental', {}) if extras else {} %}
+{% set emb_x = extras.get('embeddings', {}) if extras else {} %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Own search index</span></div>
+  <div class="between">
+    <div>
+      <h1>Your own search index</h1>
+      <p class="dim">BM25 over free datasets — Curlie, Wikipedia, Common Crawl.
+        No Google, no SerpAPI, no per-query bill, works unplugged.</p>
+    </div>
+    <div class="row">
+      <a class="btn" href="/app/search">Open search →</a>
+    </div>
+  </div>
+</div>
+
+{% if stats_error %}
+  <div class="alert danger mb-3"><span class="ico">✕</span><span>{{ stats_error }}</span></div>
+{% endif %}
+
+<div class="grid g-4 mb-3">
+  <div class="card stat">
+    <div class="label">Documents</div>
+    <div class="value">{{ stats.get('docs', 0)|num }}</div>
+    <div class="delta muted">level {{ stats.get('level', 0) }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Shards</div>
+    <div class="value">{{ stats.get('shards', 0) }}</div>
+    <div class="delta muted">{{ stats.get('terms', 0)|num }} distinct terms</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Reranker</div>
+    <div class="value" style="font-size:20px;padding-top:5px">{{ stats.get('reranker', 'none') }}</div>
+    <div class="delta muted">semantic second stage</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Spelling</div>
+    <div class="value" style="font-size:20px;padding-top:5px">
+      {% if spell_x.get('trained') %}trained{% else %}not trained{% endif %}
+    </div>
+    <div class="delta muted">{{ (spell_x.get('terms') or 0)|num }} terms</div>
+  </div>
+</div>
+
+<div class="grid g-main">
+  <div class="stack">
+
+    {# ------------------------------------------------------------- sources -- #}
+    <div class="card">
+      <div class="card-head"><h3>What is in it</h3>
+        <span class="badge {% if stats.get('ready') %}ok{% else %}warn{% endif %}">
+          {% if stats.get('ready') %}ready{% else %}not built{% endif %}</span>
+      </div>
+      {% if stats.get('sources') %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th data-sort>Source</th><th data-sort class="num">Documents</th>
+              <th class="num">Share</th></tr></thead>
+            <tbody>
+              {% set total = stats.get('docs', 0) or 1 %}
+              {% for src, n in stats.get('sources', {}).items() %}
+                <tr>
+                  <td><span class="badge brand">{{ src }}</span></td>
+                  <td class="num tar">{{ n|num }}</td>
+                  <td style="width:40%">
+                    <div class="meter"><i style="width:{{ (n / total * 100)|round(1) }}%"></i></div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">🗂</div>
+          <h3>Nothing indexed yet</h3>
+          <p>Level 0 needs about 330 MB of downloads and gives you a working
+            search engine over ~1M curated sites. It costs nothing but disk.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    {# ------------------------------------------------------------ the three -- #}
+    <div class="card">
+      <div class="card-head"><h3>The three optional layers</h3></div>
+      <div class="card-pad grid g-3">
+        <div>
+          <h4>🔀 Semantic reranking</h4>
+          <p class="small dim">
+            BM25 shortlists, an encoder reorders. Currently
+            <b>{{ stats.get('reranker', 'none') }}</b>.
+            {% if emb_x %}— {{ emb_x.get('shards_with_vectors', 0) }} of
+              {{ emb_x.get('shards', 0) }} shards have vectors.{% endif %}
+          </p>
+          <p class="tiny muted mt-1">
+            Needs <code>pip install sentence-transformers</code>. Without it the
+            engine switches reranking off and tells you why.
+          </p>
+        </div>
+        <div>
+          <h4>🔤 Spelling</h4>
+          <p class="small dim">
+            A dictionary built from your own vocabulary, not a generic English
+            list — so it will not “correct” <code>kubernetes</code>.
+          </p>
+          <p class="tiny muted mt-1">
+            {% if spell_x.get('trained') %}
+              {{ spell_x.get('terms')|num }} terms,
+              {{ spell_x.get('delete_signatures')|num }} delete signatures.
+            {% else %}
+              Run <code>wcp search-index spell</code> to train it.
+            {% endif %}
+          </p>
+        </div>
+        <div>
+          <h4>♻️ Incremental refresh</h4>
+          <p class="small dim">
+            Re-ingesting a crawl skips pages whose text did not change.
+          </p>
+          <p class="tiny muted mt-1">
+            {% if inc_x %}
+              {{ inc_x.get('tracked_documents')|num }} tracked ·
+              {{ inc_x.get('snapshots')|length if inc_x.get('snapshots') else 0 }} snapshot(s)
+            {% else %}
+              Tracker not enabled.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    {# ------------------------------------------------------------- commands -- #}
+    <div class="card card-pad">
+      <h3 class="mb-2">Build and refresh from the terminal</h3>
+      <p class="small dim mb-2">
+        Big builds belong on a schedule, not in a web request. The same engine
+        runs from the CLI and in GitHub Actions.
+      </p>
+      <div class="code">
+<span class="c"># level 0 — ~330 MB, Ctrl-C safe, resumes after every shard</span>
+wcp search-index build <span class="k">--level 0</span><br>
+<br>
+<span class="c"># train the spelling dictionary from your own vocabulary</span>
+wcp search-index spell <span class="k">--check "kubernets,reserch"</span><br>
+<br>
+<span class="c"># pre-compute vectors so reranking is a lookup, not a model call</span>
+wcp search-index <span class="k">embeddings</span><br>
+<br>
+<span class="c"># monthly refresh: only pages that actually changed are re-indexed</span>
+wcp search-index refresh <span class="k">--snapshot CC-MAIN-2026-40</span>
+      </div>
+    </div>
+  </div>
+
+  {# ---------------------------------------------------------------- levels -- #}
+  <div class="stack">
+    <div class="card">
+      <div class="card-head"><h3>Levels</h3><span class="badge">$0 datasets</span></div>
+      <div class="card-pad stack-sm">
+        {% for lvl in levels %}
+          <div style="padding:12px;border:1px solid var(--border);border-radius:var(--r)">
+            <div class="between">
+              <b>Level {{ lvl.get('level', loop.index0) }}</b>
+              <span class="badge">{{ lvl.get('label', '') or lvl.get('name', '') }}</span>
+            </div>
+            <p class="small dim mt-1">{{ lvl.get('description') or lvl.get('summary', '') }}</p>
+            <div class="row-wrap tiny muted mt-1">
+              {% if lvl.get('docs') %}<span>{{ lvl.get('docs')|num }} docs</span>{% endif %}
+              {% if lvl.get('download_bytes') %}<span>↓ {{ lvl.get('download_bytes')|bytes }}</span>{% endif %}
+              {% if lvl.get('disk_bytes') %}<span>💾 {{ lvl.get('disk_bytes')|bytes }}</span>{% endif %}
+            </div>
+          </div>
+        {% else %}
+          <p class="small muted">Level metadata unavailable.</p>
+        {% endfor %}
+      </div>
+      <div class="card-foot tiny muted">
+        Datasets: Curlie (CC-BY) · Wikipedia (CC-BY-SA) · Common Crawl (AWS Open
+        Data, no egress charge).
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h3 class="mb-2">Why own it</h3>
+      <ul class="stack-sm small dim" style="list-style:none">
+        <li>✓ No per-query fee — the cost is disk and one build</li>
+        <li>✓ Works with the network unplugged</li>
+        <li>✓ You choose what is in it, so you can explain every result</li>
+        <li>✓ Nobody can change the ranking underneath you</li>
+      </ul>
+      <div class="alert warn mt-2 small">
+        <span class="ico">!</span>
+        <span>It is not Google. It is an index of openly licensed datasets —
+          excellent for discovery, not for long-tail freshness.</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

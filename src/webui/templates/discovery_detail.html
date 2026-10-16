@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% set cands = candidates or [] %}
+{% set res = results or {} %}
+{% set st = (job.get('state') or '?')|string|lower|replace('discoverystate.', '') %}
+{% set awaiting = 'approval' in st %}
+
+{% block content %}
+<div class="page-head">
+  <div class="crumbs">
+    <a href="/app">Home</a><span>/</span><a href="/app/discovery">Discovery</a>
+    <span>/</span><span class="mono">{{ job_id[:12] }}</span>
+  </div>
+  <div class="between">
+    <div>
+      <h1>{{ job.get('topic') or 'Discovery job' }}</h1>
+      <p class="dim small mono">{{ job_id }}</p>
+    </div>
+    <div class="row">
+      {% if st not in ('completed', 'failed', 'cancelled') %}
+        <form method="post" action="/app/discovery/{{ job_id }}/cancel">
+          <button class="btn btn-danger">Cancel</button>
+        </form>
+      {% endif %}
+      <a class="btn" href="/app/discovery">← All jobs</a>
+    </div>
+  </div>
+</div>
+
+<div class="grid g-4 mb-3">
+  <div class="card stat">
+    <div class="label">State</div>
+    <div class="value" style="font-size:19px;padding-top:5px">
+      <span class="badge {{ 'ok' if st == 'completed' else ('danger' if st in ('failed','cancelled') else 'warn') }}">
+        <span class="dot {% if st in ('running','queued','pending') %}live{% endif %}"></span>{{ st }}
+      </span>
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="label">Sites shortlisted</div>
+    <div class="value">{{ job.get('sites_total') or cands|length or 0 }}</div>
+    <div class="delta muted">{{ res.get('sites_succeeded', 0) }} succeeded</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Pages crawled</div>
+    <div class="value">{{ (res.get('pages') or 0)|num }}</div>
+    <div class="delta muted">{{ (res.get('items') or 0)|num }} items</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Requested</div>
+    <div class="value">{{ job.get('count') or '—' }}</div>
+    <div class="delta muted">{{ job.get('language', 'en') }} · {{ job.get('max_pages_per_site', 5) }} pages/site</div>
+  </div>
+</div>
+
+{% if st in ('running', 'queued', 'pending') %}
+  <div class="alert info mb-3" data-poll="/app/poll/discovery/{{ job_id }}">
+    <span class="ico">◷</span><span>Working — this page reloads when it finishes.</span>
+  </div>
+  <script>
+    function wcpPollDefault(el, data) {
+      if (data && !['running','queued','pending'].includes(String(data.state||'').toLowerCase()))
+        window.location.reload();
+    }
+  </script>
+{% endif %}
+
+{% if awaiting %}
+  <div class="alert warn mb-3">
+    <span class="ico">!</span>
+    <span><b>Waiting for your approval.</b> Tick the sites you want and press
+      Approve — nothing is crawled until you do.</span>
+  </div>
+{% endif %}
+
+<div class="card">
+  <div class="card-head">
+    <h3>Candidates</h3>
+    <span class="badge">{{ cands|length }}</span>
+    {% if cands and awaiting %}
+      <button class="btn btn-sm btn-primary push" data-modal-open="approve-all">Approve shortlist</button>
+    {% endif %}
+  </div>
+
+  {% if cands %}
+    <form method="post" action="/app/discovery/{{ job_id }}/approve" id="cand-form">
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              {% if awaiting %}<th style="width:38px">
+                <input type="checkbox" onclick="document.querySelectorAll('.cand').forEach(c=>c.checked=this.checked)">
+              </th>{% endif %}
+              <th data-sort>Domain</th>
+              <th data-sort class="num">Score</th>
+              <th>Why</th>
+              <th data-sort>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in cands %}
+              {% set domain = c.get('domain') or c.get('url') or '' %}
+              <tr>
+                {% if awaiting %}
+                  <td><input class="cand" type="checkbox" name="domains" value="{{ domain }}"
+                             {% if c.get('selected') %}checked{% endif %}></td>
+                {% endif %}
+                <td>
+                  <span class="mono">{{ domain }}</span>
+                  {% if c.get('seed') %}<span class="badge brand">seed</span>{% endif %}
+                </td>
+                <td class="num tar">{{ '{:.3f}'.format(c.get('score', 0)) if c.get('score') is number else (c.get('score') or '—') }}</td>
+                <td class="small dim">{{ c.get('reason') or c.get('why') or '—' }}</td>
+                <td>
+                  {% set cs = (c.get('state') or 'pending')|lower %}
+                  <span class="badge {{ 'ok' if cs in ('crawled','done','completed') else ('danger' if cs == 'failed' else '') }}">{{ cs }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if awaiting %}
+        <div class="card-foot row">
+          <span class="small muted">Nothing is crawled until you approve.</span>
+          <button type="submit" class="btn btn-danger push"
+                  formaction="/app/discovery/{{ job_id }}/reject">Reject selected</button>
+          <button type="submit" class="btn btn-primary"
+                  onclick="return confirm('Crawl the selected sites now? This uses quota.')">
+            Approve selected</button>
+        </div>
+      {% endif %}
+    </form>
+  {% else %}
+    <div class="empty">
+      <div class="ico">✦</div>
+      <h3>No candidates yet</h3>
+      <p>The ranking step has not produced a shortlist. If this persists, cancel
+        and try a broader topic.</p>
+    </div>
+  {% endif %}
+</div>
+
+{% if res.get('per_site') %}
+  <div class="card mt-3">
+    <div class="card-head"><h3>Per-site results</h3></div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th data-sort>Domain</th><th data-sort>State</th>
+          <th data-sort class="num">Pages</th><th data-sort class="num">Items</th><th>Error</th></tr></thead>
+        <tbody>
+          {% for s in res['per_site'] %}
+            <tr>
+              <td class="mono">{{ s.get('domain') }}</td>
+              <td><span class="badge {{ 'ok' if s.get('state') == 'succeeded' else 'danger' }}">{{ s.get('state') }}</span></td>
+              <td class="num tar">{{ s.get('pages', 0) }}</td>
+              <td class="num tar">{{ s.get('items', 0) }}</td>
+              <td class="small dim">{{ s.get('error') or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if res.get('data_sha256') %}
+      <div class="card-foot tiny muted">Dataset SHA-256: <span class="mono">{{ res['data_sha256'] }}</span></div>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="modal-back" id="approve-all" hidden>
+  <div class="modal">
+    <div class="head"><h3 style="flex:1">Approve the shortlist</h3>
+      <button type="button" class="icon-btn" data-modal-close>✕</button></div>
+    <div class="body">
+      <p class="small dim">The engine crawls the highest-ranked candidates up to
+        the count you asked for. This starts real crawling and consumes quota.</p>
+    </div>
+    <div class="foot">
+      <button class="btn" data-modal-close>Cancel</button>
+      <button class="btn btn-primary"
+              onclick="document.getElementById('cand-form').submit()">Approve and crawl</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
