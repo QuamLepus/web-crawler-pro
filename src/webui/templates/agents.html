@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">AI agents</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        An agent here is a workflow with a declared input, a declared output and a
+        manifest — publishable, installable and revenue-shared like a dataset. No
+        agent gets shell access: it can only call the tools the platform exposes,
+        which is what makes installing one a normal decision rather than a leap of
+        faith.
+      </p>
+    </div>
+    <span class="badge brand nowrap">{{ stats.get('agents', 0) }} published</span>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric"><div class="label">catalogue</div>
+      <div class="v">{{ catalogue|length }}</div>
+      <div class="sub">{{ stats.get('curated', 0) }} curated</div></div>
+    <div class="metric cyan"><div class="label">installed here</div>
+      <div class="v">{{ installed|length }}</div>
+      <div class="sub">tenant-scoped</div></div>
+    <div class="metric gold"><div class="label">revenue shared</div>
+      <div class="v">${{ ((revenue.get('author_share_usd', 0) or 0))|round(2) }}</div>
+      <div class="sub">{{ revenue.get('runs', 0) }} run(s) billed</div></div>
+    <div class="metric"><div class="label">platform fee</div>
+      <div class="v">${{ ((revenue.get('platform_usd', 0) or 0))|round(2) }}</div>
+      <div class="sub">the split is in the ledger</div></div>
+  </div>
+
+  <div class="panel mt-3">
+    <div class="panel-head"><h3>Catalogue</h3>
+      <span class="sub">install runs the agent's own smoke test first</span></div>
+    {% if catalogue %}
+      <div class="grid g-3">
+        {% for a in catalogue %}
+          <div class="panel tight">
+            <div class="row-between">
+              <b>{{ a.get('name', a.get('slug')) }}</b>
+              <span class="badge {{ 'ok' if a.get('verified', a.get('status') == 'published') else '' }}">
+                {{ a.get('category', 'agent') }}</span>
+            </div>
+            <p class="tiny muted" style="margin:6px 0">{{ a.get('description')|truncate(150) }}</p>
+            <div class="chip-row">
+              {% for tool in (a.get('tools') or [])[:4] %}<span class="chip">{{ tool }}</span>{% endfor %}
+            </div>
+            <div class="row-between mt-2">
+              <span class="tiny muted">v{{ a.get('version', '1.0.0') }}
+                {% if a.get('price_usd') %} · ${{ a.get('price_usd') }}/run{% endif %}</span>
+              <form method="post" action="/app/agents/{{ a.get('slug') }}/install" style="margin:0">
+                <button class="btn btn-sm btn-primary" type="submit">install</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty"><div class="ico">🤖</div><h3>Nothing published yet</h3>
+        <p>Publish a manifest with <span class="mono-num">POST /api/v1/agents</span>
+           to list an agent. Manifests are checksummed, so an installed version is the
+           version you read.</p></div>
+    {% endif %}
+  </div>
+
+  {% if installed %}
+    <div class="panel mt-3">
+      <div class="panel-head"><h3>Installed in this tenant</h3></div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>agent</th><th>version</th><th>installed</th><th>runs</th><th>state</th></tr></thead>
+          <tbody>
+            {% for i in installed %}
+              <tr><td class="mono-num">{{ i.get('slug') }}</td>
+                <td class="mono-num">{{ i.get('version') }}</td>
+                <td class="tiny muted">{{ i.get('installed_at')|human_ago if i.get('installed_at') else '—' }}</td>
+                <td class="mono-num">{{ i.get('runs', 0) }}</td>
+                <td><span class="badge {{ 'ok' if i.get('state', 'ready') == 'ready' else 'warn' }}">
+                  {{ i.get('state', 'ready') }}</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="panel tight mt-3">
+    <div class="panel-head"><h3>What an agent may touch</h3></div>
+    <div class="grid g-4">
+      <div><b class="tiny">Tools, not machines</b>
+        <p class="tiny muted" style="margin:4px 0 0">search, ask, extract, watch, dataset
+          write, webhook — each permission-gated per tenant.</p></div>
+      <div><b class="tiny">No shell, no network</b>
+        <p class="tiny muted" style="margin:4px 0 0">No subprocess, no arbitrary HTTP:
+          agents compose platform tools.</p></div>
+      <div><b class="tiny">Budgeted</b>
+        <p class="tiny muted" style="margin:4px 0 0">Every install carries a page and
+          spend budget; running without one is refused.</p></div>
+      <div><b class="tiny">Attributable</b>
+        <p class="tiny muted" style="margin:4px 0 0">Runs are written to the audit log
+          and the revenue ledger.</p></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

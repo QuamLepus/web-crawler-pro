@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Living datasets</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        A dataset here is a series of immutable versions, not a file. Re-running a
+        crawl that changed nothing creates no version, so the diff you read is the
+        diff that matters — and every version carries its quality metrics and a
+        SHA-256 checksum.
+      </p>
+    </div>
+    <a class="btn btn-primary" href="#new-dataset">New dataset</a>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric"><div class="label">datasets</div>
+      <div class="v">{{ stats.get('datasets', datasets|length) }}</div>
+      <div class="sub">{{ stats.get('versions', 0) }} version(s) stored</div></div>
+    <div class="metric cyan"><div class="label">rows</div>
+      <div class="v">{{ stats.get('rows', 0)|human_num }}</div>
+      <div class="sub">across all versions</div></div>
+    <div class="metric gold"><div class="label">live</div>
+      <div class="v">{{ stats.get('live', 0) }}</div>
+      <div class="sub">{{ (stats.get('stale_live') or [])|length }} overdue</div></div>
+    <div class="metric"><div class="label">mean quality</div>
+      <div class="v">{{ ((stats.get('mean_quality', 0) or 0) * 100)|round(0)|int }}%</div>
+      <div class="sub">worst {{ ((stats.get('worst_quality', 0) or 0) * 100)|round(0)|int }}%</div></div>
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel">
+      <div class="panel-head"><h3>Catalog</h3><span class="sub">{{ datasets|length }} shown</span></div>
+      {% if datasets %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>dataset</th><th>version</th><th>rows</th><th>quality</th>
+              <th>updated</th><th></th></tr></thead>
+            <tbody>
+            {% for d in datasets %}
+              <tr>
+                <td><a href="/app/datasets/{{ d.dataset_id }}">{{ d.name }}</a>
+                  <div class="tiny muted">{{ d.description|truncate(70) }}</div>
+                  {% if d.tags %}<div class="chip-row">
+                    {% for t in d.tags[:3] %}<span class="chip">{{ t }}</span>{% endfor %}
+                  </div>{% endif %}</td>
+                <td class="mono-num">{{ d.latest.version if d.latest else '—' }}
+                  {% if d.versions and d.versions|length > 1 %}
+                    <div class="tiny muted">{{ d.versions|length }} versions</div>{% endif %}</td>
+                <td class="mono-num">{{ (d.row_count or 0)|human_num }}</td>
+                <td>
+                  {% set q = (d.latest.quality.score if d.latest and d.latest.quality else 0) %}
+                  <span class="badge {{ 'ok' if q >= 0.8 else ('warn' if q >= 0.55 else 'danger') }}">
+                    {{ (q * 100)|round(0)|int }}%</span>
+                </td>
+                <td class="tiny muted">{{ d.updated_at|human_ago }}</td>
+                <td><a class="btn btn-sm" href="/app/datasets/{{ d.dataset_id }}">open</a></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">🗂</div>
+          <h3>No datasets yet</h3>
+          <p>Create one, then feed it from a crawl, a workflow or a monitor. A monitor
+             writing into a dataset is how “living” datasets actually get built.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="panel" id="new-dataset">
+      <div class="panel-head"><h3>Create a dataset</h3></div>
+      <form method="post" action="/app/datasets" class="stack">
+        <label class="tiny muted">name<input class="input" name="name" maxlength="120"
+               placeholder="smartphone-prices" required></label>
+        <label class="tiny muted">description
+          <input class="input" name="description" maxlength="500"
+                 placeholder="Bangladeshi e-commerce smartphone prices"></label>
+        <div class="row" style="gap:8px">
+          <label class="tiny muted" style="flex:1">primary key
+            <input class="input" name="primary_key" value="url"></label>
+          <label class="tiny muted" style="flex:1">licence
+            <input class="input" name="licence" placeholder="CC-BY-4.0"></label>
+        </div>
+        <label class="tiny muted">refresh cadence (optional)
+          <input class="input" name="refresh" placeholder="6h"></label>
+        <button class="btn btn-primary" type="submit">Create</button>
+        <p class="tiny muted" style="margin:0">
+          The primary key is what makes a diff stable: it is the row's identity.
+          Everything else can move.
+        </p>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Answer &amp; research</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Type a goal, not a URL. Answers come back with the page they came from,
+        the time it was fetched and a confidence, so a number can be checked
+        instead of trusted. Research runs the same pipeline as a job:
+        plan → discover → crawl → extract → verify → report.
+      </p>
+    </div>
+    <span class="badge brand nowrap">Citations · provenance · confidence</span>
+  </div>
+
+  <div class="tabs" data-tabs role="tablist" aria-label="Intelligence">
+    <button class="tab" role="tab" data-tab="ask" aria-selected="{{ 'true' if tab != 'research' else 'false' }}">Ask</button>
+    <button class="tab" role="tab" data-tab="research" aria-selected="{{ 'true' if tab == 'research' else 'false' }}">Research agent</button>
+    <button class="tab" role="tab" data-tab="how" aria-selected="false">How it works</button>
+  </div>
+
+  <section data-panel="ask" {% if tab == 'research' %}hidden{% endif %}>
+    <div class="panel mt-3">
+      <form method="post" action="/app/intelligence/ask" class="ask-box">
+        <input class="input" type="text" name="question" value="{{ question }}"
+               placeholder="What did the RBI say about digital lending in 2025?"
+               aria-label="Your question" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Ask</button>
+      </form>
+      {% if not question %}
+        <div class="chip-row">
+          {% for ex in examples %}
+            <a class="chip" href="/app/intelligence?tab=ask&q={{ ex|urlencode }}">{{ ex }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% if question and tab != 'research' %}
+      <div class="split mt-3" data-loads>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Answer</h3>
+            {% set conf = result.get('confidence') or result.get('answer', {}).get('confidence') %}
+            {% if conf is not none %}
+              <span class="badge {{ 'ok' if conf >= 0.7 else ('warn' if conf >= 0.4 else 'danger') }}">
+                confidence {{ (conf * 100)|round(0)|int }}%
+              </span>
+            {% endif %}
+          </div>
+          {% set body = result.get('answer') if result.get('answer') is string else (result.get('answer') or {}).get('text') %}
+          {% if body %}
+            <div class="answer">
+              <p class="claim">{{ body }}</p>
+              {% set citations = result.get('citations') or result.get('sources') or [] %}
+              {% if citations %}
+                <ol class="stack" style="margin:12px 0 0;padding-left:18px">
+                  {% for c in citations %}
+                    <li class="tl-item" style="padding:6px 0">
+                      <div class="tl-body">
+                        <a href="{{ c.get('url', '#') }}" target="_blank" rel="noopener nofollow">
+                          {{ c.get('title') or c.get('url') }}
+                        </a>
+                      </div>
+                      <div class="tl-meta">
+                        {% if c.get('fetched_at') %}fetched {{ c.get('fetched_at')|human_ago }} · {% endif %}
+                        {% if c.get('provenance_id') %}<span class="mono-num">{{ c.get('provenance_id') }}</span> · {% endif %}
+                        {% if c.get('quote') %}“{{ c.get('quote')|truncate(140) }}”{% endif %}
+                      </div>
+                    </li>
+                  {% endfor %}
+                </ol>
+              {% endif %}
+            </div>
+          {% else %}
+            <div class="empty">
+              <div class="ico">✦</div>
+              <h3>Nothing to answer from</h3>
+              <p>Either no source in the index covered this, or the budget was spent
+                 before a claim was verified. Both are reported rather than papered
+                 over — see the plan below.</p>
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><h3>What it did</h3></div>
+            {% if plan %}
+              <div class="kv">
+                {% for key, value in plan.items() %}
+                  <div class="row-between"><span class="tiny muted">{{ key }}</span>
+                    <span class="tiny mono-num">{{ value }}</span></div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="tiny muted">The planner did not return a plan for this question.</p>
+            {% endif %}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Cost</h3></div>
+            {% set cost = result.get('cost') or {} %}
+            <div class="metric cyan">
+              <div class="label">estimated spend</div>
+              <div class="v">{{ (cost.get('usd') if cost else 0)|human_money if cost.get('usd') else '—' }}</div>
+              <div class="sub">{{ cost.get('pages', 0) or 0 }} page(s) budgeted ·
+                {{ cost.get('model', 'no model') }}</div>
+            </div>
+            <p class="tiny muted mt-2" style="margin-bottom:0">
+              Cost is an estimate from the simulator, not an invoice.
+            </p>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section data-panel="research" {% if tab != 'research' %}hidden{% endif %}>
+    <div class="panel mt-3">
+      <form method="post" action="/app/intelligence/research" class="ask-box">
+        <input class="input" type="text" name="question" value="{{ question if tab == 'research' else '' }}"
+               placeholder="Compare the 2026 pricing of every Bangladeshi cloud host"
+               aria-label="Research question" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Run research</button>
+      </form>
+      <p class="tiny muted" style="margin:10px 0 0">
+        A research run produces a report; every factual statement in it carries the
+        row of evidence it came from. Claims that failed verification are listed
+        separately instead of being quietly dropped.
+      </p>
+    </div>
+    {% if question and tab == 'research' %}
+      {% set report = result.get('report') or {} %}
+      <div class="panel mt-3" data-loads>
+        <div class="panel-head">
+          <h3>{{ report.get('title') or 'Research report' }}</h3>
+          <a class="btn btn-sm" href="/app/intelligence?tab=research&q={{ question|urlencode }}">refresh</a>
+        </div>
+        {% if report.get('markdown') %}
+          <pre class="code" style="max-height:520px;overflow:auto;white-space:pre-wrap">{{ report.get('markdown') }}</pre>
+        {% else %}
+          <div class="empty"><div class="ico">🔬</div>
+            <h3>No report yet</h3>
+            <p>{{ result.get('note') or 'The agent needs at least one fetchable source; configure a fetch backend or seed the index.' }}</p>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section data-panel="how" hidden>
+    <div class="panel mt-3">
+      <div class="split">
+        <div>
+          <h3>Plan → discover → crawl → extract → verify → report</h3>
+          <ol class="muted" style="line-height:1.7">
+            <li><b>Plan.</b> The question becomes sub-questions and a page budget.</li>
+            <li><b>Discover.</b> Candidates come from your own index first, then the
+                topic-discovery providers — never from a third-party search API.</li>
+            <li><b>Crawl.</b> Robots, politeness and per-host rate limits apply
+                exactly as they do for a normal job.</li>
+            <li><b>Extract.</b> A recipe extracts the claim; if none matches, the
+                page's structured data is used, and the field is marked healed.</li>
+            <li><b>Verify.</b> A claim needs one source, a strong claim needs two.
+                Unverified claims are separated from the answer.</li>
+            <li><b>Report.</b> Markdown with inline citations and a signed manifest.</li>
+          </ol>
+        </div>
+        <div>
+          <h3>What this cannot do</h3>
+          <ul class="muted" style="line-height:1.7">
+            <li>It does not answer questions about the open web in general — only
+                about pages it can reach and that are in scope.</li>
+            <li>It does not invent a number when no citation exists; you get the
+                plan and a refusal instead.</li>
+            <li>The confidence score is a heuristic over source agreement, not a
+                statistical guarantee.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

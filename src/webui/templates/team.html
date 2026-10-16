@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Team, roles &amp; audit</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Who can do what, what they did, and how long we keep it. Roles are a fixed
+        matrix rather than free-form permissions, the audit log is append-only and
+        hash-chained, and retention is a policy you can read before it deletes
+        anything.
+      </p>
+    </div>
+    <span class="badge brand nowrap">{{ me.get('role') or 'member' }}</span>
+  </div>
+
+  <div class="split">
+    <div class="panel">
+      <div class="panel-head"><h3>Role matrix</h3>
+        <span class="sub">the whole policy, no hidden super-user</span></div>
+      {% if matrix %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>permission</th>
+              {% for role in ['owner','admin','member','viewer'] %}<th>{{ role }}</th>{% endfor %}</tr></thead>
+            <tbody>
+            {% for row in matrix %}
+              <tr><td class="tiny mono-num">{{ row.get('permission', row.get('name')) }}</td>
+                {% for role in ['owner','admin','member','viewer'] %}
+                  <td>{% if row.get(role) %}<span class="badge ok">yes</span>
+                      {% else %}<span class="tiny muted">—</span>{% endif %}</td>
+                {% endfor %}</tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="tiny muted">No role matrix configured.</p>
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel tight">
+        <div class="panel-head"><h3>Usage this period</h3></div>
+        <div class="stack" style="gap:6px">
+          {% for k, v in (usage or {}).items() %}
+            <div class="row-between tiny"><span class="muted">{{ k }}</span>
+              <span class="mono-num">{{ v|human_num if v is number else v }}</span></div>
+          {% else %}
+            <p class="tiny muted" style="margin:0">No usage recorded yet.</p>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="panel tight">
+        <div class="panel-head"><h3>Retention policy</h3></div>
+        {% if policy %}
+          <div class="stack" style="gap:6px">
+            {% for k, v in policy.items() %}
+              <div class="row-between tiny"><span class="muted">{{ k }}</span>
+                <span class="mono-num">{{ v }}</span></div>
+            {% endfor %}
+          </div>
+        {% else %}<p class="tiny muted" style="margin:0">Using the default: raw bodies 30 days,
+          extracted rows kept, ledger kept.</p>{% endif %}
+        {% if retention %}
+          <div class="hr"></div>
+          <div class="tiny muted">next sweep would remove:
+            {% for item in retention[:4] %}<div>{{ item }}</div>{% endfor %}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mt-3">
+    <div class="panel-head"><h3>Audit log</h3>
+      <span class="sub">{{ audit|length }} recent entr{{ 'y' if audit|length == 1 else 'ies' }}</span></div>
+    {% if audit %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>when</th><th>actor</th><th>action</th><th>target</th><th>hash</th></tr></thead>
+          <tbody>
+          {% for e in audit %}
+            <tr><td class="tiny muted">{{ e.at|human_ago if e.at else '—' }}</td>
+              <td class="tiny">{{ e.actor or 'system' }}</td>
+              <td><span class="badge">{{ e.action }}</span></td>
+              <td class="tiny mono-num">{{ (e.target or e.resource or '')|truncate(40) }}</td>
+              <td class="tiny mono-num">{{ (e.entry_hash or e.hash or '')[:16] }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty"><div class="ico">🛡</div><h3>Nothing logged yet</h3>
+        <p>Keys, logins, installs, deletions and exports all land here. An audit log
+           that starts empty because nothing happened is a good sign.</p></div>
+    {% endif %}
+    {% if counts %}
+      <div class="chip-row">
+        {% for action, n in counts.items() %}<span class="chip">{{ action }} · {{ n }}</span>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="grid g-3 mt-3">
+    <div class="panel tight"><b class="tiny">SSO / OIDC</b>
+      <p class="tiny muted" style="margin:4px 0 0">OIDC with JWKS validation and
+        tenant mapping. SAML is configured per deployment; we do not resell an
+        identity provider.</p></div>
+    <div class="panel tight"><b class="tiny">Row-level isolation</b>
+      <p class="tiny muted" style="margin:4px 0 0">Every Redis key and every dataset
+        file embeds the tenant id, so a missing filter returns nothing instead of
+        somebody else's rows.</p></div>
+    <div class="panel tight"><b class="tiny">Export &amp; erase</b>
+      <p class="tiny muted" style="margin:4px 0 0">Backup, restore and erasure
+        requests run as jobs and are audited. Erasure removes bodies, keeps the
+        ledger entry that it happened.</p></div>
+  </div>
+</div>
+{% endblock %}

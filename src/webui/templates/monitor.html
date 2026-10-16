@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Change monitoring</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        “Something changed” is noise. This page is about <em>what</em> changed:
+        price, a new product, an announcement, a policy rewrite, a jump in open
+        roles — each with the before/after and the significance that decided
+        whether you were told.
+      </p>
+    </div>
+    <span class="badge brand nowrap"><span class="dot live"></span>adaptive cadence</span>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric">
+      <div class="label">monitors</div>
+      <div class="v">{{ stats.get('watches', watches|length) }}</div>
+      <div class="sub">{{ stats.get('active', 0) }} active · {{ stats.get('paused', 0) }} paused</div>
+    </div>
+    <div class="metric cyan">
+      <div class="label">targets</div>
+      <div class="v">{{ stats.get('targets', 0) }}</div>
+      <div class="sub">{{ stats.get('fetches', 0) }} fetch(es) recorded</div>
+    </div>
+    <div class="metric gold">
+      <div class="label">events</div>
+      <div class="v">{{ stats.get('events', 0) }}</div>
+      <div class="sub">{{ stats.get('notified', 0) }} notified</div>
+    </div>
+    <div class="metric">
+      <div class="label">median latency</div>
+      <div class="v">{{ stats.get('median_check_ms', '—') }}<span class="tiny muted"> ms</span></div>
+      <div class="sub">per check, fetches included</div>
+    </div>
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Your monitors</h3>
+        <a class="btn btn-sm" href="#new-monitor">new monitor</a>
+      </div>
+      {% if watches %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>name</th><th>targets</th><th>cadence</th><th>state</th>
+              <th>next check</th><th></th></tr></thead>
+            <tbody>
+            {% for w in watches %}
+              <tr>
+                <td><a href="/app/monitor?watch={{ w.watch_id }}">{{ w.name }}</a>
+                  <div class="tiny muted">{{ w.goal|truncate(70) or ', '.join((w.kinds or [])|list) }}</div></td>
+                <td class="mono-num">{{ (w.targets or [])|length }}</td>
+                <td class="mono-num">{{ w.schedule_seconds|human_seconds if w.schedule_seconds else '—' }}</td>
+                <td><span class="badge {{ 'ok' if w.state == 'active' else 'warn' }}">{{ w.state }}</span></td>
+                <td class="mono-num tiny">{{ (w.next_run_at|human_ago) if w.next_run_at else '—' }}</td>
+                <td class="row" style="gap:6px">
+                  <form method="post" action="/app/monitor/{{ w.watch_id }}/run" style="margin:0">
+                    <button class="btn btn-sm" type="submit">check now</button></form>
+                  <form method="post" action="/app/monitor/{{ w.watch_id }}/pause" style="margin:0">
+                    <button class="btn btn-sm btn-ghost" type="submit">
+                      {{ 'pause' if w.state == 'active' else 'resume' }}</button></form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="ico">📡</div>
+          <h3>No monitors yet</h3>
+          <p>Point one at a pricing page, a careers page or a policy page. The first
+             run records a baseline and tells you nothing else — that is what makes
+             the second run worth reading.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel" id="new-monitor">
+        <div class="panel-head"><h3>Watch a page (or a topic)</h3></div>
+        <form method="post" action="/app/monitor" class="stack">
+          <label class="tiny muted">name<input class="input" name="name" maxlength="160"
+                 placeholder="Competitor pricing — pro plan"></label>
+          <label class="tiny muted">urls (one per line)
+            <textarea class="input" name="urls" rows="3" placeholder="https://competitor.test/pricing"></textarea></label>
+          <label class="tiny muted">goal (optional)
+            <input class="input" name="goal" maxlength="400"
+                   placeholder="Tell me when the pro plan price moves"></label>
+          <div class="row" style="gap:8px">
+            <label class="tiny muted" style="flex:1">cadence
+              <input class="input" name="schedule" value="1h"></label>
+            <label class="tiny muted" style="flex:1">notify above
+              <input class="input" name="min_significance" type="number" step="0.05"
+                     min="0" max="1" value="0.35"></label>
+          </div>
+          <fieldset class="tiny muted" style="border:0;padding:0">
+            <legend class="tiny muted">what to look for</legend>
+            <div class="chip-row">
+              {% for kind in kinds %}
+                <label class="chip {{ 'on' if kind in ['price_change','new_product','announcement','policy_change','jobs_change'] }}">
+                  <input type="checkbox" name="kinds" value="{{ kind }}"
+                    {% if kind in ['price_change','new_product','announcement','policy_change','jobs_change'] %}checked{% endif %}>
+                  {{ kind }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <button class="btn btn-primary" type="submit">Create monitor</button>
+        </form>
+      </div>
+
+      <div class="panel tight">
+        <div class="panel-head"><h3>Cadence</h3></div>
+        <p class="tiny muted" style="margin:0">
+          An hourly monitor on a page that changes twice a month is 700 wasted
+          fetches. With <b>adaptive</b> cadence on, a page that never changes is
+          checked less and less often, and a page that just moved is checked
+          sooner — the optimizer's schedule, not a cron expression.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mt-3">
+    <div class="panel-head">
+      <h3>Recent changes</h3>
+      <span class="sub">{{ events|length }} shown</span>
+    </div>
+    {% if events %}
+      <div class="timeline">
+        {% for e in events %}
+          <div class="tl-item {{ e.kind }}">
+            <div class="row-between">
+              <div class="tl-body">
+                <b>{{ e.summary or e.kind.replace('_', ' ') }}</b>
+                {% if e.url %}<a class="tiny" href="{{ e.url }}" target="_blank"
+                   rel="noopener nofollow">{{ e.url|truncate(70) }}</a>{% endif %}
+              </div>
+              <span class="badge {{ 'gold' if e.kind == 'price_change' else '' }}">{{ e.kind.replace('_',' ') }}</span>
+            </div>
+            <div class="tl-meta">
+              <span class="tl-when">{{ e.detected_at|human_ago if e.detected_at else '' }}</span>
+              · significance <b class="mono-num">{{ (e.significance or 0)|round(2) }}</b>
+              {% if e.notified is defined %} · {{ 'notified' if e.notified else 'below your threshold' }}{% endif %}
+              {% if e.watch_id %} · <a href="/app/monitor?watch={{ e.watch_id }}">monitor</a>{% endif %}
+            </div>
+            {% if e.before or e.after %}
+              <div class="diff-row" style="margin-top:6px">
+                <span class="k">value</span>
+                <span class="from">{{ e.before|string|truncate(160) or '—' }}</span>
+                <span class="to">{{ e.after|string|truncate(160) or '—' }}</span>
+              </div>
+            {% endif %}
+            {% if e.detail %}
+              <details class="disclose"><summary>detail</summary>
+                <pre class="code tiny" style="white-space:pre-wrap">{{ e.detail }}</pre>
+              </details>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty"><div class="ico">🕰</div>
+        <h3>No change events yet</h3>
+        <p>Events appear here after a monitor has run at least twice: the first run
+           is a baseline, the second is a comparison.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

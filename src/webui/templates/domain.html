@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <div class="tiny muted">Public domain score · free to read, no key required</div>
+      <h1 style="margin:2px 0 0" class="mono-num">{{ host }}</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Computed only from our own index and our provenance ledger — no
+        third-party authority metric, no bought ranking. Every component is shown
+        with its weight so the number can be argued with.
+      </p>
+    </div>
+    <form method="get" action="/domain/{{ host }}" class="row" style="gap:8px;margin:0">
+      <input class="input" name="compare" value="{{ compare }}" placeholder="compare with…"
+             aria-label="Compare host" autocomplete="off">
+      <button class="btn" type="submit">Compare</button>
+    </form>
+  </div>
+
+  {% if score.get('score') is none %}
+    <div class="panel">
+      <div class="empty"><div class="ico">◍</div>
+        <h3>Not in our index</h3>
+        <p>{{ (score.get('notes') or ['We have not crawled this host yet.'])[0] }} —
+           <b>unknown is not the same as bad</b>, so this page reports nothing
+           rather than a zero.</p>
+        <a class="btn btn-primary" href="/app/discovery">Discover sites for a topic</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="kpi-grid">
+      <div class="metric gold">
+        <div class="label">score</div>
+        <div class="v">{{ score.get('score')|round(1) }}<span class="tiny muted">/100</span></div>
+        <div class="sub">grade {{ grade }} · coverage {{ score.get('coverage') }} ·
+          {{ score.get('docs', 0) }} document(s)</div>
+      </div>
+      {% for row in breakdown[:3] %}
+        <div class="metric cyan">
+          <div class="label">{{ row.component }}</div>
+          <div class="v">{{ (row.value * 100)|round(0)|int }}%</div>
+          <div class="sub">weight {{ (row.weight * 100)|round(0)|int }}% →
+            {{ row.points }} pts</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="split mt-3">
+      <div class="panel">
+        <div class="panel-head"><h3>Components</h3>
+          <span class="sub">computed {{ score.get('computed_at')|human_ago }}</span></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>component</th><th>value</th><th>weight</th><th>contribution</th></tr></thead>
+            <tbody>
+              {% for row in breakdown %}
+                <tr><td>{{ row.component }}</td>
+                  <td style="min-width:120px">
+                    <div class="conf-bar"><i style="width:{{ (row.value * 100)|round(0)|int }}%"></i></div></td>
+                  <td class="mono-num">{{ (row.weight * 100)|round(0)|int }}%</td>
+                  <td class="mono-num">{{ row.points }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if score.get('notes') %}
+          <div class="hr"></div>
+          <ul class="tiny muted" style="margin:0;padding-left:18px;line-height:1.8">
+            {% for n in score.get('notes', []) %}<li>{{ n }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+
+      <div class="stack">
+        {% if comparison and comparison.get('rows') %}
+          <div class="panel tight">
+            <div class="panel-head"><h3>{{ comparison.a.host }} vs {{ comparison.b.host }}</h3>
+              <span class="badge brand">
+                {{ comparison.a.score|round(1) if comparison.a.score is not none else '—' }} :
+                {{ comparison.b.score|round(1) if comparison.b.score is not none else '—' }}</span></div>
+            {% for row in comparison.rows %}
+              <div class="row-between tiny"><span class="muted">{{ row.component }}</span>
+                <span class="mono-num">{{ (row.a * 100)|round(0)|int }}% vs
+                  {{ (row.b * 100)|round(0)|int }}%
+                  <b class="{{ 'gold' if row.delta > 0 else '' }}">
+                    {{ '+' if row.delta > 0 else '' }}{{ (row.delta * 100)|round(0)|int }}</b></span></div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="panel tight">
+          <div class="panel-head"><h3>Use it via API</h3></div>
+          <pre class="code tiny" style="margin:0">GET /api/v1/domain/{{ host }}</pre>
+          <p class="tiny muted" style="margin:8px 0 0">
+            The same data powers this page, so there is no “premium” version that
+            says something different — only a higher rate limit.
+          </p>
+        </div>
+
+        <div class="panel tight">
+          <div class="panel-head"><h3>How to read this</h3></div>
+          <ul class="tiny muted" style="margin:0;padding-left:18px;line-height:1.8">
+            <li><b>authority</b> — best in-index signal we hold for the host, or an
+              index-depth proxy, and we say which.</li>
+            <li><b>coverage</b> — how much of the host we actually hold (log-ish:
+              100+ documents saturates).</li>
+            <li><b>freshness</b> — decay over 180 days since the newest fetch.</li>
+            <li><b>licence</b> — from each page's own metadata. Unknown scores 0.4,
+              never “free”.</li>
+            <li><b>robots</b> — share of recorded fetches that robots.txt allowed.</li>
+          </ul>
+        </div>
+
+        <div class="panel tight">
+          <div class="panel-head"><h3>Sources</h3></div>
+          {% if score.get('sources') %}
+            {% for src in score.get('sources', []) %}
+              <div class="tiny mono-num">{{ src }}</div>
+            {% endfor %}
+          {% else %}
+            <p class="tiny muted" style="margin:0">No source tag recorded — usually
+              means the rows arrived through a direct crawl.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="tiny muted mt-3">
+    A domain score is not a judgement of a business and not a legal opinion. It
+    describes <i>our</i> knowledge of a host at a point in time, and it changes as
+    we crawl. Disagree with it? The components above are the entire formula.
+  </div>
+</div>
+{% endblock %}

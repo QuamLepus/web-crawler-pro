@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Knowledge graph</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Companies, people, products, technologies and the relations between them —
+        extracted from pages you crawled, each edge carrying the sentence and the
+        URL it came from. No relation enters this graph without evidence.
+      </p>
+    </div>
+    <form method="get" action="/app/graph" class="row" style="gap:8px;margin:0">
+      <input class="input" name="q" value="{{ query }}" placeholder="Look up an entity…"
+             aria-label="Entity" autocomplete="off">
+      <select class="input" name="kind" aria-label="Kind">
+        <option value="">all kinds</option>
+        {% for k in ['company','person','product','technology','location','event','organisation','other'] %}
+          <option value="{{ k }}" {% if kind == k %}selected{% endif %}>{{ k }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn" type="submit">Find</button>
+    </form>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric"><div class="label">entities</div>
+      <div class="v">{{ stats.get('entities', entities|length) }}</div>
+      <div class="sub">across {{ stats.get('kinds', {})|length }} kinds</div></div>
+    <div class="metric cyan"><div class="label">relations</div>
+      <div class="v">{{ stats.get('relations', 0) }}</div>
+      <div class="sub">{{ (stats.get('predicates', {}) or {})|length }} predicate(s) seen</div></div>
+    <div class="metric gold"><div class="label">merged duplicates</div>
+      <div class="v">{{ stats.get('merged', 0) }}</div>
+      <div class="sub">alias + acronym resolution</div></div>
+    <div class="metric"><div class="label">evidence edges</div>
+      <div class="v">{{ stats.get('evidenced', stats.get('relations', 0)) }}</div>
+      <div class="sub">every edge links a sentence</div></div>
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>{% if focus %}{{ focus.name }}{% else %}Entities{% endif %}</h3>
+        {% if focus %}<a class="btn btn-sm btn-ghost" href="/app/graph">clear</a>{% endif %}
+      </div>
+
+      {% if focus and subgraph.get('edges') %}
+        <div class="graph-wrap">
+          <svg viewBox="0 0 860 340" role="img" aria-label="Entity neighbourhood">
+            {% for edge in subgraph.get('edges', []) %}
+              {% set a = layout.get(edge.subject) %}
+              {% set b = layout.get(edge.object) %}
+              {% if a and b %}
+                <line class="edge" x1="{{ a.x }}" y1="{{ a.y }}" x2="{{ b.x }}" y2="{{ b.y }}"></line>
+                <text class="edge-label" x="{{ ((a.x + b.x) / 2)|round(0) }}"
+                      y="{{ ((a.y + b.y) / 2)|round(0) }}">{{ edge.predicate.replace('_', ' ') }}</text>
+              {% endif %}
+            {% endfor %}
+            {% for node in subgraph.get('nodes', []) %}
+              {% set p = layout.get(node.entity_id) %}
+              {% if p %}
+                <circle class="node node-{{ node.kind }}" cx="{{ p.x }}" cy="{{ p.y }}"
+                        r="{{ 26 if node.entity_id == subgraph.get('root') else 19 }}"></circle>
+                <text x="{{ p.x }}" y="{{ p.y - 2 }}" text-anchor="middle">{{ node.name|truncate(22) }}</text>
+                <text x="{{ p.x }}" y="{{ p.y + 11 }}" text-anchor="middle"
+                      style="fill:var(--text-3);font-size:9px">{{ node.kind }}</text>
+              {% endif %}
+            {% endfor %}
+          </svg>
+        </div>
+        <div class="timeline mt-2">
+          {% for edge in subgraph.get('edges', [])[:8] %}
+            <div class="tl-item">
+              <div class="tl-body">
+                {{ edge.subject_name or edge.subject }} →
+                <b>{{ edge.predicate.replace('_', ' ') }}</b> →
+                {{ edge.object_name or edge.object }}
+              </div>
+              <div class="tl-meta">
+                confidence {{ (edge.confidence or 0)|round(2) }} · weight {{ edge.weight or 1 }} ·
+                {% set ev = (edge.evidence or [{}])[0] %}
+                {% if ev.get('url') %}<a href="{{ ev.get('url') }}" target="_blank"
+                   rel="noopener nofollow">{{ ev.get('url')|truncate(60) }}</a>{% endif %}
+                {% if ev.get('quote') %}<br><span class="muted">“{{ ev.get('quote')|truncate(160) }}”</span>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% elif entities %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>entity</th><th>kind</th><th>mentions</th><th>confidence</th>
+              <th>aliases</th></tr></thead>
+            <tbody>
+            {% for e in entities %}
+              <tr>
+                <td><a href="/app/graph?q={{ e.name|urlencode }}">{{ e.name }}</a>
+                  {% if e.url %}<div class="tiny muted">{{ e.url|truncate(60) }}</div>{% endif %}</td>
+                <td><span class="badge">{{ e.kind }}</span></td>
+                <td class="mono-num">{{ e.mentions or 0 }}</td>
+                <td class="mono-num">{{ ((e.confidence or 0) * 100)|round(0)|int }}%</td>
+                <td class="tiny muted">{{ (e.aliases or [])[:3]|join(', ') or '—' }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">🕸</div>
+          <h3>The graph is empty</h3>
+          <p>Entities appear here once you crawl. Run a job and the extractor turns
+             each page into nodes — organisations by legal suffix, products by model
+             naming, technologies from a closed vocabulary.</p>
+          <a class="btn btn-primary" href="/app/crawl">Start a crawl</a>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel tight">
+        <div class="panel-head"><h3>Top by mentions</h3></div>
+        {% if stats.get('top') %}
+          <div class="chip-row">
+            {% for name in stats.get('top', []) %}
+              <a class="chip" href="/app/graph?q={{ name|urlencode }}">{{ name }}</a>
+            {% endfor %}
+          </div>
+        {% else %}<p class="tiny muted" style="margin:0">Nothing yet.</p>{% endif %}
+        {% if stats.get('kinds') %}
+          <div class="hr"></div>
+          <div class="stack" style="gap:6px">
+          {% for k, n in stats.get('kinds', {}).items() %}
+            <div class="row-between tiny"><span>{{ k }}</span>
+              <span class="mono-num">{{ n }}</span></div>
+          {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      <div class="panel tight">
+        <div class="panel-head"><h3>Entity resolution</h3></div>
+        <p class="tiny muted" style="margin:0">
+          “Acme Ltd”, “ACME Limited” and “Acme” are one node, and the merge is
+          recorded with its reason and confidence. People are never merged on a
+          name alone — attributing one person's quote to another is a worse error
+          than a duplicate node.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

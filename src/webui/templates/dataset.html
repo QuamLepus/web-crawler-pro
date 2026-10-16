@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <div class="tiny muted"><a href="/app/datasets">Living datasets</a> / {{ dataset.name }}</div>
+      <h1 style="margin:2px 0 0">{{ dataset.name }}</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">{{ dataset.description }}</p>
+    </div>
+    <div class="row" style="gap:8px">
+      {% if dataset.latest %}
+        <span class="badge brand mono-num">{{ dataset.latest.version }}</span>
+        <span class="badge">{{ dataset.latest.rows|human_num }} rows</span>
+      {% endif %}
+      <a class="btn btn-sm" href="/app/datasets/{{ dataset.dataset_id }}/export.csv?version={{ version }}">CSV</a>
+      <a class="btn btn-sm" href="/app/datasets/{{ dataset.dataset_id }}/export.json?version={{ version }}">JSON</a>
+      <a class="btn btn-sm" href="/app/datasets/{{ dataset.dataset_id }}/export.markdown?version={{ version }}">Report</a>
+    </div>
+  </div>
+
+  <div class="tabs" data-tabs role="tablist" aria-label="Dataset">
+    <button class="tab" role="tab" data-tab="data" aria-selected="true">Data</button>
+    <button class="tab" role="tab" data-tab="ask" aria-selected="false">Ask</button>
+    <button class="tab" role="tab" data-tab="quality" aria-selected="false">Quality</button>
+    <button class="tab" role="tab" data-tab="versions" aria-selected="false">Versions</button>
+    <button class="tab" role="tab" data-tab="provenance" aria-selected="false">Provenance</button>
+  </div>
+
+  <section data-panel="data">
+    <div class="panel mt-3">
+      <div class="panel-head">
+        <h3>Rows <span class="tiny muted">({{ rows|length }} of {{ dataset.row_count|human_num }} shown)</span></h3>
+        <form method="get" action="/app/datasets/{{ dataset.dataset_id }}" class="row" style="gap:6px;margin:0">
+          <select class="input" name="version" aria-label="Version">
+            {% for v in dataset.versions %}
+              <option value="{{ v.version }}" {% if v.version == version %}selected{% endif %}>{{ v.version }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-sm" type="submit">view</button>
+        </form>
+      </div>
+      {% if rows %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>{% for c in columns[:8] %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for row in rows[:60] %}
+                <tr>{% for c in columns[:8] %}
+                  <td class="tiny">{{ row.get(c)|string|truncate(58) }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">📄</div><h3>No rows in this version</h3>
+          <p>Feed this dataset from a crawl, a workflow's dataset node, or a monitor
+             that writes into it.</p></div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section data-panel="ask" hidden>
+    <div class="panel mt-3">
+      <div class="panel-head">
+        <h3>Ask this dataset</h3>
+        <span class="sub">deterministic · offline · no model call</span>
+      </div>
+      <form method="post" action="/app/datasets/{{ dataset.dataset_id }}/ask" class="ask-box">
+        <input type="hidden" name="version" value="{{ version }}">
+        <input class="input" name="question" value="{{ question }}"
+               placeholder="average price by brand" aria-label="Question" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Ask</button>
+      </form>
+      <div class="chip-row">
+        <a class="chip" href="/app/datasets/{{ dataset.dataset_id }}?q=how+many+rows+are+there">how many rows?</a>
+        <a class="chip" href="/app/datasets/{{ dataset.dataset_id }}?q=average+price">average price</a>
+        <a class="chip" href="/app/datasets/{{ dataset.dataset_id }}?q=top+5+price">top 5</a>
+        <a class="chip" href="/app/datasets/{{ dataset.dataset_id }}?q=distribution+of+price">distribution</a>
+        <a class="chip" href="/app/datasets/{{ dataset.dataset_id }}?q=average+price+by+brand">by brand</a>
+      </div>
+
+      {% if answer %}
+        <div class="answer" data-loads>
+          <p class="claim">{{ answer.answer }}</p>
+          <div class="tiny muted">understood as: <span class="mono-num">{{ answer.interpretation }}</span>
+            · confidence {{ ((answer.confidence or 0) * 100)|round(0)|int }}%</div>
+          {% if answer.caveats %}
+            <div class="chip-row">
+              {% for c in answer.caveats %}<span class="chip gold">{{ c }}</span>{% endfor %}
+            </div>
+          {% endif %}
+          {% if answer.chart and answer.chart.points %}
+            <div class="chart" data-chart='{{ answer.chart|tojson }}'></div>
+          {% endif %}
+          {% if answer.rows %}
+            <div class="table-wrap mt-2">
+              <table class="table">
+                <thead><tr>{% for k in answer.rows[0].keys() %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+                <tbody>{% for row in answer.rows[:12] %}
+                  <tr>{% for v in row.values() %}<td class="tiny mono-num">{{ v }}</td>{% endfor %}</tr>
+                {% endfor %}</tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section data-panel="quality" hidden>
+    <div class="split mt-3">
+      <div class="panel">
+        <div class="panel-head"><h3>Field health</h3>
+          <span class="badge {{ 'ok' if (quality.get('score', 0) >= 0.8) else 'warn' }}">
+            score {{ ((quality.get('score', 0)) * 100)|round(0)|int }}%</span></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>field</th><th>type</th><th>completeness</th><th>distinct</th></tr></thead>
+            <tbody>
+            {% for c in columns %}
+              <tr><td class="mono-num">{{ c }}</td>
+                <td class="tiny muted">{{ (quality.get('types', {}) or {}).get(c, '—') }}</td>
+                <td>
+                  {% set pct = ((quality.get('completeness', {}) or {}).get(c, 0) * 100)|round(0)|int %}
+                  <div class="conf-bar"><i style="width:{{ pct }}%"></i></div>
+                  <span class="tiny muted">{{ pct }}%</span></td>
+                <td class="mono-num tiny">{{ (quality.get('distinct', {}) or {}).get(c, '—') }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="panel tight">
+          <div class="panel-head"><h3>Warnings</h3></div>
+          {% if quality.get('warnings') %}
+            <ul class="tiny" style="margin:0;padding-left:18px;line-height:1.7">
+              {% for w in quality.get('warnings', []) %}<li>{{ w }}</li>{% endfor %}
+            </ul>
+          {% else %}
+            <p class="tiny muted" style="margin:0">No structural problems found in this version.</p>
+          {% endif %}
+        </div>
+        {% if quality.get('currency_mix') %}
+          <div class="panel tight">
+            <div class="panel-head"><h3>Mixed currencies</h3></div>
+            {% for field, mix in quality.get('currency_mix', {}).items() %}
+              <div class="tiny">{{ field }}: {{ mix }}</div>
+            {% endfor %}
+            <p class="tiny muted" style="margin:8px 0 0">Totals across currencies are
+               refused in the Ask tab until they are converted — a sum of USD and BDT
+               is a number, not a fact.</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="versions" hidden>
+    <div class="panel mt-3">
+      <div class="panel-head"><h3>Version history</h3>
+        <span class="sub">immutable · content-addressed</span></div>
+      {% if dataset.versions|length > 1 %}
+        <form method="get" action="/app/datasets/{{ dataset.dataset_id }}" class="row" style="gap:6px">
+          <input type="hidden" name="version" value="{{ version }}">
+          <select class="input" name="compare" aria-label="Compare from">
+            {% for v in dataset.versions %}<option value="{{ v.version }}">{{ v.version }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-sm" type="submit">diff against {{ version }}</button>
+        </form>
+      {% endif %}
+      <div class="timeline mt-2">
+        {% for v in dataset.versions %}
+          <div class="tl-item">
+            <div class="row-between">
+              <div class="tl-body"><b class="mono-num">{{ v.version }}</b>
+                <span class="tiny muted">{{ v.rows|human_num }} rows · {{ v.source or 'manual' }}</span></div>
+              <span class="tiny muted">{{ v.created_at|human_ago }}</span>
+            </div>
+            <div class="tl-meta mono-num">{{ v.checksum }}</div>
+            {% if v.changes %}
+              <div class="chip-row">{% for c in v.changes[:3] %}<span class="chip">{{ c }}</span>{% endfor %}</div>
+            {% endif %}
+            <div class="row" style="gap:6px;margin-top:6px">
+              <a class="btn btn-sm" href="/app/datasets/{{ dataset.dataset_id }}?version={{ v.version }}">view</a>
+              <a class="btn btn-sm btn-ghost" href="/app/datasets/{{ dataset.dataset_id }}/export.csv?version={{ v.version }}">csv</a>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if diff %}
+      <div class="panel mt-3">
+        <div class="panel-head"><h3>Diff {{ diff.from_version }} → {{ diff.to_version }}</h3>
+          <span class="sub">{{ diff.summary }}</span></div>
+        <div class="kpi-grid">
+          <div class="metric"><div class="label">added</div><div class="v">+{{ diff.added }}</div></div>
+          <div class="metric cyan"><div class="label">changed</div><div class="v">~{{ diff.changed }}</div></div>
+          <div class="metric gold"><div class="label">removed</div><div class="v">−{{ diff.removed }}</div></div>
+          <div class="metric"><div class="label">unchanged</div><div class="v">{{ diff.unchanged }}</div></div>
+        </div>
+        <div class="mt-3">
+          {% for row in diff.rows[:40] %}
+            {% if row.status == 'changed' %}
+              {% for field, move in (row.changes or {}).items() %}
+                <div class="diff-row"><span class="k">{{ field }}</span>
+                  <span class="from">{{ move.from|string|truncate(90) }}</span>
+                  <span class="to">{{ move.to|string|truncate(90) }}</span></div>
+              {% endfor %}
+            {% elif row.status == 'added' %}
+              <div class="diff-row added"><span class="k">new row</span>
+                <span class="from">—</span><span class="to">{{ row.key|truncate(90) }}</span></div>
+            {% elif row.status == 'removed' %}
+              <div class="diff-row removed"><span class="k">gone</span>
+                <span class="from">{{ row.key|truncate(90) }}</span><span class="to">—</span></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section data-panel="provenance" hidden>
+    <div class="panel mt-3">
+      <div class="panel-head"><h3>Where these rows came from</h3></div>
+      <p class="muted" style="max-width:80ch">
+        Every version is content-addressed
+        (<span class="mono-num">{{ dataset.latest.checksum if dataset.latest else '—' }}</span>)
+        and paired with a manifest listing the URLs, fetch timestamps, robots verdicts
+        and extractor versions that produced it. Verify it with
+        <span class="mono-num">POST /api/v1/datasets/{{ dataset.dataset_id }}/verify</span>
+        or read the ledger on <a href="/app/provenance?dataset={{ dataset.dataset_id }}">Provenance
+        &amp; replay</a>.
+      </p>
+      <div class="chip-row">
+        <a class="chip" href="/app/provenance?dataset={{ dataset.dataset_id }}">open in the ledger</a>
+        <a class="chip" href="/api/v1/datasets/{{ dataset.dataset_id }}/manifest">manifest JSON</a>
+        <a class="chip gold" href="/app/monitor">attach a monitor</a>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

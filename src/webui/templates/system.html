@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">System health</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        What is up, what is degraded and what is simply not configured. A subsystem
+        that is switched off reports as “off”, never as “fine” — the difference
+        between those two is the whole point of this page.
+      </p>
+    </div>
+    <span class="badge ok"><span class="dot live"></span>live</span>
+  </div>
+
+  <div class="kpi-grid">
+    {% for name, value in (health.get('checks') or {}).items() %}
+      <div class="metric {{ 'cyan' if value else '' }}">
+        <div class="label">{{ name }}</div>
+        <div class="v">{{ 'on' if value else 'off' }}</div>
+        <div class="sub">{{ 'available' if value else 'not configured here' }}</div>
+      </div>
+    {% endfor %}
+    {% if not (health.get('checks') or {}) %}
+      <div class="metric"><div class="label">api</div><div class="v">on</div>
+        <div class="sub">this page rendered</div></div>
+    {% endif %}
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel">
+      <div class="panel-head"><h3>Crawl Doctor</h3>
+        <span class="badge {{ 'ok' if report.get('verdict') == 'healthy' else 'warn' }}">
+          {{ report.get('verdict', 'no traffic yet') }}</span></div>
+      {% if report %}
+        <div class="grid g-4">
+          <div><div class="tiny muted">fetches</div><b>{{ report.get('spans', report.get('count', 0)) }}</b></div>
+          <div><div class="tiny muted">success</div><b>{{ ((report.get('success_rate', 1) or 0) * 100)|round(0)|int }}%</b></div>
+          <div><div class="tiny muted">p95</div><b>{{ report.get('p95_ms', '—') }} ms</b></div>
+          <div><div class="tiny muted">blocked</div><b>{{ report.get('blocked', 0) }}</b></div>
+        </div>
+        {% if report.get('advice') %}
+          <div class="hr"></div>
+          <ul class="tiny" style="margin:0;padding-left:18px;line-height:1.8">
+            {% for a in report.get('advice', []) %}<li>{{ a }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      {% else %}
+        <p class="tiny muted" style="margin:0">No fetch spans recorded yet — crawl
+          something and the phases will show up here with timings per stage.</p>
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel tight">
+        <div class="panel-head"><h3>Counters</h3></div>
+        <div class="stack" style="gap:6px">
+          {% for k, v in (counters or {}).items() %}
+            <div class="row-between tiny"><span class="muted">{{ k }}</span>
+              <span class="mono-num">{{ v }}</span></div>
+          {% else %}<p class="tiny muted" style="margin:0">No counters yet.</p>{% endfor %}
+        </div>
+      </div>
+      <div class="panel tight">
+        <div class="panel-head"><h3>Probes</h3></div>
+        <div class="stack" style="gap:6px">
+          <div class="row-between tiny"><span class="mono-num">/livez</span><span class="badge ok">process</span></div>
+          <div class="row-between tiny"><span class="mono-num">/readyz</span><span class="badge ok">dependencies</span></div>
+          <div class="row-between tiny"><span class="mono-num">/healthz</span><span class="badge ok">aggregate</span></div>
+          <div class="row-between tiny"><span class="mono-num">/metrics</span><span class="badge">Prometheus</span></div>
+        </div>
+      </div>
+      <div class="panel tight">
+        <div class="panel-head"><h3>Recent spans</h3></div>
+        {% if spans %}
+          {% for s in spans[:6] %}
+            <div class="row-between tiny"><span class="mono-num">{{ s.get('url', '')|truncate(34) }}</span>
+              <span>{{ s.get('total_ms', 0) }}ms · {{ s.get('status', '—') }}</span></div>
+          {% endfor %}
+        {% else %}<p class="tiny muted" style="margin:0">Nothing recorded.</p>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

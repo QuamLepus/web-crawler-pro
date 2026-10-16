@@ -1,0 +1,41 @@
+"""Knowledge Graph Engine (entities, resolution, evidence-backed edges)."""
+
+from src.graph.service import (
+    ENTITY_KINDS,
+    Entity,
+    GraphService,
+    GraphStore,
+    Mention,
+    Relation,
+    canonical_name,
+    entity_id,
+    entity_kinds,
+    extract,
+    extract_relations,
+    graph_to_mermaid,
+    merge_duplicates,
+    predicate_vocabulary,
+    resolve,
+    similarity,
+    tech_vocabulary,
+)
+
+__all__ = [
+    "ENTITY_KINDS",
+    "Entity",
+    "GraphService",
+    "GraphStore",
+    "Mention",
+    "Relation",
+    "canonical_name",
+    "entity_id",
+    "entity_kinds",
+    "extract",
+    "extract_relations",
+    "graph_to_mermaid",
+    "merge_duplicates",
+    "predicate_vocabulary",
+    "resolve",
+    "similarity",
+    "tech_vocabulary",
+]

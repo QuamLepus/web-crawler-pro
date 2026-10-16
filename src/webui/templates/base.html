@@ -1,23 +1,30 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="WebCrawler Pro — a distributed web crawler, topic-discovery engine and training-data pipeline with a search index you own outright.">
-<meta name="color-scheme" content="light dark">
+<meta name="description" content="Web Intelligence OS — topic discovery, a crawler you run, an index you own, change monitoring, provenance and living datasets. Discover. Extract. Understand. Automate.">
+<meta name="color-scheme" content="dark light">
 <title>{{ title }}</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕷️</text></svg>">
-<link rel="stylesheet" href="/static/app.css?v=3">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>">
+<link rel="stylesheet" href="/static/app.css?v=4">
 <script>
-  /* Set the theme before first paint so the page never flashes the wrong one. */
+  /* Theme before first paint: dark is the product default, and the choice
+     survives navigation. */
   try {
-    var t = localStorage.getItem('wcp.theme');
-    if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    var t = localStorage.getItem('wcp.theme') || 'dark';
     document.documentElement.setAttribute('data-theme', t);
     if (localStorage.getItem('wcp.sidebar') === '1')
       document.documentElement.classList.add('pre-collapsed');
-  } catch (e) {}
+  } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
 </script>
+{% if speculation %}
+{# Speculation Rules: prerender the links a user is most likely to click next.
+   Same-origin only, no third party, and it costs nothing when unsupported. #}
+<script type="speculationrules">
+{"prerender":[{"where":{"and":[{"href_matches":"/app/*"},{"not":{"selector_matches":"[data-no-prerender]"}}]},"eagerness":"moderate"}]}
+</script>
+{% endif %}
 {% block head %}{% endblock %}
 </head>
 <body{% block bodyclass %}{% endblock %}>
@@ -25,8 +32,8 @@
 <div class="app">
   <aside class="sidebar">
     <a class="brand" href="/app" style="color:inherit">
-      <mark>🕷</mark>
-      <span><b>WebCrawler</b><small>Crawl · Discover · Index</small></span>
+      <mark>◈</mark>
+      <span><b>Web Intelligence</b><small>OS · Discover. Extract. Understand.</small></span>
     </a>
     <nav class="nav" aria-label="Console">
       {% for group in nav %}
@@ -39,7 +46,7 @@
       {% endfor %}
     </nav>
     <div class="side-foot">
-      <button type="button" data-theme-toggle title="Toggle dark mode">◐<span>Theme</span></button>
+      <button type="button" data-theme-toggle title="Toggle theme">◐<span>Theme</span></button>
       <a href="/app/docs">📘<span>API reference</span></a>
       <form method="post" action="/logout" style="margin:0">
         <button type="submit">⎋<span>Sign out</span></button>
@@ -50,15 +57,15 @@
   <div class="main">
     <header class="topbar">
       <button class="icon-btn" data-sidebar-toggle title="Collapse sidebar" aria-label="Collapse sidebar">☰</button>
-      <button class="icon-btn" data-palette title="Jump to a page (Ctrl+K)" aria-label="Search pages">⌕</button>
-      {# Always answer "what is this thing?" — one glance at the topbar. #}
+      <button class="icon-btn" data-palette title="Command palette (Ctrl/⌘ K)" aria-label="Open the command palette">⌕</button>
       <span class="badge brand nowrap" title="What this platform does">
         Crawler · Discovery · Own index
       </span>
+      <span class="badge nowrap muted" title="What it is now">Web Intelligence OS</span>
       <div class="spacer"></div>
       <div class="row" style="gap:8px">
         <span class="badge ok"><span class="dot live"></span>API online</span>
-        <button class="icon-btn" data-theme-toggle title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+        <button class="icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">◐</button>
         <div class="avatar" title="{{ me.email if me else 'guest' }}">
           {{ (me.email[0] if me and me.email else '?')|upper }}
         </div>
@@ -68,7 +75,7 @@
     <main class="content">
       {% if flash %}
         <div class="alert {{ 'ok' if flash_kind == 'ok' else ('warn' if flash_kind == 'warn' else 'danger') }} mb-3"
-             role="status" style="animation:fadeUp 300ms var(--ease-out)">
+             role="status" style="animation:fadeUp 200ms var(--ease-out)">
           <span class="ico">{{ '✓' if flash_kind == 'ok' else ('!' if flash_kind == 'warn' else '✕') }}</span>
           <span>{{ flash }}</span>
         </div>
@@ -79,11 +86,22 @@
         </div>
       {% endfor %}
       {% block content %}{% endblock %}
+      <footer class="tiny muted" style="margin-top:34px">
+        Web Intelligence OS · {{ version|default('0.1.0') }} ·
+        <a href="/app/docs">API</a> · <a href="/app/mcp">MCP &amp; SDKs</a> ·
+        <a href="/app/system">System health</a>
+        <span class="muted"> — performance figures in the README are engineering
+        targets, not measurements.</span>
+      </footer>
     </main>
   </div>
 </div>
 {% endblock %}
-<script src="/static/app.js?v=3" defer></script>
+<script>
+  /* Seed the palette with the server's own nav so ⌘K always matches the app. */
+  window.WCP_NAV = [{% for group in nav %}{% for item in group.pages %}{t:{{ item.label|tojson }},u:{{ item.href|tojson }},i:{{ item.icon|tojson }},k:{{ (group.group ~ ' ' ~ item.key)|tojson }}},{% endfor %}{% endfor %}];
+</script>
+<script src="/static/app.js?v=4" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

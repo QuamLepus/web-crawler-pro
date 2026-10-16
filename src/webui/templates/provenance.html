@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Provenance &amp; time machine</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Every fact this platform produces has a receipt: which URL, fetched when,
+        under which robots verdict, by which extractor version, and the hash of what
+        was actually returned. The ledger is append-only and hash-chained, so a
+        deleted or edited record breaks the chain visibly.
+      </p>
+    </div>
+    <form method="post" action="/app/provenance/verify" style="margin:0">
+      <button class="btn btn-primary" type="submit">Verify the chain</button>
+    </form>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric"><div class="label">records</div>
+      <div class="v">{{ stats.get('records', counts.get('total', 0))|human_num }}</div>
+      <div class="sub">{{ stats.get('urls', 0) }} distinct URL(s)</div></div>
+    <div class="metric cyan"><div class="label">chain head</div>
+      <div class="v tiny mono-num" style="font-size:14px">{{ head[:24] or '—' }}</div>
+      <div class="sub">append-only</div></div>
+    <div class="metric gold"><div class="label">recent 24h</div>
+      <div class="v">{{ stats.get('last_24h', '—') }}</div>
+      <div class="sub">fetches recorded</div></div>
+    <div class="metric"><div class="label">robots</div>
+      <div class="v">{{ stats.get('robots_ok_share', 1)|human_pct }}</div>
+      <div class="sub">fetches that respected robots.txt</div></div>
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>{% if url %}Records for {{ url|truncate(60) }}{% else %}Recent records{% endif %}</h3>
+        <form method="get" action="/app/provenance" class="row" style="gap:6px;margin:0">
+          <input class="input" name="url" value="{{ url }}" placeholder="filter by URL"
+                 aria-label="URL filter" autocomplete="off">
+          <button class="btn btn-sm" type="submit">filter</button>
+          {% if url %}<a class="btn btn-sm btn-ghost" href="/app/provenance">clear</a>{% endif %}
+        </form>
+      </div>
+      {% if records %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>url</th><th>when</th><th>status</th><th>hash</th><th>extractor</th></tr></thead>
+            <tbody>
+            {% for r in records %}
+              <tr>
+                <td class="tiny"><a href="{{ r.source_url }}" target="_blank" rel="noopener nofollow">{{ r.source_url|truncate(52) }}</a>
+                  <div class="tiny muted mono-num">{{ (r.record_id or '')[:18] }}</div>
+                  {% if r.dataset %}<div class="tiny muted">→ {{ r.dataset }}{{ ' ' ~ r.dataset_version if r.dataset_version }}</div>{% endif %}</td>
+                <td class="tiny muted">{{ r.fetched_at|human_ago if r.fetched_at else '—' }}</td>
+                <td><span class="badge {{ 'ok' if (r.http_status or 200) < 400 else 'danger' }}">
+                  {{ r.http_status or '—' }}</span>
+                  {% if r.robots_verdict %}<div class="tiny muted">robots: {{ r.robots_verdict }}</div>{% endif %}</td>
+                <td class="tiny mono-num">{{ (r.content_sha256 or '')[:16] }}</td>
+                <td class="tiny">{{ r.extractor_version or '—' }}
+                  {% if r.llm_model_id %}<div class="tiny muted">{{ r.llm_model_id }}</div>{% endif %}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">🧾</div><h3>No records yet</h3>
+          <p>The ledger fills as you crawl. Nothing is back-filled or synthesised —
+             if it is not here, it did not happen.</p>
+          <a class="btn btn-primary" href="/app/crawl">Start a crawl</a></div>
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel tight">
+        <div class="panel-head"><h3>Signed manifest</h3></div>
+        <form method="get" action="/app/provenance" class="row" style="gap:6px">
+          <input class="input" name="dataset" value="{{ dataset }}" placeholder="dataset id or slug"
+                 aria-label="Dataset" autocomplete="off">
+          <button class="btn btn-sm" type="submit">build</button>
+        </form>
+        {% if manifest %}
+          <pre class="code tiny mt-2" style="max-height:260px;overflow:auto;white-space:pre-wrap">{{ manifest|tojson(indent=2) }}</pre>
+          <button class="btn btn-sm mt-2" data-copy="pre.code"
+                  data-copy-text="manifest">copy manifest</button>
+        {% else %}
+          <p class="tiny muted" style="margin:8px 0 0">
+            A manifest lists the records behind a dataset version with a SHA-256 over
+            each row group. Hand it to a reviewer, a partner or a regulator, and they
+            can re-verify without trusting this deployment.
+          </p>
+        {% endif %}
+      </div>
+
+      <div class="panel tight">
+        <div class="panel-head"><h3>Time machine</h3></div>
+        <p class="tiny muted" style="margin:0 0 8px">
+          Snapshots are content-addressed, so “what did this page say on the 3rd of
+          March” is a lookup, not a re-crawl. Replay a version from a dataset page or
+          diff two snapshots with
+          <span class="mono-num">POST /api/v1/doc-diff</span>.
+        </p>
+        <div class="chip-row">
+          <a class="chip" href="/app/monitor">change events</a>
+          <a class="chip" href="/app/datasets">version history</a>
+          <a class="chip gold" href="/app/docs">API: /doc-diff</a>
+        </div>
+      </div>
+
+      {% if counts %}
+        <div class="panel tight">
+          <div class="panel-head"><h3>Ledger by verdict</h3></div>
+          <div class="stack" style="gap:6px">
+            {% for k, v in counts.items() %}
+              <div class="row-between tiny"><span>{{ k }}</span>
+                <span class="mono-num">{{ v|human_num }}</span></div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
