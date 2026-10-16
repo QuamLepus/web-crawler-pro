@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">MCP &amp; SDKs</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        The platform is an API first: agents, notebooks and CI call the same
+        endpoints the console does. The MCP server exposes the useful subset as
+        tools, so a coding assistant can search, ask, watch and check provenance
+        without a bespoke integration.
+      </p>
+    </div>
+    <span class="badge brand nowrap">JSON-RPC 2.0 · POST /mcp</span>
+  </div>
+
+  <div class="split">
+    <div class="panel">
+      <div class="panel-head"><h3>MCP tools</h3>
+        <span class="sub">{{ tools|length }} exposed</span></div>
+      {% if tools %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>tool</th><th>what it does</th></tr></thead>
+            <tbody>
+              {% for t in tools %}
+                <tr><td class="mono-num">{{ t.name }}</td>
+                  <td class="tiny muted">{{ t.description|truncate(160) }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="tiny muted">Tool listing unavailable in this process — run
+          <span class="mono-num">POST {{ base }}/mcp</span> with
+          <span class="mono-num">{"method":"tools/list"}</span> instead.</p>
+      {% endif %}
+
+      <div class="hr"></div>
+      <h3>Call it</h3>
+      <pre class="code tiny" style="white-space:pre-wrap">curl -s {{ base }}/mcp \
+  -H "Authorization: Bearer $WCP_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"ask","arguments":{"question":"Who sets EU AI rules?"}}}'</pre>
+      <button class="btn btn-sm mt-2" data-copy="pre.code"
+              data-copy-text='{"jsonrpc":"2.0","id":1,"method":"tools/list"}'>copy tools/list</button>
+    </div>
+
+    <div class="stack">
+      <div class="panel tight">
+        <div class="panel-head"><h3>Python</h3></div>
+        <pre class="code tiny" style="margin:0">pip install webintelligence
+
+from webintelligence import Client
+
+client = Client(token=os.environ["WCP_TOKEN"])
+answer = client.ask("average Pixel price in Bangladesh")
+print(answer.text, answer.confidence)
+for cite in answer.citations:
+    print(cite.url, cite.fetched_at)
+
+client.watch.create(
+    name="competitor pricing",
+    urls=["https://competitor.test/pricing"],
+    schedule="6h",
+)</pre>
+        <p class="tiny muted" style="margin:8px 0 0">
+          The SDK is a thin typed wrapper over the REST API — nothing it does is
+          unavailable over HTTP.
+        </p>
+      </div>
+
+      <div class="panel tight">
+        <div class="panel-head"><h3>TypeScript</h3></div>
+        <pre class="code tiny" style="margin:0">npm i @webintelligence/sdk
+
+const client = new WebIntelligence({ token: process.env.WCP_TOKEN! });
+const report = await client.research("2026 cloud pricing, Bangladesh");
+console.log(report.markdown);</pre>
+      </div>
+
+      <div class="panel tight">
+        <div class="panel-head"><h3>Endpoints worth knowing</h3></div>
+        <div class="stack" style="gap:6px">
+          {% for row in [
+              ('POST /api/v1/ask', 'question → cited answer'),
+              ('POST /api/v1/research', 'question → report + evidence'),
+              ('GET  /api/v1/watch', 'monitors and change events'),
+              ('GET  /api/v1/graph', 'entities and relations'),
+              ('POST /api/v1/datasets/{ref}/ask', 'question → dataset answer'),
+              ('GET  /api/v1/provenance/manifest', 'signed manifest'),
+              ('GET  /api/v1/domain/{host}', 'public domain score'),
+              ('POST /api/v1/mcp', 'MCP JSON-RPC bridge')] %}
+            <div class="row-between tiny"><span class="mono-num">{{ row[0] }}</span>
+              <span class="muted">{{ row[1] }}</span></div>
+          {% endfor %}
+        </div>
+        <a class="btn btn-sm mt-2" href="/app/docs">Full API reference</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

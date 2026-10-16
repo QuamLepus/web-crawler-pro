@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Recipes</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        An extraction recipe is a small program with its own test fixtures: which
+        selectors to try, in what order, what to do with the value, and what the
+        page looked like when it worked. Recipes are versioned and content-addressed,
+        so <span class="mono-num">wcp install shop@1.2.0</span> means one specific
+        extractor — not whatever today's file says.
+      </p>
+    </div>
+    <form method="post" action="/app/recipes/seed" style="margin:0">
+      <button class="btn btn-primary" type="submit">Install library</button>
+    </form>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="metric"><div class="label">recipes</div>
+      <div class="v">{{ stats.get('recipes', recipes|length) }}</div>
+      <div class="sub">{{ stats.get('versions', recipes|length) }} version(s)</div></div>
+    <div class="metric cyan"><div class="label">hosts covered</div>
+      <div class="v">{{ stats.get('hosts', hosts|length) }}</div>
+      <div class="sub">host-agnostic recipes apply anywhere</div></div>
+    <div class="metric gold"><div class="label">fixtures passing</div>
+      <div class="v">{{ ((stats.get('healthy_share', 0) or 0) * 100)|round(0)|int }}%</div>
+      <div class="sub">run before every install</div></div>
+    <div class="metric"><div class="label">published</div>
+      <div class="v">{{ stats.get('published', 0) }}</div>
+      <div class="sub">shareable bundles</div></div>
+  </div>
+
+  <div class="panel mt-3">
+    <div class="panel-head"><h3>Installed</h3>
+      <span class="sub">a recipe that fails its own fixtures is not installed</span></div>
+    {% if recipes %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>ref</th><th>hosts</th><th>fields</th><th>status</th>
+            <th>fixtures</th><th>checksum</th><th></th></tr></thead>
+          <tbody>
+          {% for r in recipes %}
+            <tr>
+              <td><b class="mono-num">{{ r.name }}@{{ r.version }}</b>
+                <div class="tiny muted">{{ r.description|truncate(80) }}</div>
+                {% if r.tags %}<div class="chip-row">{% for t in r.tags[:4] %}
+                  <span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}</td>
+              <td class="tiny">{{ (r.hosts or [])|join(', ') or 'any host' }}</td>
+              <td class="mono-num">{{ (r.fields or [])|length }}</td>
+              <td><span class="badge {{ 'ok' if r.status == 'published' else 'warn' }}">{{ r.status }}</span></td>
+              <td>
+                {% set h = r.health or {} %}
+                <span class="badge {{ 'ok' if h.get('verdict') == 'pass' else ('warn' if h.get('verdict') == 'partial' else 'danger') }}">
+                  {{ h.get('verdict', 'untested') }}</span>
+                <div class="tiny muted">{{ h.get('passed', 0) }} pass · {{ h.get('failed', 0) }} fail</div>
+              </td>
+              <td class="tiny mono-num">{{ (r.checksum or '')[:22] }}</td>
+              <td>
+                <form method="post" action="/app/recipes/{{ r.name }}/test" style="margin:0">
+                  <button class="btn btn-sm" type="submit">run fixtures</button></form>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty"><div class="ico">📐</div><h3>No recipes installed</h3>
+        <p>Install the library to get product pages, articles, job boards and pricing
+           pages working immediately — five tested recipes, no model, no API key.</p>
+        <form method="post" action="/app/recipes/seed" style="margin:0">
+          <button class="btn btn-primary" type="submit">Install library</button>
+        </form>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="split mt-3">
+    <div class="panel tight">
+      <div class="panel-head"><h3>The healing ladder</h3></div>
+      <ol class="tiny muted" style="line-height:1.8;margin:0;padding-left:18px">
+        <li><b>schema.org JSON-LD</b> — the page's own machine-readable claim.</li>
+        <li><b>OpenGraph / microdata</b> — weaker, still the page's claim.</li>
+        <li><b>the recipe's selectors</b>, in priority order.</li>
+        <li><b>label lookup</b> — “Price” next to a value, anywhere on the page.</li>
+        <li><b>explicit failure</b> for a required field.</li>
+      </ol>
+      <p class="tiny muted" style="margin:10px 0 0">
+        A healed field is <em>reported as healed</em> and costs confidence, so a
+        dataset built from a redesigned page carries that fact into its provenance
+        instead of silently mixing two schemas.
+      </p>
+    </div>
+    <div class="panel tight">
+      <div class="panel-head"><h3>Publish one</h3></div>
+      <pre class="code tiny" style="margin:0">wcp recipes draft https://shop.test/p/1 \\
+    --name shop --host shop.test
+
+wcp recipes test shop            # fixtures first
+wcp recipes publish shop@1.2.0   # bundle + digest
+wcp install shop@1.2.0           # on another box</pre>
+      <p class="tiny muted" style="margin:10px 0 0">
+        Publishing writes the recipe <em>with its tests</em> and a digest over both.
+        Installing re-runs those tests before the recipe is trusted.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

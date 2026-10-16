@@ -144,8 +144,12 @@ AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/", "/graphql")
 # handler redirects to /login when the session is gone), so the API's
 # credential gate has to let these paths through untouched — otherwise a
 # browser would get a JSON 401 instead of a sign-in page.
+# ``/domain/<host>`` is the public domain-score page: it is a landing page and a
+# shareable link, so it has to answer to strangers (and to crawlers) with HTML,
+# not with the API's JSON 401 envelope. The API twin lives under
+# ``/api/v1/domain/<host>`` and keeps requiring a credential as usual.
 WEBUI_PATHS = ("/", "/pricing", "/login", "/signup", "/logout", "/app",
-               "/static")
+               "/static", "/domain")
 
 
 class AuthContextMiddleware:

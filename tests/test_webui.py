@@ -152,15 +152,27 @@ def test_short_password_is_rejected_by_the_api(client):
 # --------------------------------------------------------------------------- #
 PAGES = [
     "/app",
+    "/app/system",
+    "/app/intelligence",
+    "/app/monitor",
+    "/app/graph",
     "/app/search",
+    "/app/datasets",
     "/app/crawl",
     "/app/discovery",
     "/app/index",
+    "/app/provenance",
+    "/app/workflows",
+    "/app/recipes",
+    "/app/engine",
     "/app/marketplace",
+    "/app/agents",
+    "/app/mcp",
+    "/app/docs",
     "/app/keys",
+    "/app/team",
     "/app/billing",
     "/app/settings",
-    "/app/docs",
 ]
 
 
@@ -662,3 +674,69 @@ def test_speed_failure_never_breaks_a_page(client, monkeypatch):
     res = TestClient(bare).get("/")
     assert res.status_code == 200
     assert "<html" in res.text.lower()
+
+
+# --------------------------------------------------------------------------- #
+# the Web Intelligence layer (v4 pages)
+# --------------------------------------------------------------------------- #
+def test_every_intelligence_page_explains_itself(signed_in):
+    """Each new page says what it is for, in the product's own words.
+
+    A dashboard full of numbers nobody can justify is worse than no dashboard:
+    these pages all have to state the question they answer.
+    """
+    expectations = {
+        "/app/intelligence": "citation",
+        "/app/monitor": "change",
+        "/app/graph": "entit",
+        "/app/datasets": "version",
+        "/app/workflows": "node",
+        "/app/recipes": "fixture",
+        "/app/engine": "cost",
+        "/app/provenance": "manifest",
+        "/app/agents": "agent",
+        "/app/mcp": "tools",
+        "/app/team": "audit",
+        "/app/system": "health",
+    }
+    for path, needle in expectations.items():
+        text = signed_in.get(path).text.lower()
+        assert needle in text, (path, needle)
+
+
+def test_public_domain_score_needs_no_session(client):
+    """The score page is a public surface; the API twin still needs a key."""
+    res = client.get("/domain/example.com")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    assert "no key required" in res.text.lower()
+    # unknown host: refuse to invent a number
+    unknown = client.get("/domain/definitely-not-indexed.example")
+    assert unknown.status_code == 200
+    assert "not in our index" in unknown.text.lower()
+    # and the JSON API did NOT become public along with the page
+    assert client.get("/api/v1/domain/example.com").status_code == 401
+
+
+def test_team_page_shows_the_permission_matrix(signed_in):
+    text = signed_in.get("/app/team").text
+    assert "Role matrix" in text
+    for role in ("owner", "admin", "member", "viewer"):
+        assert role in text
+
+
+def test_mcp_page_names_a_real_endpoint(signed_in):
+    text = signed_in.get("/app/mcp").text
+    assert "tools/list" in text
+    assert "/mcp" in text
+
+
+def test_command_palette_includes_the_new_destinations(client):
+    """⌘K must not silently stop at the nine original pages."""
+    js = client.get("/static/app.js").text
+    assert "mergePalette" in js
+    assert "window.WCP_PALETTE = PALETTE" in js
+    for href in ("/app/intelligence", "/app/engine", "/app/provenance",
+                 "/app/agents", "/app/mcp", "/app/team", "/app/datasets",
+                 "/app/workflows"):
+        assert href in js, href

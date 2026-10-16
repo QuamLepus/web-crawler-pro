@@ -362,3 +362,166 @@
     setTimeout(function () { btn.disabled = false; btn.textContent = label; }, 6000);
   });
 })();
+
+/* ==========================================================================
+   Obsidian Intelligence (v4) layer
+   --------------------------------------------------------------------------
+   Adds the things a data product needs and a static page cannot have, without
+   a framework: cross-document view transitions, a palette that also runs
+   commands, inline SVG charts from a table of numbers, and copies.
+
+   Everything here degrades: with JavaScript off the pages are still complete
+   HTML documents, and with prefers-reduced-motion the visual changes are
+   instant instead of animated.
+   ========================================================================== */
+(function () {
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ------------------------------------------------ cross-document nav --- */
+  // The Speculation Rules in the document prerender the next click; these
+  // handlers only decide how the swap *looks*.
+  if (document.startViewTransition && !reduce) {
+    document.addEventListener("click", function (e) {
+      var link = e.target.closest ? e.target.closest("a") : null;
+      if (!link || e.defaultPrevented) return;
+      var href = link.getAttribute("href") || "";
+      if (!href || href.charAt(0) === "#" || link.target === "_blank" ||
+          link.host !== location.host || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      e.preventDefault();
+      document.startViewTransition(function () { location.href = href; });
+    });
+  }
+
+  /* ------------------------------------------------------ palette commands */
+  var COMMANDS = [
+    { t: "New crawl job", u: "/app/crawl", i: "🕷" },
+    { t: "Ask a question (cited answer)", u: "/app/intelligence?tab=ask", i: "✦" },
+    { t: "Start a research job", u: "/app/intelligence?tab=research", i: "🔬" },
+    { t: "Watch a page for change", u: "/app/intelligence?tab=monitor", i: "📡" },
+    { t: "Knowledge graph", u: "/app/intelligence?tab=graph", i: "🕸" },
+    { t: "Datasets", u: "/app/datasets", i: "🗂" },
+    { t: "Workflows", u: "/app/workflows", i: "⛓" },
+    { t: "Crawl Doctor", u: "/app/engine", i: "🩺" },
+    { t: "Cost simulator", u: "/app/engine?tab=cost", i: "🧮" },
+    { t: "Provenance ledger", u: "/app/provenance", i: "🧾" },
+    { t: "Agent marketplace", u: "/app/agents", i: "🤖" },
+    { t: "MCP & SDKs", u: "/app/mcp", i: "🔌" },
+    { t: "Team, roles & audit", u: "/app/team", i: "🛡" }
+  ];
+  /* The v4 pages are not all in the nine-item list above, so the ⌘K palette
+     would look like a product that stopped shipping in 2024. Merge instead of
+     replacing: server-rendered entries first (they follow the real nav), then
+     anything the workbench pages add, de-duplicated by destination. */
+  (function mergePalette() {
+    var seen = {};
+    PALETTE.forEach(function (entry) { if (entry && entry.u) seen[entry.u] = true; });
+    COMMANDS.forEach(function (entry) {
+      if (!entry || !entry.u || seen[entry.u]) return;
+      if (!entry.k) entry.k = entry.t.toLowerCase();
+      PALETTE.push(entry);
+      seen[entry.u] = true;
+    });
+    window.WCP_PALETTE = PALETTE;
+    window.WCP_EXTRA_COMMANDS = COMMANDS;
+  })();
+
+  /* ---------------------------------------------------------- SVG charts -- */
+  function renderChart(host) {
+    var raw = host.getAttribute("data-chart");
+    if (!raw) return;
+    var spec;
+    try { spec = JSON.parse(raw); } catch (e) { return; }
+    var points = (spec.points || []).filter(function (p) {
+      return p && typeof p.y === "number" && isFinite(p.y);
+    });
+    if (!points.length) return;
+    var max = Math.max.apply(null, points.map(function (p) { return p.y; }));
+    var min = Math.min.apply(null, points.map(function (p) { return p.y; }));
+    var span = max - min || max || 1;
+
+    if (spec.type === "bar" || spec.type === "histogram") {
+      host.innerHTML = points.map(function (p, i) {
+        var h = 6 + Math.round(((p.y - min) / span) * 96);
+        return '<span class="bar" style="--i:' + i + ";height:" + h + 'px" title="' +
+          String(p.x).replace(/"/g, "") + " → " + p.y + '"></span>';
+      }).join("");
+      if (spec.x) {
+        host.insertAdjacentHTML("afterend",
+          '<div class="chart-legend"><span>' + String(points[0].x) +
+          "</span><span>" + String(points[points.length - 1].x) + "</span></div>");
+      }
+      return;
+    }
+    if (spec.type === "line") {
+      var w = 640, h = 120, pad = 6;
+      var step = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
+      var path = points.map(function (p, i) {
+        var x = pad + i * step;
+        var y = h - pad - ((p.y - min) / span) * (h - pad * 2);
+        return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+      }).join(" ");
+      host.innerHTML = '<svg class="chart-line" viewBox="0 0 ' + w + " " + h +
+        '" preserveAspectRatio="none" role="img" aria-label="' +
+        (spec.y || "series") + ' over time">' +
+        '<path class="line" d="' + path + '"></path>' +
+        points.map(function (p, i) {
+          var x = pad + i * step;
+          var y = h - pad - ((p.y - min) / span) * (h - pad * 2);
+          return '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.4"></circle>';
+        }).join("") + "</svg>";
+    }
+  }
+
+  /* --------------------------------------------------------- copy buttons -- */
+  function copy(text, btn) {
+    function done() {
+      var old = btn.textContent;
+      btn.textContent = "copied";
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    }
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(done, function () {
+        fallback(text); done();
+      });
+    } else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  /* --------------------------------------------------- first paint wiring -- */
+  function boot() {
+    var charts = document.querySelectorAll("[data-chart]");
+    Array.prototype.forEach.call(charts, renderChart);
+
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("[data-copy]") : null;
+      if (!btn) return;
+      e.preventDefault();
+      var sel = btn.getAttribute("data-copy");
+      var node = sel && document.querySelector(sel);
+      copy(node ? node.innerText : btn.getAttribute("data-copy-text") || "", btn);
+    });
+
+    // Skeleton → content: any element declaring data-loads gets a shimmer
+    // placeholder until its content actually arrives.
+    Array.prototype.forEach.call(document.querySelectorAll("[data-loads]"),
+      function (node) {
+        node.setAttribute("aria-busy", "true");
+        var busy = function () { node.setAttribute("aria-busy", "false"); };
+        if (node.children.length) busy();
+        else setTimeout(busy, 120);
+      });
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();

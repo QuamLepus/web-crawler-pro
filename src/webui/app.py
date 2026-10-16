@@ -46,63 +46,69 @@ router = APIRouter(include_in_schema=False)
 # --------------------------------------------------------------------------- #
 NAV: list[dict] = [
     {
-        "group": "Workspace",
+        "group": "Overview",
         "pages": [
             {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
-            {
-                "href": "/app/search",
-                "icon": "🔍",
-                "label": "Query the index",
-                "key": "search",
-            },
+            {"href": "/app/system", "icon": "🩺", "label": "System health", "key": "system"},
+        ],
+    },
+    {
+        "group": "Intelligence",
+        "pages": [
+            {"href": "/app/intelligence", "icon": "✦", "label": "Answer & research",
+             "key": "intelligence"},
+            {"href": "/app/monitor", "icon": "📡", "label": "Change monitoring",
+             "key": "monitor"},
+            {"href": "/app/graph", "icon": "🕸", "label": "Knowledge graph", "key": "graph"},
+            {"href": "/app/search", "icon": "🔍", "label": "Query the index", "key": "search"},
+        ],
+    },
+    {
+        "group": "Data engine",
+        "pages": [
+            {"href": "/app/datasets", "icon": "🗂", "label": "Living datasets",
+             "key": "datasets"},
             {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
-            {
-                "href": "/app/discovery",
-                "icon": "✦",
-                "label": "Topic discovery",
-                "key": "discovery",
-            },
+            {"href": "/app/discovery", "icon": "✦", "label": "Topic discovery",
+             "key": "discovery"},
+            {"href": "/app/index", "icon": "📚", "label": "Own search index", "key": "index"},
+            {"href": "/app/provenance", "icon": "🧾", "label": "Provenance & replay",
+             "key": "provenance"},
         ],
     },
     {
-        "group": "Data",
+        "group": "Automation",
         "pages": [
-            {
-                "href": "/app/index",
-                "icon": "🗂",
-                "label": "Own search index",
-                "key": "index",
-            },
-            {
-                "href": "/app/marketplace",
-                "icon": "🛒",
-                "label": "Data exchange",
-                "key": "marketplace",
-            },
+            {"href": "/app/workflows", "icon": "⛓", "label": "Workflows", "key": "workflows"},
+            {"href": "/app/recipes", "icon": "📐", "label": "Recipes", "key": "recipes"},
+            {"href": "/app/engine", "icon": "🧮", "label": "Cost & optimizer",
+             "key": "engine"},
         ],
     },
     {
-        "group": "Account",
+        "group": "Marketplace",
         "pages": [
+            {"href": "/app/marketplace", "icon": "🛒", "label": "Data exchange",
+             "key": "marketplace"},
+            {"href": "/app/agents", "icon": "🤖", "label": "AI agents", "key": "agents"},
+        ],
+    },
+    {
+        "group": "Developers",
+        "pages": [
+            {"href": "/app/mcp", "icon": "🔌", "label": "MCP & SDKs", "key": "mcp"},
+            {"href": "/app/docs", "icon": "📘", "label": "API reference", "key": "docs"},
             {"href": "/app/keys", "icon": "🔑", "label": "API keys", "key": "keys"},
-            {
-                "href": "/app/billing",
-                "icon": "💳",
-                "label": "Billing & usage",
-                "key": "billing",
-            },
-            {
-                "href": "/app/settings",
-                "icon": "⚙",
-                "label": "Settings",
-                "key": "settings",
-            },
-            {
-                "href": "/app/docs",
-                "icon": "📘",
-                "label": "API reference",
-                "key": "docs",
-            },
+        ],
+    },
+    {
+        "group": "Settings",
+        "pages": [
+            {"href": "/app/team", "icon": "🛡", "label": "Team, roles & audit",
+             "key": "team"},
+            {"href": "/app/billing", "icon": "💳", "label": "Billing & usage",
+             "key": "billing"},
+            {"href": "/app/settings", "icon": "⚙", "label": "Settings", "key": "settings"},
         ],
     },
 ]
@@ -250,6 +256,14 @@ def _env():
             "money": human_money,
             "stars": human_stars,
             "rows": as_rows,
+            # long-form aliases: the intelligence pages read better as
+            # `| human_ago` than as `| ago`, and both stay valid.
+            "human_bytes": human_bytes,
+            "human_num": human_num,
+            "human_ago": human_ago,
+            "human_pct": human_pct,
+            "human_money": human_money,
+            "human_seconds": human_seconds,
         }
     )
     env.globals.update(nav=NAV, now=time.time)
@@ -290,6 +304,30 @@ def human_num(value) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}k"
     return f"{n:,.0f}"
+
+
+def human_seconds(value) -> str:
+    """Seconds as a human cadence: 3600 → ``1h``, 5400 → ``1h 30m``.
+
+    Used by the monitoring pages, where "every 1h" reads like a cadence and
+    "every 3600 seconds" reads like a bug report.
+    """
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return "—"
+    if seconds <= 0:
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    units = ((86400, "d"), (3600, "h"), (60, "m"))
+    for size, suffix in units:
+        if seconds >= size:
+            whole, rest = divmod(seconds, size)
+            if suffix == "h" and rest >= 60:
+                return f"{whole}h {rest // 60}m"
+            return f"{whole}{suffix}"
+    return f"{seconds}s"
 
 
 def human_ago(value) -> str:
@@ -370,7 +408,11 @@ def render(request: Request, template: str, **ctx) -> HTMLResponse:
     base = str(request.base_url).rstrip("/")
     ctx.setdefault("request", request)
     ctx.setdefault("page", "")
-    ctx.setdefault("title", "WebCrawler Pro")
+    ctx.setdefault("title", "Web Intelligence OS")
+    ctx.setdefault("version", os.getenv("WCP_VERSION", "0.2.0"))
+    # Speculation Rules are opt-in by page: prerendering a form page would be
+    # wasteful, and the landing page ships them itself.
+    ctx.setdefault("speculation", True)
     ctx.setdefault("token", token)
     ctx.setdefault("api", Api(base_url=base, token=token, app=_asgi_app(request)))
     ctx.setdefault("path", request.url.path)
@@ -1252,6 +1294,11 @@ def mount_webui(app) -> bool:
     app.state.webui_target = app
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="webui-static")
     app.include_router(router)
+    # The Web Intelligence OS pages live in their own module; importing them
+    # here (not at the top) keeps the console's import graph acyclic.
+    from src.webui.pages import router as intel_router
+
+    app.include_router(intel_router)
     try:
         from src.webui.speed import install_speed
 

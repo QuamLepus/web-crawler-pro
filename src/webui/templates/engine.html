@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Cost &amp; optimiser</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Know the bill before the crawl. The simulator prices a plan from page
+        count, render share, proxy tier and model use; the optimiser then decides
+        where those pages are spent — changing pages first, rendering only when it
+        changes the answer.
+      </p>
+    </div>
+    <span class="badge brand nowrap">estimates, not invoices</span>
+  </div>
+
+  <div class="tabs" data-tabs role="tablist" aria-label="Engine">
+    <button class="tab" role="tab" data-tab="cost" aria-selected="{{ 'true' if tab == 'cost' else 'false' }}">Cost simulator</button>
+    <button class="tab" role="tab" data-tab="optimizer" aria-selected="{{ 'true' if tab == 'optimizer' else 'false' }}">Crawl optimiser</button>
+    <button class="tab" role="tab" data-tab="doctor" aria-selected="{{ 'true' if tab == 'doctor' else 'false' }}">Crawl Doctor</button>
+  </div>
+
+  <section data-panel="cost" {% if tab != 'cost' %}hidden{% endif %}>
+    <div class="split mt-3">
+      <div class="panel">
+        <form method="get" action="/app/engine" class="stack">
+          <input type="hidden" name="tab" value="cost">
+          <div class="row" style="gap:10px">
+            <label class="tiny muted" style="flex:1">pages
+              <input class="input" type="number" name="pages" value="{{ pages }}" min="1"></label>
+            <label class="tiny muted" style="flex:1">render share
+              <input class="input" type="number" name="render_share" value="{{ render_share }}"
+                     min="0" max="1" step="0.05"></label>
+            <label class="tiny muted" style="flex:1;align-self:end">
+              <input type="checkbox" name="stealth" value="true" {% if stealth %}checked{% endif %}>
+              stealth / residential</label>
+          </div>
+          <button class="btn btn-primary" type="submit">Estimate</button>
+        </form>
+
+        <div class="kpi-grid mt-3">
+          <div class="metric gold">
+            <div class="label">estimated cost</div>
+            <div class="v">${{ (estimate.get('est_usd', 0) or 0)|round(2) }}</div>
+            <div class="sub">{{ estimate.get('pages', pages)|human_num }} pages ·
+              {{ estimate.get('usable_pages', 0)|human_num }} usable</div>
+          </div>
+          <div class="metric cyan">
+            <div class="label">wall clock</div>
+            <div class="v">{{ (estimate.get('est_hours', 0) or 0)|round(1) }}<span class="tiny muted"> h</span></div>
+            <div class="sub">{{ (estimate.get('est_minutes', 0) or 0)|round(0)|int }} minutes end to end</div>
+          </div>
+          <div class="metric">
+            <div class="label">per 1 000 pages</div>
+            <div class="v">${{ (estimate.get('usd_per_1000_pages', 0) or 0)|round(3) }}</div>
+            <div class="sub">the number to compare on</div>
+          </div>
+        </div>
+
+        {% if estimate.get('breakdown') %}
+          <div class="hr"></div>
+          <div class="stack" style="gap:6px">
+            {% for label, value in estimate.get('breakdown', {}).items() %}
+              <div class="row-between tiny">
+                <span>{{ label.replace('_', ' ') }}</span>
+                <span class="mono-num">${{ value|round(3) }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if estimate.get('assumptions') %}
+          <details class="disclose mt-2"><summary>assumptions behind this estimate</summary>
+            <ul class="tiny muted" style="margin:6px 0 0;padding-left:18px;line-height:1.7">
+              {% for a in estimate.get('assumptions', []) %}<li>{{ a }}</li>{% endfor %}
+            </ul>
+          </details>
+        {% endif %}
+      </div>
+
+      <div class="stack">
+        <div class="panel tight">
+          <div class="panel-head"><h3>Presets</h3></div>
+          {% if presets %}
+            <div class="chip-row">
+              {% for p in presets %}
+                <a class="chip" href="/app/engine?tab=cost&pages={{ p.get('pages', 100000) }}&render_share={{ p.get('render_share', 0) }}">
+                  {{ p.get('name', 'preset') }}</a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="tiny muted" style="margin:0">No presets configured.</p>
+          {% endif %}
+        </div>
+        <div class="panel tight">
+          <div class="panel-head"><h3>Where the money goes</h3></div>
+          <p class="tiny muted" style="margin:0">
+            Rendering is the expensive part of any crawl, and most pages do not need
+            it. The optimiser's first question is never “how do I go faster” — it is
+            “which of these fetches is not worth making at all”.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="optimizer" {% if tab != 'optimizer' %}hidden{% endif %}>
+    <div class="panel mt-3">
+      <div class="panel-head"><h3>Priority plan</h3>
+        <span class="sub">{{ plan.get('pages', 0) }} page(s) · {{ plan.get('render', 0) }} need rendering</span></div>
+      {% if plan.get('scores') or plan.get('plan') %}
+        <div class="kpi-grid">
+          <div class="metric"><div class="label">planned</div>
+            <div class="v">{{ plan.get('selected', plan.get('pages', 0)) }}</div>
+            <div class="sub">{{ plan.get('deferred', 0) }} deferred — not worth the fetch</div></div>
+          <div class="metric cyan"><div class="label">render budget</div>
+            <div class="v">{{ plan.get('render_count', plan.get('render', 0)) }}</div>
+            <div class="sub">pages that actually need a browser</div></div>
+          <div class="metric gold"><div class="label">est. cost</div>
+            <div class="v">${{ (plan.get('est_usd', plan.get('usd', 0)) or 0)|round(3) }}</div>
+            <div class="sub">{{ plan.get('summary', '')|truncate(60) }}</div></div>
+        </div>
+        <div class="table-wrap mt-3">
+          <table class="table">
+            <thead><tr><th>url</th><th>priority</th><th>strategy</th><th>reasons</th></tr></thead>
+            <tbody>
+              {% for s in (plan.get('scores') or plan.get('plan'))[:20] %}
+                <tr><td class="tiny mono-num">{{ s.get('url', '')|truncate(58) }}</td>
+                  <td class="mono-num">{{ (s.get('priority', s.get('score', 0)) or 0)|round(3) }}</td>
+                  <td><span class="badge">{{ s.get('strategy', 'fetch') }}</span></td>
+                  <td class="tiny muted">{{ (s.get('reasons') or [])|join(' · ') }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">🧮</div><h3>No plan yet</h3>
+          <p>Priority is computed from change rate, importance, render need and how
+             stale a page is. Wire it into a crawl to see the plan for real URLs.</p></div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section data-panel="doctor" {% if tab != 'doctor' %}hidden{% endif %}>
+    <div class="split mt-3">
+      <div class="panel">
+        <div class="panel-head"><h3>Crawl Doctor</h3>
+          <span class="badge {{ 'ok' if report.get('verdict') == 'healthy' else ('warn' if report.get('verdict') else '') }}">
+            {{ report.get('verdict', 'no traffic yet') }}</span></div>
+        {% if report %}
+          <div class="kpi-grid">
+            <div class="metric"><div class="label">fetches</div>
+              <div class="v">{{ report.get('spans', report.get('count', 0)) }}</div></div>
+            <div class="metric cyan"><div class="label">success</div>
+              <div class="v">{{ ((report.get('success_rate', 1) or 0) * 100)|round(0)|int }}%</div></div>
+            <div class="metric gold"><div class="label">p95 latency</div>
+              <div class="v">{{ report.get('p95_ms', '—') }}<span class="tiny muted"> ms</span></div></div>
+            <div class="metric"><div class="label">blocked</div>
+              <div class="v">{{ report.get('blocked', 0) }}</div></div>
+          </div>
+          {% if report.get('advice') %}
+            <div class="hr"></div>
+            <ul class="tiny" style="margin:0;padding-left:18px;line-height:1.8">
+              {% for a in report.get('advice', []) %}<li>{{ a }}</li>{% endfor %}
+            </ul>
+          {% endif %}
+        {% else %}
+          <p class="tiny muted">No fetch spans have been recorded for this tenant yet.</p>
+        {% endif %}
+        {% if counters %}
+          <div class="hr"></div>
+          <div class="stack" style="gap:6px">
+            {% for k, v in counters.items() %}
+              <div class="row-between tiny"><span>{{ k }}</span>
+                <span class="mono-num">{{ v }}</span></div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Recent spans</h3>
+          <span class="sub">dns · connect · tls · ttfb · transfer · render · extract</span></div>
+        {% if spans %}
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>url</th><th>status</th><th>total</th><th>phases</th></tr></thead>
+              <tbody>
+                {% for s in spans[:14] %}
+                  <tr><td class="tiny mono-num">{{ s.get('url', '')|truncate(46) }}</td>
+                    <td><span class="badge {{ 'ok' if (s.get('status', 0) or 0) < 400 else 'danger' }}">{{ s.get('status', '—') }}</span></td>
+                    <td class="mono-num tiny">{{ s.get('total_ms', 0) }}ms</td>
+                    <td class="tiny muted">{% for k, v in (s.get('phases') or {}).items() %}{{ k }} {{ v|round(1) }} · {% endfor %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="tiny muted">A span appears for every fetch, with each phase timed.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-in">
+  <div class="row-between mb-3">
+    <div>
+      <h1 style="margin:0">Workflows</h1>
+      <p class="muted" style="margin:4px 0 0;max-width:70ch">
+        Topic → selection → crawler → extraction → cleaning → dedupe → dataset →
+        analysis → notify. Every node records what it did, what it skipped and why,
+        so an empty dataset has an explainable cause instead of a shrug.
+      </p>
+    </div>
+    <span class="badge brand nowrap">{{ templates|length }} templates · {{ catalogue|length }} node types</span>
+  </div>
+
+  <div class="split">
+    <div class="panel">
+      <div class="panel-head"><h3>Your workflows</h3><span class="sub">{{ workflows|length }}</span></div>
+      {% if workflows %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>name</th><th>nodes</th><th>schedule</th><th>runs</th><th>state</th><th></th></tr></thead>
+            <tbody>
+            {% for w in workflows %}
+              <tr>
+                <td><a href="/app/workflows?workflow={{ w.workflow_id }}">{{ w.name }}</a>
+                  <div class="tiny muted">{{ w.description|truncate(70) }}</div></td>
+                <td class="mono-num">{{ w.node_count }}</td>
+                <td class="mono-num tiny">{{ w.schedule or 'manual' }}</td>
+                <td class="mono-num">{{ w.runs }}</td>
+                <td><span class="badge {{ 'ok' if w.state == 'active' else '' }}">{{ w.state }}</span></td>
+                <td class="row" style="gap:6px">
+                  <form method="post" action="/app/workflows/{{ w.workflow_id }}/run" style="margin:0">
+                    <button class="btn btn-sm btn-primary" type="submit">run</button></form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><div class="ico">⛓</div><h3>No workflows yet</h3>
+          <p>Start from a template on the right. Each one is a working pipeline, not
+             a diagram: the market monitor pairs topic discovery with the change
+             monitor; the research report ends in citations.</p></div>
+      {% endif %}
+
+      {% if selected %}
+        <div class="hr"></div>
+        <div class="panel-head">
+          <h3>{{ selected.name }}</h3>
+          <span class="sub">{{ selected.nodes|length }} node(s) · run {{ preview.get('estimated_pages', '—') }} page(s) est.</span>
+        </div>
+        <div class="flow-canvas">
+          {% set positions = {} %}
+          {% for node in selected.nodes %}
+            {% set x = 20 + loop.index0 * 200 %}
+            <div class="flow-node" style="left:{{ x }}px;top:{{ 24 + (loop.index0 % 2) * 96 }}px">
+              <div class="t">{{ node.type.replace('_', ' ') }}</div>
+              <div class="s">{{ node.config|tojson|truncate(60) }}</div>
+            </div>
+          {% endfor %}
+        </div>
+        <p class="tiny muted" style="margin:10px 0 0">
+          Node order is computed, not drawn: the graph is validated for cycles,
+          dangling edges and a missing terminal node before anything runs.
+        </p>
+        {% if preview %}
+          <details class="disclose mt-2"><summary>dry run — what would happen</summary>
+            <pre class="code tiny" style="white-space:pre-wrap">{{ preview|tojson(indent=2) }}</pre>
+          </details>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="stack">
+      <div class="panel">
+        <div class="panel-head"><h3>Start from a template</h3></div>
+        <form method="post" action="/app/workflows" class="stack">
+          <label class="tiny muted">template
+            <select class="input" name="template">
+              {% for t in templates %}
+                <option value="{{ t.id }}">{{ t.name }} — {{ t.nodes }} nodes</option>
+              {% endfor %}
+            </select></label>
+          <label class="tiny muted">name (optional)
+            <input class="input" name="name" maxlength="140" placeholder="My monitor"></label>
+          <button class="btn btn-primary" type="submit">Create workflow</button>
+        </form>
+        <div class="hr"></div>
+        {% for t in templates %}
+          <div class="mb-2">
+            <b class="tiny">{{ t.name }}</b>
+            <div class="tiny muted">{{ t.description }}
+              {% if t.schedule %}· every {{ t.schedule }}{% endif %}</div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="panel tight">
+        <div class="panel-head"><h3>Recent runs</h3></div>
+        {% if runs %}
+          <div class="timeline">
+            {% for r in runs[:8] %}
+              <div class="tl-item {{ 'announcement' if r.state == 'ok' else 'policy_change' }}">
+                <div class="tl-body"><b>{{ r.state }}</b>
+                  <span class="tiny muted">{{ r.ok }} ok · {{ r.skipped }} skipped ·
+                    {{ r.failed }} failed</span></div>
+                <div class="tl-meta">{{ r.started_at|human_ago }} · {{ r.seconds }}s
+                  {% if r.error %} · <span style="color:var(--danger)">{{ r.error|truncate(80) }}</span>{% endif %}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}<p class="tiny muted" style="margin:0">No runs yet.</p>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
