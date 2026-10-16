@@ -76,6 +76,31 @@ class Config:
     # Empty means "console only" — src/utils/logger.py skips the file handler.
     LOG_FILE = _env("LOG_FILE", "logs/crawler.log")
 
+    # -- topic discovery (src/discovery) -------------------------------------- #
+    # Comma-separated provider list. "duckduckgo" needs no API key; the rest are
+    # enabled automatically when their key is present in the environment.
+    DISCOVERY_PROVIDERS = _env(
+        "DISCOVERY_PROVIDERS", "duckduckgo").replace(" ", "").split(",")
+    DISCOVERY_MAX_CANDIDATES = int(_env("DISCOVERY_MAX_CANDIDATES", 300))
+    DISCOVERY_MAX_QUERIES = int(_env("DISCOVERY_MAX_QUERIES", 6))
+    DISCOVERY_TIMEOUT = int(_env("DISCOVERY_TIMEOUT", 20))
+    DISCOVERY_MAX_PAGES_PER_SITE = int(_env("DISCOVERY_MAX_PAGES_PER_SITE", 5))
+    # Comma-separated domains that must never be proposed (parked/SEO farms).
+    DISCOVERY_BLOCKLIST = [
+        d for d in _env("DISCOVERY_BLOCKLIST", "").replace(" ", "").split(",") if d
+    ]
+    # Optional: let an LLM propose well-known sites for the topic. Off by
+    # default so discovery stays free and offline-capable.
+    DISCOVERY_USE_LLM = os.getenv("DISCOVERY_USE_LLM", "").lower() == "true"
+    DISCOVERY_USE_COMMONCRAWL = (
+        os.getenv("DISCOVERY_USE_COMMONCRAWL", "").lower() == "true")
+
+    # Search-provider credentials — all optional. Without any of them the
+    # DuckDuckGo HTML endpoint (no key, no cost) is still used.
+    BRAVE_API_KEY = _env("BRAVE_API_KEY", "")
+    SERPAPI_KEY = _env("SERPAPI_KEY", "")
+    TAVILY_API_KEY = _env("TAVILY_API_KEY", "")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

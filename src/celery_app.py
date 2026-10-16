@@ -15,7 +15,7 @@ app = Celery(
     "web_crawler_pro",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["workers.crawl_tasks"],
+    include=["workers.crawl_tasks", "workers.discovery_tasks"],
 )
 
 default_exchange = Exchange("crawl", type="direct")

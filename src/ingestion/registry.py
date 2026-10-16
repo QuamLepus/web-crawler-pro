@@ -108,7 +108,14 @@ def _assert_url(value: str) -> None:
 # --------------------------------------------------------------------------- #
 # Feed / sitemap parsers (pure functions - easy to unit test)
 # --------------------------------------------------------------------------- #
-_LOC_RE = re.compile(r"<(?:loc|url>|guid[^>]*>)\s*(?:<!\[CDATA\[)?([^<\]]+)", re.I)
+# The `>` belongs *outside* the alternation. It used to sit inside the `url>`
+# and `guid[^>]*>` branches but not after `loc`, so `<loc>https://x</loc>` was
+# captured as ">https://x" and then rejected by the http(s) prefix check below
+# — every SITEMAP source silently expanded to zero URLs.
+# `link` (RSS 2.0) belongs here too: the href-only fallback below only ever
+# handled Atom, so a plain `<link>https://…</link>` item yielded nothing.
+_LOC_RE = re.compile(
+    r"<(?:loc|url|link|guid[^>]*)>\s*(?:<!\[CDATA\[)?([^<\]]+)", re.I)
 _SITEMAP_INDEX_RE = re.compile(r"<sitemap>", re.I)
 
 
