@@ -10,7 +10,7 @@ import json
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -234,22 +234,64 @@ async def list_workflows(request: Request, ctx: CtxDep,
 
 @router.get("/runs", summary="List recent workflow runs for this tenant")
 async def list_workflow_runs(request: Request, ctx: CtxDep,
-                             page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> dict:
+                             page: int = Query(1, ge=1),
+                             page_size: int = Query(20, ge=1, le=100),
+                             q: str = Query("", max_length=100),
+                             status: str | None = Query(None,
+                                 pattern="^(queued|running|completed|failed|cancelled)$"),
+                             date_from: date | None = None,
+                             date_to: date | None = None) -> dict:
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "date_from must be on or before date_to")
     tenant = str(ctx["tenant"])
     redis = request.app.state.services.redis
     key = TENANT_RUNS.format(tenant=tenant)
-    ids = redis.zrevrange(key, (page - 1) * page_size, page * page_size - 1)
-    items = []
-    for raw_id in ids:
-        run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
-        raw = redis.get(RUN_KEY.format(run_id=run_id))
-        if not raw:
-            continue
-        record = _decode(raw)
-        if record.get("tenant") == tenant:
-            items.append(record)
-    return {"items": items, "total": int(redis.zcard(key) or 0),
-            "page": page, "page_size": page_size}
+    offset = (page - 1) * page_size
+    needle = q.strip().casefold()
+    filtering = bool(needle or status or date_from or date_to)
+    if not filtering:
+        ids = redis.zrevrange(key, offset, offset + page_size - 1)
+        items = []
+        for raw_id in ids:
+            run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+            raw = redis.get(RUN_KEY.format(run_id=run_id))
+            if not raw:
+                continue
+            record = _decode(raw)
+            if record.get("tenant") == tenant:
+                items.append(record)
+        total = int(redis.zcard(key) or 0)
+    else:
+        matches = []
+        for raw_id in redis.zrevrange(key, 0, -1):
+            run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+            raw = redis.get(RUN_KEY.format(run_id=run_id))
+            if not raw:
+                continue
+            record = _decode(raw)
+            if record.get("tenant") != tenant:
+                continue
+            if status and record.get("status") != status:
+                continue
+            if needle:
+                searchable = " ".join(str(record.get(field, ""))
+                                      for field in ("name", "run_id", "workflow_id"))
+                if needle not in searchable.casefold():
+                    continue
+            if date_from or date_to:
+                try:
+                    created = datetime.fromisoformat(
+                        str(record.get("created_at", ""))).date()
+                except ValueError:
+                    continue
+                if date_from and created < date_from:
+                    continue
+                if date_to and created > date_to:
+                    continue
+            matches.append(record)
+        total = len(matches)
+        items = matches[offset:offset + page_size]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/{workflow_id}", summary="Get a workflow definition")
@@ -363,8 +405,10 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         run_key = RUN_KEY.format(run_id=run_id)
         now_ts = time.time()
         pipe = redis.pipeline()
+        tenant_runs_key = TENANT_RUNS.format(tenant=tenant)
         pipe.set(run_key, json.dumps(record), ex=TTL)
-        pipe.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: now_ts})
+        pipe.zremrangebyscore(tenant_runs_key, "-inf", now_ts - TTL)
+        pipe.zadd(tenant_runs_key, {run_id: now_ts})
         pipe.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now_ts})
         pipe.execute()
         payload = {"run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,

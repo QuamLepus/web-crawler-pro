@@ -22,7 +22,13 @@ All endpoints below require an authenticated tenant API key with crawl access.
 | `PUT /api/v1/workflows/{workflow_id}` | Update one or more of `name`, `steps`, or `schedule_interval_minutes`. A `null` schedule disables recurrence; an omitted field is unchanged. |
 | `DELETE /api/v1/workflows/{workflow_id}` | Delete the definition and schedule. Returns `409` while any run is queued or running. Historical run records remain available under the tenant's run history. |
 | `POST /api/v1/workflows/{workflow_id}/runs` | Queue a run using the current definition snapshot. |
+| `GET /api/v1/workflows/runs` | List paginated runs; optional `q` searches workflow name/run ID/workflow ID, `status` filters state, and `date_from`/`date_to` bound creation dates (inclusive). |
+| `GET /api/v1/workflows/runs/{run_id}` | Read a run owned by the authenticated tenant. |
 | `PATCH /api/v1/workflows/{workflow_id}/schedule` | Set or disable the recurring interval without replacing other definition fields. |
+
+Filtered run-history requests scan the tenant's run index to compute an exact
+match count; unfiltered requests use Redis range pagination. Very high-volume
+history filters may benefit from dedicated indexes.
 
 The web console provides a simple URL-list form for sequential recipes, an
 advanced JSON editor for DAG step definitions, and a read-only visual dependency

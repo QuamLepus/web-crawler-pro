@@ -969,18 +969,28 @@ def _workflow_dag_preview(workflow: dict) -> dict | None:
 async def workflows_page(request: Request,
                          selected_workflow_id: str | None = Query(None, alias="workflow_id"),
                          selected_run_id: str | None = Query(None, alias="run_id"),
-                         run_page: int = Query(1, ge=1)):
+                         run_page: int = Query(1, ge=1),
+                         run_q: str = Query("", max_length=100),
+                         run_status: str | None = Query(None,
+                             pattern="^(queued|running|completed|failed|cancelled)$"),
+                         run_from: date | None = None,
+                         run_to: date | None = None):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
-    result, runs = await _gather(api.workflows(),
-                                api.workflow_runs(page=run_page, page_size=20))
+    result, runs = await _gather(api.workflows(), api.workflow_runs(
+        page=run_page, page_size=20, q=run_q, status=run_status,
+        date_from=run_from.isoformat() if run_from else None,
+        date_to=run_to.isoformat() if run_to else None))
     run_total = max(0, runs.get("total", len(runs.get("items", []))))
     run_page_size = max(1, runs.get("page_size", 20))
     run_page_count = max(1, math.ceil(run_total / run_page_size))
     if runs.ok and run_page > run_page_count:
         run_page = run_page_count
-        runs = await api.workflow_runs(page=run_page, page_size=run_page_size)
+        runs = await api.workflow_runs(
+            page=run_page, page_size=run_page_size, q=run_q, status=run_status,
+            date_from=run_from.isoformat() if run_from else None,
+            date_to=run_to.isoformat() if run_to else None)
         run_total = max(0, runs.get("total", run_total))
         run_page_size = max(1, runs.get("page_size", run_page_size))
         run_page_count = max(1, math.ceil(run_total / run_page_size))
@@ -1031,15 +1041,25 @@ async def workflows_page(request: Request,
         })
     selected_workflow_id = (selected_workflow_id if selected_run_record else None)
     selected_run_id = selected_run_id if selected_run_record else None
+    history_filters = {}
+    if run_q.strip():
+        history_filters["run_q"] = run_q.strip()
+    if run_status:
+        history_filters["run_status"] = run_status
+    if run_from:
+        history_filters["run_from"] = run_from.isoformat()
+    if run_to:
+        history_filters["run_to"] = run_to.isoformat()
+    selected_query = ({"workflow_id": selected_workflow_id, "run_id": selected_run_id}
+                      if selected_run_record else {})
+    clear_runs_url = "/app/workflows"
+    if selected_query:
+        clear_runs_url += "?" + urlencode(selected_query)
     previous_runs_url = "/app/workflows?" + urlencode({
-        "run_page": run_page - 1,
-        **({"workflow_id": selected_workflow_id, "run_id": selected_run_id}
-           if selected_run_record else {}),
+        "run_page": run_page - 1, **history_filters, **selected_query,
     }) if run_page > 1 else ""
     next_runs_url = "/app/workflows?" + urlencode({
-        "run_page": run_page + 1,
-        **({"workflow_id": selected_workflow_id, "run_id": selected_run_id}
-           if selected_run_record else {}),
+        "run_page": run_page + 1, **history_filters, **selected_query,
     }) if run_page < run_page_count else ""
     return render(request, "workflows.html", page="workflows", me=me,
                   workflows=rendered_workflows,
@@ -1048,6 +1068,15 @@ async def workflows_page(request: Request,
                   run_page_count=run_page_count,
                   run_total=run_total,
                   run_page_size=run_page_size,
+                  selected_workflow_id=selected_workflow_id or "",
+                  selected_run_id=selected_run_id or "",
+                  run_q=run_q.strip(),
+                  run_status=run_status or "",
+                  run_from=run_from.isoformat() if run_from else "",
+                  run_to=run_to.isoformat() if run_to else "",
+                  run_filter_active=bool(run_q.strip() or run_status or run_from or run_to),
+                  history_error=runs.error if not runs.ok else "",
+                  clear_runs_url=clear_runs_url,
                   previous_runs_url=previous_runs_url,
                   next_runs_url=next_runs_url,
                   error=result.error if not result.ok else "",

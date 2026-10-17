@@ -90,6 +90,10 @@
         <form method="get" action="/app/workflows" class="row wrap mt-2">
           <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
           <input type="hidden" name="run_page" value="{{ run_page }}">
+          <input type="hidden" name="run_q" value="{{ run_q }}">
+          <input type="hidden" name="run_status" value="{{ run_status }}">
+          <input type="hidden" name="run_from" value="{{ run_from }}">
+          <input type="hidden" name="run_to" value="{{ run_to }}">
           <label>Run status overlay
             <select name="run_id" aria-label="Choose run status for {{ workflow.name }}">
               {% for option in workflow.dag_run_options %}
@@ -151,15 +155,37 @@
   <div class="row wrap" style="justify-content:space-between">
     <div>
       <h2>Recent runs</h2>
-      {% if run_total %}<p class="muted small">{{ run_total }} runs · page {{ run_page }} of {{ run_page_count }}. Graph selectors use this page's runs and retain the selected overlay while browsing.</p>{% endif %}
+      {% if run_total %}<p class="muted small">{{ run_total }}{% if run_filter_active %} matching{% endif %} runs · page {{ run_page }} of {{ run_page_count }}. Graph selectors use this page's runs and retain the selected overlay while browsing.</p>{% endif %}
     </div>
-    {% if run_page_count > 1 %}
-    <nav class="row" aria-label="Workflow run history pages">
-      {% if run_page > 1 %}<a class="btn btn-sm" href="{{ previous_runs_url }}">Newer runs</a>{% endif %}
-      {% if run_page < run_page_count %}<a class="btn btn-sm" href="{{ next_runs_url }}">Older runs</a>{% endif %}
-    </nav>
-    {% endif %}
   </div>
+  <form method="get" action="/app/workflows" class="row wrap mt-2">
+    {% if selected_workflow_id and selected_run_id %}
+    <input type="hidden" name="workflow_id" value="{{ selected_workflow_id }}">
+    <input type="hidden" name="run_id" value="{{ selected_run_id }}">
+    {% endif %}
+    <label>Search workflow or run ID
+      <input type="search" name="run_q" maxlength="100" value="{{ run_q }}" placeholder="Workflow name or run ID">
+    </label>
+    <label>Status
+      <select name="run_status" aria-label="Filter runs by status">
+        <option value="">Any status</option>
+        {% for value in ['queued', 'running', 'completed', 'failed', 'cancelled'] %}
+        <option value="{{ value }}" {% if run_status == value %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Created from<input type="date" name="run_from" value="{{ run_from }}"></label>
+    <label>Created through<input type="date" name="run_to" value="{{ run_to }}"></label>
+    <button class="btn btn-sm" type="submit">Filter runs</button>
+    {% if run_filter_active %}<a class="btn btn-sm" href="{{ clear_runs_url }}">Clear filters</a>{% endif %}
+  </form>
+  {% if history_error %}<div class="alert warn mt-2">Could not load run history: {{ history_error }}</div>{% endif %}
+  {% if run_page_count > 1 %}
+  <nav class="row mt-2" aria-label="Workflow run history pages">
+    {% if run_page > 1 %}<a class="btn btn-sm" href="{{ previous_runs_url }}">Newer runs</a>{% endif %}
+    {% if run_page < run_page_count %}<a class="btn btn-sm" href="{{ next_runs_url }}">Older runs</a>{% endif %}
+  </nav>
+  {% endif %}
   {% if runs %}
   <div class="table-wrap">
     <table><thead><tr><th>Workflow</th><th>Status</th><th>Progress</th><th>Created</th><th>Error</th><th>Actions</th></tr></thead>
@@ -205,6 +231,9 @@
       </tbody>
     </table>
   </div>
-  {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
+  {% else %}
+    {% if run_filter_active %}<p class="muted">No workflow runs match these filters.</p>
+    {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
+  {% endif %}
 </section>
 {% endblock %}

@@ -172,8 +172,19 @@ class Api:
         return self.patch(f"/api/v1/workflows/{workflow_id}/schedule",
                           {"interval_minutes": interval_minutes})
 
-    def workflow_runs(self, page: int = 1, page_size: int = 20) -> Any:
-        return self.get("/api/v1/workflows/runs", {"page": page, "page_size": page_size})
+    def workflow_runs(self, page: int = 1, page_size: int = 20, q: str = "",
+                      status: str | None = None, date_from: str | None = None,
+                      date_to: str | None = None) -> Any:
+        params = {"page": page, "page_size": page_size}
+        if q.strip():
+            params["q"] = q.strip()
+        if status:
+            params["status"] = status
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
+        return self.get("/api/v1/workflows/runs", params)
 
     def workflow_run_status(self, run_id: str) -> Any:
         return self.get(f"/api/v1/workflows/runs/{run_id}")
