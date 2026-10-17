@@ -601,6 +601,38 @@ async def research_page(request: Request, question: str = Query("", max_length=4
                    title="AI Research — Web Intelligence OS")
 
 
+def _studio_bar_rows(counts, *, limit: int = 8, max_width: int = 360) -> list[dict]:
+    """Turn counts from a bounded result set into safe SVG bar dimensions."""
+    rows = counts.most_common(limit)
+    maximum = max((count for _label, count in rows), default=1) or 1
+    return [{"label": str(label), "count": int(count),
+             "width": round(max_width * count / maximum)}
+            for label, count in rows]
+
+
+def _studio_score_points(hits: list[dict]) -> tuple[str, int]:
+    """Build numeric-only SVG points for hit score versus result rank."""
+    values = []
+    for hit in hits:
+        try:
+            score = float(hit.get("score", 0))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(score):
+            values.append(score)
+    if not values:
+        return "", 0
+    low, high = min(values), max(values)
+    span = high - low
+    points = []
+    for index, value in enumerate(values):
+        x = 24.0 if len(values) == 1 else 24 + index * 552 / (len(values) - 1)
+        normalized = 0.5 if span == 0 else (value - low) / span
+        y = 170 - normalized * 140
+        points.append(f"{x:.1f},{y:.1f}")
+    return " ".join(points), len(values)
+
+
 @router.get("/app/studio", response_class=HTMLResponse, name="studio")
 async def data_studio(request: Request, q: str = Query("", max_length=2048),
                       limit: int = Query(25, ge=1, le=100),
@@ -618,11 +650,13 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
     hits = results.get("results", []) if isinstance(results, dict) else []
     host_counts = Counter(hit.get("host") or "(unknown)" for hit in hits)
     source_counts = Counter(hit.get("source") or "(unknown)" for hit in hits)
+    score_points, scored_hits = _studio_score_points(hits)
     return render(request, "studio.html", page="studio", me=me, q=q,
                   limit=limit, source=source, results=results,
                   saved_queries=saved.get("items", []) if saved.ok else [],
-                  host_counts=host_counts.most_common(8),
-                  source_counts=source_counts.most_common(8),
+                  host_bars=_studio_bar_rows(host_counts),
+                  source_bars=_studio_bar_rows(source_counts),
+                  score_points=score_points, scored_hits=scored_hits,
                   stats=stats.data if stats.ok and isinstance(stats.data, dict) else {},
                   title="Data Studio — Web Intelligence OS")
 

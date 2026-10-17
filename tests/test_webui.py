@@ -758,3 +758,32 @@ def test_data_studio_console_saves_and_deletes_queries(signed_in, monkeypatch):
                              follow_redirects=False)
     assert removed.status_code == 303
     assert calls[1]["delete"] == "saved_aaaaaaaaaaaaaaaaaaaa"
+
+
+def test_data_studio_charts_are_accessible_and_derive_from_real_result_fields(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def fake_index_query(self, q, limit=10, **kwargs):
+        return Result(True, data={"query": q, "count": 3, "took_ms": 2, "results": [
+            {"rank": 1, "url": "https://a.example/", "host": "a.example", "score": 3.0, "source": "wiki"},
+            {"rank": 2, "url": "https://a.example/b", "host": "a.example", "score": 2.0, "source": "wiki"},
+            {"rank": 3, "url": "https://b.example/", "host": "b.example", "score": 1.0, "source": "curlie"},
+        ]})
+
+    async def fake_index_stats(self):
+        return Result(True, data={"docs": 3, "shards": 1, "available": True})
+
+    async def fake_saved(self):
+        return Result(True, data={"items": []})
+
+    monkeypatch.setattr(Api, "index_query", fake_index_query)
+    monkeypatch.setattr(Api, "index_stats", fake_index_stats)
+    monkeypatch.setattr(Api, "studio_saved_queries", fake_saved)
+    response = signed_in.get("/app/studio", params={"q": "solar"})
+    assert response.status_code == 200
+    assert 'data-viz="host"' in response.text
+    assert 'data-viz="source"' in response.text
+    assert 'data-viz="score-rank"' in response.text
+    assert 'role="img"' in response.text
+    assert "a.example" in response.text and "wiki: 2" in response.text
+    assert 'points="24.0,30.0' in response.text

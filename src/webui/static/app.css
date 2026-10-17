@@ -789,3 +789,11 @@ html.pre-collapsed .brand span, html.pre-collapsed .side-foot span { display: no
   .counters { grid-template-columns: minmax(0, 1fr); }
   .card-head { flex-wrap: wrap; }
 }
+
+/* Inline, server-rendered Data Studio charts: no CDN or charting dependency. */
+.studio-chart{display:block;width:100%;height:auto;max-height:520px;overflow:visible}
+.chart-label,.chart-value{fill:currentColor;font-size:12px;font-family:inherit}
+.chart-value{font-weight:700}
+.chart-bar{fill:var(--brand-500)}
+.chart-axis{stroke:var(--line);stroke-width:1}
+.chart-line{fill:none;stroke:var(--brand-500);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
