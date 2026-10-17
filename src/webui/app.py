@@ -916,10 +916,36 @@ def _workflow_dag_preview(workflow: dict) -> dict | None:
     columns: dict[int, list[str]] = {}
     for step_id in ids:
         columns.setdefault(levels[step_id], []).append(step_id)
+    # Stable barycentric sweeps keep nodes connected to nearby neighbors,
+    # reducing crossed dependency arrows without changing DAG semantics.
+    for level in sorted(columns):
+        if level == 0:
+            continue
+        previous_order = {step_id: row for row, step_id in enumerate(columns[level - 1])}
+        columns[level].sort(key=lambda step_id: (
+            sum(previous_order[dependency] for dependency in dependencies[step_id]
+                if dependency in previous_order)
+            / max(1, sum(dependency in previous_order
+                         for dependency in dependencies[step_id])),
+            ids.index(step_id),
+        ))
+    for level in sorted(columns, reverse=True):
+        if level == max(columns):
+            continue
+        next_order = {step_id: row for row, step_id in enumerate(columns[level + 1])}
+        columns[level].sort(key=lambda step_id: (
+            sum(next_order[child] for child in ids
+                if step_id in dependencies[child] and child in next_order)
+            / max(1, sum(step_id in dependencies[child] and child in next_order
+                         for child in ids)),
+            ids.index(step_id),
+        ))
     positions = {}
+    max_rows = max(map(len, columns.values()))
     for level, step_ids in columns.items():
+        offset = (max_rows - len(step_ids)) * 60
         for row, step_id in enumerate(step_ids):
-            positions[step_id] = {"x": 24 + level * 300, "y": 24 + row * 120}
+            positions[step_id] = {"x": 24 + level * 300, "y": 24 + offset + row * 120}
     nodes = []
     for step_id in ids:
         step = by_id[step_id]

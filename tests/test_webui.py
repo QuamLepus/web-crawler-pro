@@ -959,6 +959,26 @@ def test_workflow_console_creates_and_edits_dependency_graphs(signed_in, monkeyp
                         {"name": "Branched v2", "steps": steps})
 
 
+def test_workflow_dag_preview_orders_nodes_to_reduce_crossings():
+    from src.webui.app import _workflow_dag_preview
+
+    preview = _workflow_dag_preview({
+        "execution_mode": "dag",
+        "steps": [
+            {"step_id": "a", "depends_on": [], "url": "https://a.example"},
+            {"step_id": "b", "depends_on": [], "url": "https://b.example"},
+            {"step_id": "x", "depends_on": ["b"], "url": "https://x.example"},
+            {"step_id": "y", "depends_on": ["a"], "url": "https://y.example"},
+        ],
+    })
+
+    positions = {node["step_id"]: node for node in preview["nodes"]}
+    assert positions["a"]["y"] < positions["b"]["y"]
+    assert positions["y"]["y"] < positions["x"]["y"]
+    assert positions["a"]["y"] == positions["y"]["y"]
+    assert positions["b"]["y"] == positions["x"]["y"]
+
+
 def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     from src.webui.client import Api, Result
 
