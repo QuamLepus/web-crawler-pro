@@ -68,6 +68,17 @@
             {% if mode == 'login' %}Sign in{% else %}Create the workspace{% endif %}
           </button>
         </form>
+        {% if mode == 'login' %}
+          <div class="center muted small mt-3">or use your organization’s SSO</div>
+          <form method="get" action="/login/sso" class="stack mt-2">
+            <div class="field">
+              <label for="tenant_id">Organization ID</label>
+              <input class="input" id="tenant_id" name="tenant_id" required
+                     pattern="[a-f0-9]{10}" maxlength="10" placeholder="10-character workspace ID">
+            </div>
+            <button class="btn btn-block" type="submit">Continue with SSO</button>
+          </form>
+        {% endif %}
       </div>
     </div>
 

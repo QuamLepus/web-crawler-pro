@@ -919,3 +919,44 @@ def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch
     assert "'=HYPERLINK" in exported.text
     assert calls[-1]["limit"] == 100
     assert calls[-1]["source"] == "wiki"
+
+
+def test_sso_settings_page_and_secure_configuration_form(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+
+    async def configure(self, **body):
+        calls.append(body)
+        return Result(True, data={"client_secret_configured": True})
+
+    async def disable(self):
+        calls.append("disabled")
+        return Result(True, data={})
+
+    monkeypatch.setattr(Api, "sso_configure_oidc", configure)
+    monkeypatch.setattr(Api, "sso_disable_oidc", disable)
+    page = signed_in.get("/app/settings")
+    assert page.status_code == 200
+    assert "Enterprise OIDC SSO" in page.text
+    assert "Allowed email domains" in page.text
+    response = signed_in.post("/app/settings/sso/oidc", data={
+        "issuer": "https://idp.example.test/tenant", "client_id": "wcp-client",
+        "client_secret": "sensitive-secret", "allowed_domains": "example.com, child.example.com",
+        "jit_provisioning": "true", "default_role": "viewer",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    assert calls[0]["allowed_domains"] == ["example.com", "child.example.com"]
+    assert calls[0]["client_secret"] == "sensitive-secret"
+    assert "sensitive-secret" not in response.headers.get("location", "")
+    disabled = signed_in.post("/app/settings/sso/oidc/disable", follow_redirects=False)
+    assert disabled.status_code == 303 and calls[-1] == "disabled"
+
+
+def test_login_page_offers_sso_with_validated_workspace_route(client):
+    response = client.get("/login")
+    assert response.status_code == 200
+    assert "Continue with SSO" in response.text
+    assert client.get("/login/sso", params={"tenant_id": "bad"}).status_code == 422
+    valid = client.get("/login/sso", params={"tenant_id": "0123456789"}, follow_redirects=False)
+    assert valid.status_code == 302
+    assert valid.headers["location"] == "/api/auth/oidc/0123456789/login"

@@ -120,6 +120,26 @@ class UserStore:
             return None
         return self.get_user(uid.decode() if isinstance(uid, bytes) else uid)
 
+    def link_oauth_identity(self, user_id: str, provider: str, oauth_id: str) -> User:
+        """Atomically bind a verified external subject to one existing account."""
+        user = self.get_user(user_id)
+        if user is None:
+            raise LookupError("user not found")
+        if user.oauth_provider and (user.oauth_provider != provider or user.oauth_id != oauth_id):
+            raise ValueError("account already has a different external identity")
+        key = f"user:oauth:{provider}:{oauth_id}"
+        existing_id = self.r.get(key)
+        if existing_id:
+            existing_id = existing_id.decode() if isinstance(existing_id, bytes) else existing_id
+            if existing_id != user.id:
+                raise ValueError("external identity is already linked to another account")
+        elif not self.r.set(key, user.id, nx=True):
+            raise ValueError("external identity is already linked to another account")
+        user.oauth_provider = provider
+        user.oauth_id = oauth_id
+        self.r.set(f"user:{user.id}", json.dumps(asdict(user)))
+        return user
+
     def authenticate(self, email: str, password: str) -> User | None:
         user = self.get_by_email(email)
         if user is None or user.disabled or not user.password_hash:

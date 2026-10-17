@@ -66,6 +66,33 @@
       {% endif %}
     </div>
 
+    {% if sso_admin %}
+    <section class="card card-pad">
+      <div class="between"><h3>Enterprise OIDC SSO</h3>
+        {% if sso_config.client_secret_configured %}<span class="badge ok">configured</span>{% else %}<span class="badge">not configured</span>{% endif %}
+      </div>
+      <p class="small dim">OpenID Connect sign-in for this organization. Enterprise plan and WCP_SSO_ENCRYPTION_KEY are required. The issuer’s discovery, token and JWKS endpoints must share its HTTPS hostname.</p>
+      {% if sso_status_error %}<div class="alert warn" role="status">{{ sso_status_error }}</div>{% endif %}
+      {% if sso_config.client_secret_configured %}
+        <dl class="kv small"><dt class="muted">Issuer</dt><dd class="mono">{{ sso_config.issuer }}</dd><dt class="muted">Client ID</dt><dd class="mono">{{ sso_config.client_id }}</dd><dt class="muted">Email domains</dt><dd>{{ sso_config.allowed_domains|join(', ') }}</dd><dt class="muted">JIT</dt><dd>{{ 'enabled' if sso_config.jit_provisioning else 'disabled' }} · default role {{ sso_config.default_role }}</dd></dl>
+        <p class="small">Sign-in path: <a href="{{ sso_config.login_path }}"><code>{{ sso_config.login_path }}</code></a>. Reconfiguring rotates the client secret; the existing secret is never shown.</p>
+        <form method="post" action="/app/settings/sso/oidc/disable" data-confirm="Disable OIDC SSO for this organization?"><button class="btn btn-danger btn-sm">Disable SSO</button></form>
+        <details class="mt-2"><summary>Update provider settings</summary>
+      {% endif %}
+      <form method="post" action="/app/settings/sso/oidc" class="stack mt-2">
+        <label>Issuer URL<input name="issuer" type="url" required maxlength="2048" value="{{ sso_config.issuer or '' }}" placeholder="https://idp.example.com/tenant"></label>
+        <label>Client ID<input name="client_id" required maxlength="256" value="{{ sso_config.client_id or '' }}"></label>
+        <label>Client secret<input name="client_secret" type="password" required maxlength="4096" autocomplete="new-password" placeholder="Stored encrypted; never displayed"></label>
+        <label>Allowed email domains<input name="allowed_domains" required maxlength="4000" value="{{ sso_config.allowed_domains|join(', ') if sso_config.allowed_domains else '' }}" placeholder="example.com, subsidiary.example.com"><span class="hint">Exact domains only; nested domains must be listed explicitly.</span></label>
+        <label>Default role for JIT users<select name="default_role"><option value="viewer" {{ 'selected' if not sso_config or sso_config.default_role == 'viewer' else '' }}>Viewer (recommended)</option><option value="member" {{ 'selected' if sso_config.default_role == 'member' else '' }}>Member</option></select></label>
+        <label class="check"><input type="checkbox" name="jit_provisioning" value="true" {{ 'checked' if sso_config.jit_provisioning else '' }}><span>Allow JIT provisioning for verified, allowlisted email domains</span></label>
+        <button class="btn btn-primary" data-busy="Saving encrypted settings…">{{ 'Update OIDC settings' if sso_config.client_secret_configured else 'Configure OIDC SSO' }}</button>
+      </form>
+      {% if sso_config.client_secret_configured %}</details>{% endif %}
+      {% if sso_audit_events %}<details class="mt-2"><summary>Recent SSO audit events ({{ sso_audit_events|length }})</summary><ul class="small">{% for event in sso_audit_events %}<li><code>{{ event.at }}</code> · {{ event.event }} · {{ event.result }}{% if event.user_id %} · user {{ event.user_id }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+    </section>
+    {% endif %}
+
     <div class="card card-pad">
       <h3 class="mb-2">Environment</h3>
       <dl class="kv small">
