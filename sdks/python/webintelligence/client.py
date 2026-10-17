@@ -1,8 +1,93 @@
 """Synchronous HTTPX client; no API key is logged or included in exceptions."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
+
 import httpx
+
+
+class _UnsetType:
+    """Sentinel type used to distinguish omitted update fields from null."""
+
+
+_UNSET = _UnsetType()
+
+
+@dataclass(frozen=True)
+class WorkflowStep:
+    """One HTTP(S) crawl step in an ordered workflow definition."""
+    url: str
+    max_pages: int = 3
+    obey_robots: bool = True
+
+
+class WorkflowResource:
+    """Tenant-scoped workflow and run methods exposed at ``client.workflows``."""
+    def __init__(self, client: Client) -> None:
+        self._client = client
+
+    @staticmethod
+    def _steps_payload(steps: list[WorkflowStep | Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"url": step.url, "max_pages": step.max_pages, "obey_robots": step.obey_robots}
+            if isinstance(step, WorkflowStep) else dict(step)
+            for step in steps
+        ]
+
+    @staticmethod
+    def _id(value: str) -> str:
+        return quote(value, safe="")
+
+    def create(self, name: str, steps: list[WorkflowStep | Mapping[str, Any]], *,
+               schedule_interval_minutes: int | None = None) -> dict[str, Any]:
+        return self._client._request("POST", "workflows", json={
+            "name": name, "steps": self._steps_payload(steps),
+            "schedule_interval_minutes": schedule_interval_minutes,
+        })
+
+    def list(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+        return self._client._request("GET", "workflows", params={
+            "page": page, "page_size": page_size})
+
+    def get(self, workflow_id: str) -> dict[str, Any]:
+        return self._client._request("GET", f"workflows/{self._id(workflow_id)}")
+
+    def update(self, workflow_id: str, *, name: str | None = None,
+               steps: list[WorkflowStep | Mapping[str, Any]] | None = None,
+               schedule_interval_minutes: int | None | _UnsetType = _UNSET) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if steps is not None:
+            body["steps"] = self._steps_payload(steps)
+        if schedule_interval_minutes is not _UNSET:
+            body["schedule_interval_minutes"] = schedule_interval_minutes
+        if not body:
+            raise ValueError("provide at least one field to update")
+        return self._client._request("PUT", f"workflows/{self._id(workflow_id)}", json=body)
+
+    def delete(self, workflow_id: str) -> dict[str, Any]:
+        return self._client._request("DELETE", f"workflows/{self._id(workflow_id)}")
+
+    def set_schedule(self, workflow_id: str, interval_minutes: int | None) -> dict[str, Any]:
+        return self._client._request("PATCH", f"workflows/{self._id(workflow_id)}/schedule",
+                                     json={"interval_minutes": interval_minutes})
+
+    def run(self, workflow_id: str) -> dict[str, Any]:
+        return self._client._request("POST", f"workflows/{self._id(workflow_id)}/runs")
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return self._client._request("GET", f"workflows/runs/{self._id(run_id)}")
+
+    def list_runs(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+        return self._client._request("GET", "workflows/runs", params={
+            "page": page, "page_size": page_size})
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        return self._client._request("POST", f"workflows/runs/{self._id(run_id)}/cancel")
 
 
 class WebIntelligenceError(RuntimeError):
@@ -15,7 +100,7 @@ class WebIntelligenceError(RuntimeError):
 
 class ResearchResource:
     """Research job methods exposed at ``client.research``."""
-    def __init__(self, client: "Client") -> None:
+    def __init__(self, client: Client) -> None:
         self._client = client
 
     def create(self, topic: str, *, sources: int = 5,
@@ -45,6 +130,7 @@ class Client:
                                            "Accept": "application/json"},
                                   timeout=timeout, transport=transport)
         self.research = ResearchResource(self)
+        self.workflows = WorkflowResource(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         try:

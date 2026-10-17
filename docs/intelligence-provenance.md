@@ -78,9 +78,11 @@ per tenant. Resolution only matches Unicode-normalized, case-folded exact names
 and aliases; ambiguous aliases produce a conflict instead of silently merging.
 This is a graph foundation, not an extraction pipeline or fuzzy resolver.
 
-The Python SDK under `sdks/python/` currently supports `ask`, research jobs,
-crawl status, and basic watch operations. Early TypeScript SDK and MCP packages
-are under `sdks/typescript/` and `sdks/mcp/`.
+The Python SDK under `sdks/python/` supports `ask`, research jobs, crawl status,
+basic watch operations, and tenant workflow CRUD, schedules, run status, and
+cancellation through `client.workflows`. It is still an early client with
+limited endpoint coverage; see `sdks/python/README.md` for workflow usage. Early
+TypeScript SDK and MCP packages are under `sdks/typescript/` and `sdks/mcp/`.
 
 ```python
 from webintelligence import Client
