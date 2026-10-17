@@ -17,7 +17,7 @@ It ships in three usable layers, alongside topic discovery and indexed retrieval
 | **Provenance ledger** | Tenant-isolated Redis passports and optional HMAC-signed manifest export | `POST /api/v1/provenance/records` |
 | **Knowledge graph (early)** | Tenant-isolated entity/relationship API, exact normalized aliases, and interactive canvas explorer | `POST /api/v1/graph/entities`, `/app/graph` |
 | **Web monitoring (early)** | Scheduled, robots-aware one-page crawls; snapshot history, basic text diffs and `web.changed` webhooks | `POST /api/v1/watch` |
-| **Python SDK (early)** | Typed HTTPX client for ask, research, crawl jobs, and watch APIs | `sdks/python/` |
+| **Python SDK (early)** | HTTPX client for ask, research, crawl jobs, watch APIs, and workflow definitions/runs | `sdks/python/` |
 | **TypeScript SDK + MCP (early)** | Typed fetch client and stdio tools for ask, research, crawl, and watches | `sdks/typescript/`, `sdks/mcp/` |
 
 ---
