@@ -22,7 +22,7 @@ import logging
 import math
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit
@@ -664,13 +664,30 @@ def _studio_group_rows(hits: list[dict], group_by: str, metric: str,
             for label, value in values]
 
 
+def _studio_aggregate_bars(rows: list[dict], *, max_width: int = 360) -> list[dict]:
+    values = [(str(row.get("label", "(unknown)")), float(row.get("value") or 0))
+              for row in rows]
+    max_abs = max((abs(value) for _, value in values), default=0.0) or 1.0
+    return [{"label": label, "value": value,
+             "width": round(max_width * abs(value) / max_abs)}
+            for label, value in values]
+
+
 @router.get("/app/studio", response_class=HTMLResponse, name="studio")
 async def data_studio(request: Request, q: str = Query("", max_length=2048),
                       limit: int = Query(25, ge=1, le=100),
                       source: str = Query("", max_length=80),
                       group_by: Literal["host", "source"] = "host",
-                      metric: Literal["count", "avg_score"] = "count"):
-    """Explore and export a bounded result set from the tenant's own index."""
+                      metric: Literal["count", "avg_score"] = "count",
+                      corpus_group_by: Literal["source", "host", "lang", "snapshot", "day"] = "source",
+                      corpus_metric: Literal["count", "avg_authority", "avg_quality", "avg_body_chars"] = "count",
+                      corpus_source: str = Query("", max_length=80),
+                      corpus_host: str = Query("", max_length=253),
+                      corpus_lang: str = Query("", max_length=20),
+                      corpus_indexed_from: date | None = None,
+                      corpus_indexed_to: date | None = None,
+                      corpus_offset: int = Query(0, ge=0, le=5000)):
+    """Explore search results and full-corpus aggregates without exposing raw SQL."""
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
@@ -678,16 +695,30 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
     if q.strip():
         response = await api.index_query(q.strip(), limit=limit, sources=source)
         results = response.data if response.ok and isinstance(response.data, dict) else {"_error": response.error}
-    stats, saved, snapshots = await _gather(
-        api.index_stats(), api.studio_saved_queries(), api.studio_snapshots())
+    stats, saved, snapshots, corpus = await _gather(
+        api.index_stats(), api.studio_saved_queries(), api.studio_snapshots(),
+        api.studio_analytics(
+            group_by=corpus_group_by, metric=corpus_metric,
+            source=corpus_source, host=corpus_host, lang=corpus_lang,
+            indexed_from=corpus_indexed_from.isoformat() if corpus_indexed_from else "",
+            indexed_to=corpus_indexed_to.isoformat() if corpus_indexed_to else "",
+            limit=50, offset=corpus_offset))
     from collections import Counter
     hits = results.get("results", []) if isinstance(results, dict) else []
     host_counts = Counter(hit.get("host") or "(unknown)" for hit in hits)
     source_counts = Counter(hit.get("source") or "(unknown)" for hit in hits)
     score_points, scored_hits = _studio_score_points(hits)
     chart_rows = _studio_group_rows(hits, group_by, metric)
+    corpus_data = corpus.data if corpus.ok and isinstance(corpus.data, dict) else {}
+    corpus_rows = corpus_data.get("rows", [])
     return render(request, "studio.html", page="studio", me=me, q=q,
                   limit=limit, source=source, group_by=group_by, metric=metric,
+                  corpus_data=corpus_data, corpus_error="" if corpus.ok else corpus.error,
+                  corpus_group_by=corpus_group_by, corpus_metric=corpus_metric,
+                  corpus_source=corpus_source, corpus_host=corpus_host,
+                  corpus_lang=corpus_lang, corpus_indexed_from=corpus_indexed_from,
+                  corpus_indexed_to=corpus_indexed_to, corpus_offset=corpus_offset,
+                  corpus_bars=_studio_aggregate_bars(corpus_rows),
                   results=results, chart_rows=chart_rows,
                   saved_queries=saved.get("items", []) if saved.ok else [],
                   snapshots=snapshots.get("items", []) if snapshots.ok else [],
@@ -775,6 +806,44 @@ async def data_studio_delete_saved(request: Request, saved_id: str):
     result = await api.studio_delete_query(saved_id)
     return _redirect("/app/studio", "Saved query deleted" if result.ok else result.error,
                      "ok" if result.ok else "danger")
+
+
+@router.get("/app/studio/analytics.csv")
+async def data_studio_analytics_export(
+    request: Request,
+    group_by: Literal["source", "host", "lang", "snapshot", "day"] = "source",
+    metric: Literal["count", "avg_authority", "avg_quality", "avg_body_chars"] = "count",
+    source: str = Query("", max_length=80), host: str = Query("", max_length=253),
+    lang: str = Query("", max_length=20),
+    indexed_from: date | None = None, indexed_to: date | None = None,
+):
+    """Export at most 100 grouped full-corpus aggregates as CSV."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    response = await api.studio_analytics(
+        group_by=group_by, metric=metric, source=source, host=host, lang=lang,
+        indexed_from=indexed_from.isoformat() if indexed_from else "",
+        indexed_to=indexed_to.isoformat() if indexed_to else "", limit=100, offset=0)
+    if not response.ok:
+        return HTMLResponse(response.error, status_code=response.status if response.status >= 400 else 502)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([group_by, metric, "matched_documents"])
+    for row in response.get("rows", []):
+        label = str(row.get("label", ""))
+        if label[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            label = "'" + label
+        writer.writerow([label, row.get("value", ""),
+                         response.get("matched_documents", 0)])
+    content = output.getvalue().encode("utf-8-sig")
+    return StreamingResponse(iter([content]), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="studio-corpus-analytics.csv"',
+                                      "Cache-Control": "private, no-store"})
 
 
 @router.get("/app/studio/export")

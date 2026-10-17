@@ -245,6 +245,77 @@ class DocStore:
             return {}
         return {str(src): int(n) for src, n in rows}
 
+    def analytics(self, *, group_by: str, metric: str, source: str = "",
+                  host: str = "", lang: str = "", indexed_from: str = "",
+                  indexed_to: str = "", limit: int = 50, offset: int = 0) -> dict:
+        """Run a bounded, allow-listed aggregate over the complete document table.
+
+        Only SQL fragments selected from fixed maps are interpolated. User values
+        are always bound parameters; raw SQL and document bodies are never returned.
+        """
+        group_exprs = {
+            "source": "COALESCE(NULLIF(source, ''), '(unknown)')",
+            "host": "COALESCE(NULLIF(host, ''), '(unknown)')",
+            "lang": "COALESCE(NULLIF(lang, ''), '(unknown)')",
+            "snapshot": "COALESCE(NULLIF(snapshot, ''), '(unknown)')",
+            "day": "substr(indexed_at, 1, 10)",
+        }
+        metric_exprs = {
+            "count": "COUNT(*)",
+            "avg_authority": "AVG(authority)",
+            "avg_quality": "AVG(quality)",
+            "avg_body_chars": "AVG(length(body))",
+        }
+        if group_by not in group_exprs or metric not in metric_exprs:
+            raise ValueError("unsupported analytics dimension or metric")
+        if not 1 <= int(limit) <= 100 or not 0 <= int(offset) <= 5000:
+            raise ValueError("analytics pagination out of range")
+        clauses: list[str] = []
+        params: list[str] = []
+        for column, value in (("source", source), ("host", host), ("lang", lang)):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        if indexed_from:
+            clauses.append("substr(indexed_at, 1, 10) >= ?")
+            params.append(indexed_from)
+        if indexed_to:
+            clauses.append("substr(indexed_at, 1, 10) <= ?")
+            params.append(indexed_to)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        group_expr = group_exprs[group_by]
+        metric_expr = metric_exprs[metric]
+        if not self.path.exists():
+            raise FileNotFoundError(f"no document store at {self.path}")
+        # Use a per-call read-only connection so concurrent API requests cannot
+        # share/contend over transaction state on the query facade's connection.
+        conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30.0)
+        try:
+            conn.execute("BEGIN")
+            matched = int(conn.execute(
+                "SELECT COUNT(*) FROM docs" + where, params).fetchone()[0])
+            groups = int(conn.execute(
+                f"SELECT COUNT(*) FROM (SELECT 1 FROM docs{where} GROUP BY {group_expr})",
+                params).fetchone()[0])
+            rows = conn.execute(
+                f"SELECT {group_expr} AS label, {metric_expr} AS value "
+                f"FROM docs{where} GROUP BY {group_expr} "
+                "ORDER BY value DESC, label ASC LIMIT ? OFFSET ?",
+                [*params, int(limit), int(offset)]).fetchall()
+            conn.commit()
+        except sqlite3.Error:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return {"matched_documents": matched, "group_count": groups,
+                "group_by": group_by, "metric": metric,
+                "rows": [{"label": str(label or "(unknown)"),
+                          "value": (int(value) if metric == "count" else
+                                    round(float(value or 0.0), 4))}
+                         for label, value in rows],
+                "limit": int(limit), "offset": int(offset)}
+
     def iter_all(self, batch: int = 1000) -> Iterator[Doc]:
         """Stream every document (used by the merge/compaction path)."""
         if not self.path.exists():

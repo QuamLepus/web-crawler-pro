@@ -865,8 +865,10 @@ mechanism, not an independent public signature.
 The early Redis-backed knowledge graph supports entities, exact normalized
 alias matching, and relationships. Scheduled URL monitoring and extractive
 multi-stage research jobs are available with Celery workers/Beat; reports are
-not independently fact-checked. Data Studio supports bounded index analysis,
-saved queries, result charts, and 90-day immutable snapshots of up to 100 hits.
+not independently fact-checked. Data Studio supports full-corpus, allow-listed
+aggregates (with filters, charts, pagination, and CSV export) as well as bounded
+search analysis, saved queries, and 90-day immutable snapshots of up to 100 hits;
+it does not expose arbitrary SQL or export raw full-corpus documents.
 The tenant-scoped workflow builder runs ordered robots-aware crawl steps,
 supports cooperative cancellation between steps, and can schedule recurring runs
 when Celery Beat is active; it is not a general DAG or script engine. Early

@@ -96,6 +96,24 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_studio_analytics", "Aggregate the full indexed corpus using safe dimensions and filters; returns grouped values, not document contents.", {
+    group_by: z.enum(["source", "host", "lang", "snapshot", "day"]).optional(),
+    metric: z.enum(["count", "avg_authority", "avg_quality", "avg_body_chars"]).optional(),
+    source: z.string().max(80).optional(), host: z.string().max(253).optional(),
+    lang: z.string().max(20).optional(),
+    indexed_from: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/).optional(),
+    indexed_to: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(5000).optional(),
+  }, async (args) => {
+    try { return result(await client.studioAnalytics({
+      groupBy: args.group_by, metric: args.metric, source: args.source,
+      host: args.host, lang: args.lang, indexedFrom: args.indexed_from,
+      indexedTo: args.indexed_to, limit: args.limit, offset: args.offset,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_studio_snapshot_get", "Retrieve an immutable bounded Data Studio result snapshot.", {
     snapshot_id: z.string().regex(/^snapshot_[a-f0-9]{20}$/),
   }, async ({ snapshot_id }) => {

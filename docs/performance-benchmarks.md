@@ -28,3 +28,25 @@ reranking, browser LCP/CLS, or cloud costs. Do not interpret it as an SLO or
 production capacity claim. Re-run on the target machine and compare only runs
 with the same corpus, parameters, software, and hardware. The script emits JSON
 including its runtime environment and full parameters for reproducibility.
+
+## Full-corpus Data Studio aggregate baseline
+
+Run the checked-in synthetic SQLite aggregate harness with:
+
+```sh
+python scripts/bench-studio-analytics.py --docs 50000 --iterations 10
+```
+
+Observed in the same development sandbox on 2026-10-18:
+
+| Profile | Matched docs / groups | p50 / p95 |
+|---|---:|---:|
+| Source document count | 50,000 / 3 | 23.590 / 25.297 ms |
+| Host mean authority | 50,000 / 500 | 34.332 / 38.694 ms |
+| Filtered host mean quality (source=wiki) | 16,667 / 500 | 22.129 / 23.129 ms |
+
+The temporary SQLite file was 23,107,544 bytes; synthetic data build took
+0.689 s. These are warm-cache, single-process DocStore measurements on 50,000
+synthetic rows; they exclude HTTP/UI overhead and concurrency and must not be
+extrapolated to production-scale corpora. The harness reports its environment
+and limitations as JSON and removes the temporary database after each run.

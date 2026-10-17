@@ -5,7 +5,7 @@ import json
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Literal
@@ -43,6 +43,48 @@ class SavedQueryCreate(BaseModel):
         if any(len(value) > 80 for value in normalized):
             raise ValueError("source filter must be at most 80 characters")
         return normalized
+
+
+@router.get("/analytics", summary="Aggregate the full indexed corpus with safe dimensions")
+async def corpus_analytics(
+    request: Request, ctx: CtxDep,
+    group_by: Literal["source", "host", "lang", "snapshot", "day"] = "source",
+    metric: Literal["count", "avg_authority", "avg_quality", "avg_body_chars"] = "count",
+    source: str = Query("", max_length=80),
+    host: str = Query("", max_length=253),
+    lang: str = Query("", max_length=20),
+    indexed_from: date | None = None,
+    indexed_to: date | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=5000),
+) -> dict:
+    """Return allow-listed aggregate values over the full shared own-index corpus.
+
+    This is not a tenant's crawled-document store and does not return document
+    contents. Output groups are paginated and the API never accepts SQL.
+    """
+    del ctx  # authentication is enforced by the dependency; data is the shared own index
+    if indexed_from and indexed_to and indexed_from > indexed_to:
+        raise HTTPException(422, "indexed_from must not be after indexed_to")
+    from src.api.routers.search_index import _index
+
+    try:
+        result = _index(request).analytics(
+            group_by=group_by, metric=metric, source=" ".join(source.split()).lower(),
+            host=" ".join(host.split()).lower().rstrip("."),
+            lang=" ".join(lang.split()).lower(),
+            indexed_from=indexed_from.isoformat() if indexed_from else "",
+            indexed_to=indexed_to.isoformat() if indexed_to else "",
+            limit=limit, offset=offset)
+    except FileNotFoundError as exc:
+        raise HTTPException(503, "the own-index document store is not available") from exc
+    except Exception as exc:  # noqa: BLE001 - return a bounded API error, not internals
+        raise HTTPException(503, "corpus analytics query failed") from exc
+    result.update({"source_filter": source, "host_filter": host,
+                   "lang_filter": lang,
+                   "indexed_from": indexed_from.isoformat() if indexed_from else None,
+                   "indexed_to": indexed_to.isoformat() if indexed_to else None})
+    return result
 
 
 def _decode(raw) -> dict:

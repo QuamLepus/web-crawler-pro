@@ -81,3 +81,21 @@ test('Studio snapshots use bounded row payloads and handle 204 deletion', async 
     group_by: 'source', metric: 'avg_score', rows: [{ rank: 1, url: 'https://example.org', score: 0.8 }] });
   assert.equal(calls[1].url, 'http://localhost:8000/api/v1/studio/snapshots/snapshot%2Fa');
 });
+
+test('Studio analytics URL-encodes full-corpus filters', async () => {
+  let captured;
+  const client = new WebIntelligenceClient({ apiKey: 'analytics-key', fetch: async (url, init) => {
+    captured = { url, method: init.method };
+    return new Response(JSON.stringify({ matched_documents: 42, rows: [] }), { status: 200 });
+  } });
+  const response = await client.studioAnalytics({ groupBy: 'host', metric: 'avg_quality',
+    source: 'wiki & docs', lang: 'en', indexedFrom: '2026-01-01', limit: 50, offset: 10 });
+  assert.equal(response.matched_documents, 42);
+  assert.equal(captured.method, 'GET');
+  const url = new URL(captured.url);
+  assert.equal(url.pathname, '/api/v1/studio/analytics');
+  assert.equal(url.searchParams.get('group_by'), 'host');
+  assert.equal(url.searchParams.get('source'), 'wiki & docs');
+  assert.equal(url.searchParams.get('indexed_from'), '2026-01-01');
+  assert.equal(url.searchParams.get('offset'), '10');
+});
