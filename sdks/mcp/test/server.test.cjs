@@ -56,7 +56,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
-    'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_run', 'wio_workflow_status',
+    'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
+    'wio_workflow_run', 'wio_workflow_status', 'wio_workflow_update',
   ]);
   const result = await client.callTool({ name: 'wio_ask', arguments: { question: 'What is cited?' } });
   assert.equal(result.isError, undefined);
@@ -106,6 +107,43 @@ test('MCP workflow tool submits bounded sequential steps through the SDK', async
     assert.equal(request.key, 'workflow-tool-key');
     assert.deepEqual(request.body.steps, [{ url: 'https://example.org', max_pages: 2, obey_robots: true }]);
     assert.equal(request.body.schedule_interval_minutes, 60);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP workflow update and delete tools preserve API semantics', async () => {
+  const requests = [];
+  const api = new WebIntelligenceClient({ apiKey: 'workflow-edit-key', fetch: async (url, init) => {
+    requests.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa', deleted: true }),
+                        { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'workflow-edit-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const updated = await client.callTool({ name: 'wio_workflow_update', arguments: {
+      workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa', name: 'Revised',
+      steps: [{ url: 'https://example.net', max_pages: 5, obey_robots: false }],
+      schedule_interval_minutes: null,
+    } });
+    const deleted = await client.callTool({ name: 'wio_workflow_delete', arguments: {
+      workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    assert.equal(updated.isError, undefined);
+    assert.equal(deleted.isError, undefined);
+    assert.equal(requests[0].method, 'PUT');
+    assert.equal(requests[0].url,
+      'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa');
+    assert.deepEqual(requests[0].body, { name: 'Revised',
+      steps: [{ url: 'https://example.net', max_pages: 5, obey_robots: false }],
+      schedule_interval_minutes: null });
+    assert.equal(requests[1].method, 'DELETE');
+    assert.equal(requests[1].url, requests[0].url);
   } finally {
     await client.close();
     await server.close();

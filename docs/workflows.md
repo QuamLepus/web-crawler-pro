@@ -12,13 +12,14 @@ All endpoints below require an authenticated tenant API key with crawl access.
 | `POST /api/v1/workflows` | Create a recipe (`name`, `steps`, optional `schedule_interval_minutes`). |
 | `GET /api/v1/workflows` and `GET /api/v1/workflows/{workflow_id}` | List or read the authenticated tenant's recipes. |
 | `PUT /api/v1/workflows/{workflow_id}` | Update one or more of `name`, `steps`, or `schedule_interval_minutes`. A `null` schedule disables recurrence; an omitted field is unchanged. |
-
-The web console supports renaming and deletion; step-by-step definition edits are
-available through the API and TypeScript SDK so that per-step page limits and
-robots settings are not silently flattened by a simplified form.
 | `DELETE /api/v1/workflows/{workflow_id}` | Delete the definition and schedule. Returns `409` while any run is queued or running. Historical run records remain available under the tenant's run history. |
 | `POST /api/v1/workflows/{workflow_id}/runs` | Queue a run using the current definition snapshot. |
 | `PATCH /api/v1/workflows/{workflow_id}/schedule` | Set or disable the recurring interval without replacing other definition fields. |
+
+The web console supports renaming and deletion; step-by-step definition edits are
+available through the API, TypeScript/Python SDKs, and MCP tools so that
+per-step page limits and robots settings are not silently flattened by a
+simplified form.
 
 Definition edits, run creation, schedule changes, deletion, and scheduled dispatch
 coordinate through a short-lived Redis lock. This prevents a scheduled dispatch
