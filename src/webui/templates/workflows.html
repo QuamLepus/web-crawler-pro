@@ -89,6 +89,7 @@
         {% if workflow.dag_run_options|length > 1 %}
         <form method="get" action="/app/workflows" class="row wrap mt-2">
           <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
+          <input type="hidden" name="run_page" value="{{ run_page }}">
           <label>Run status overlay
             <select name="run_id" aria-label="Choose run status for {{ workflow.name }}">
               {% for option in workflow.dag_run_options %}
@@ -147,7 +148,18 @@
   {% endif %}
 </section>
 <section class="card mt-3">
-  <h2>Recent runs</h2>
+  <div class="row wrap" style="justify-content:space-between">
+    <div>
+      <h2>Recent runs</h2>
+      {% if run_total %}<p class="muted small">{{ run_total }} runs · page {{ run_page }} of {{ run_page_count }}. Graph selectors use runs on this page.</p>{% endif %}
+    </div>
+    {% if run_page_count > 1 %}
+    <nav class="row" aria-label="Workflow run history pages">
+      {% if run_page > 1 %}<a class="btn btn-sm" href="/app/workflows?run_page={{ run_page - 1 }}">Newer runs</a>{% endif %}
+      {% if run_page < run_page_count %}<a class="btn btn-sm" href="/app/workflows?run_page={{ run_page + 1 }}">Older runs</a>{% endif %}
+    </nav>
+    {% endif %}
+  </div>
   {% if runs %}
   <div class="table-wrap">
     <table><thead><tr><th>Workflow</th><th>Status</th><th>Progress</th><th>Created</th><th>Error</th><th>Actions</th></tr></thead>

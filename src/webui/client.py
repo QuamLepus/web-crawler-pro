@@ -172,8 +172,8 @@ class Api:
         return self.patch(f"/api/v1/workflows/{workflow_id}/schedule",
                           {"interval_minutes": interval_minutes})
 
-    def workflow_runs(self) -> Any:
-        return self.get("/api/v1/workflows/runs")
+    def workflow_runs(self, page: int = 1, page_size: int = 20) -> Any:
+        return self.get("/api/v1/workflows/runs", {"page": page, "page_size": page_size})
 
     def workflow_cancel(self, run_id: str) -> Any:
         return self.post(f"/api/v1/workflows/runs/{run_id}/cancel")
