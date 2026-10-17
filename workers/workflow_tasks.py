@@ -10,6 +10,7 @@ from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 RUN_KEY = "wcp:v1:workflow_run:{run_id}"
+ACTIVE_WORKFLOW_RUNS = "wcp:v1:workflow_active_runs:{workflow_id}"
 
 
 def _redis():
@@ -19,7 +20,11 @@ def _redis():
 
 def _save(redis, run_id: str, record: dict) -> None:
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
-    redis.set(RUN_KEY.format(run_id=run_id), json.dumps(record, separators=(",", ":")), ex=30 * 86400)
+    pipe = redis.pipeline()
+    pipe.set(RUN_KEY.format(run_id=run_id), json.dumps(record, separators=(",", ":")), ex=30 * 86400)
+    if record.get("status") not in {"queued", "running"} and record.get("workflow_id"):
+        pipe.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=record["workflow_id"]), run_id)
+    pipe.execute()
 
 
 def _read(redis, key: str) -> dict:
@@ -129,46 +134,63 @@ def schedule_tick(self, batch: int = 50) -> dict:
     queued = 0
     for raw_id in due:
         workflow_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
-        raw = redis.get(WORKFLOW_KEY.format(workflow_id=workflow_id))
-        if not raw:
-            redis.zrem(SCHEDULED_WORKFLOWS, workflow_id)
+        lock_key = f"wcp:v1:workflow_lock:{workflow_id}"
+        lock_token = uuid.uuid4().hex
+        if not redis.set(lock_key, lock_token, nx=True, ex=30):
             continue
-        definition = json.loads(raw)
-        interval = definition.get("schedule_interval_minutes")
-        if not interval:
-            redis.zrem(SCHEDULED_WORKFLOWS, workflow_id)
-            continue
-        tenant = str(definition["tenant"])
-        run_id = "wfrun_" + uuid.uuid4().hex[:20]
-        now_iso = datetime.now(timezone.utc).isoformat()
-        record = {
-            "run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
-            "name": definition["name"], "status": "queued", "step_index": 0,
-            "steps": [{"url": step["url"], "status": "queued", "pages_done": 0,
-                       "error": None} for step in definition["steps"]],
-            "created_at": now_iso, "updated_at": now_iso, "error": None,
-            "scheduled": True,
-        }
-        key = RUN_KEY.format(run_id=run_id)
-        redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
-        redis.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: now})
         try:
-            scheduler = SchedulerService(redis, celery_app=app)
-            scheduler.submit(JobSpec(
-                kind="workflow", tenant=tenant, job_id=run_id,
-                priority=JobPriority.NORMAL,
-                payload={"run_id": run_id, "workflow_id": workflow_id,
-                         "tenant": tenant, "steps": definition["steps"],
-                         "estimated_pages": int(definition.get("max_pages", 1))},
-            ))
-            queued += 1
-        except Exception as exc:  # keep a failed run record rather than silently dropping it
-            record.update(status="failed", error=f"scheduled dispatch failed: {exc}"[:500],
-                          updated_at=datetime.now(timezone.utc).isoformat())
+            raw = redis.get(WORKFLOW_KEY.format(workflow_id=workflow_id))
+            if not raw:
+                redis.zrem(SCHEDULED_WORKFLOWS, workflow_id)
+                continue
+            definition = json.loads(raw)
+            interval = definition.get("schedule_interval_minutes")
+            if not interval:
+                redis.zrem(SCHEDULED_WORKFLOWS, workflow_id)
+                continue
+            tenant = str(definition["tenant"])
+            run_id = "wfrun_" + uuid.uuid4().hex[:20]
+            now_iso = datetime.now(timezone.utc).isoformat()
+            record = {
+                "run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
+                "name": definition["name"], "status": "queued", "step_index": 0,
+                "steps": [{"url": step["url"], "status": "queued", "pages_done": 0,
+                           "error": None} for step in definition["steps"]],
+                "created_at": now_iso, "updated_at": now_iso, "error": None,
+                "scheduled": True,
+            }
+            key = RUN_KEY.format(run_id=run_id)
             redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
-        next_run = now + int(interval) * 60
-        definition["next_run_at"] = datetime.fromtimestamp(next_run, timezone.utc).isoformat()
-        redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),
-                  json.dumps(definition, separators=(",", ":")), ex=30 * 86400)
-        redis.zadd(SCHEDULED_WORKFLOWS, {workflow_id: next_run})
+            redis.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: now})
+            redis.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now})
+            try:
+                scheduler = SchedulerService(redis, celery_app=app)
+                scheduler.submit(JobSpec(
+                    kind="workflow", tenant=tenant, job_id=run_id,
+                    priority=JobPriority.NORMAL,
+                    payload={"run_id": run_id, "workflow_id": workflow_id,
+                             "tenant": tenant, "steps": definition["steps"],
+                             "estimated_pages": int(definition.get("max_pages", 1))},
+                ))
+                queued += 1
+            except Exception as exc:  # keep a failed run record rather than silently dropping it
+                record.update(status="failed", error=f"scheduled dispatch failed: {exc}"[:500],
+                              updated_at=datetime.now(timezone.utc).isoformat())
+                redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
+                redis.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), run_id)
+            next_run = now + int(interval) * 60
+            definition["next_run_at"] = datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+            redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),
+                      json.dumps(definition, separators=(",", ":")), ex=30 * 86400)
+            redis.zadd(SCHEDULED_WORKFLOWS, {workflow_id: next_run})
+        finally:
+            try:
+                redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then "
+                           "return redis.call('del', KEYS[1]) else return 0 end",
+                           1, lock_key, lock_token)
+            except Exception as exc:  # noqa: BLE001 - fakeredis may not implement Lua
+                if redis.get(lock_key) == lock_token:
+                    redis.delete(lock_key)
+                else:
+                    logger.warning("workflow schedule lock cleanup failed: %s", exc)
     return {"queued": queued, "due": len(due)}

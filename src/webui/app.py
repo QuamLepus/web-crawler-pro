@@ -916,6 +916,27 @@ async def workflow_create(request: Request, name: str = Form("", max_length=100)
                      "ok" if result.ok else "danger")
 
 
+@router.post("/app/workflows/{workflow_id}/edit", response_class=HTMLResponse)
+async def workflow_edit(request: Request, workflow_id: str,
+                        name: str = Form("", max_length=100)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.workflow_update(workflow_id, name=name.strip())
+    return _redirect("/app/workflows", "Workflow updated" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/workflows/{workflow_id}/delete", response_class=HTMLResponse)
+async def workflow_delete(request: Request, workflow_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.workflow_delete(workflow_id)
+    message = "Workflow deleted; its historical runs are retained" if result.ok else result.error
+    return _redirect("/app/workflows", message, "ok" if result.ok else "danger")
+
+
 @router.post("/app/workflows/{workflow_id}/schedule", response_class=HTMLResponse)
 async def workflow_schedule(request: Request, workflow_id: str,
                             interval_minutes: int | None = Form(None, ge=60, le=10080)):

@@ -65,6 +65,25 @@ test('workflow create, status, and cancellation use the tenant API contracts', a
     steps: [{ url: 'https://example.org', max_pages: 4, obey_robots: true }] });
 });
 
+test('workflow update and deletion use encoded tenant endpoints and snake-case fields', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'workflow-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ workflow_id: 'workflow_abcd', deleted: true }), { status: 200 });
+  } });
+  await client.updateWorkflow('workflow/a', { name: 'Updated',
+    steps: [{ url: 'https://example.org', maxPages: 5, obeyRobots: false }],
+    scheduleIntervalMinutes: null });
+  await client.deleteWorkflow('workflow/a');
+  assert.equal(calls[0].url, 'http://localhost:8000/api/v1/workflows/workflow%2Fa');
+  assert.equal(calls[0].method, 'PUT');
+  assert.deepEqual(calls[0].body, { name: 'Updated',
+    steps: [{ url: 'https://example.org', max_pages: 5, obey_robots: false }],
+    schedule_interval_minutes: null });
+  assert.equal(calls[1].url, 'http://localhost:8000/api/v1/workflows/workflow%2Fa');
+  assert.equal(calls[1].method, 'DELETE');
+});
+
 test('Studio snapshots use bounded row payloads and handle 204 deletion', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'studio-key', fetch: async (url, init) => {
