@@ -95,8 +95,31 @@
         {% for run in runs %}
         <tr>
           <td>{{ run.name }}</td>
-          <td><span class="badge {{ 'ok' if run.status == 'completed' else ('danger' if run.status == 'failed' else 'brand') }}">{{ run.status }}</span></td>
-          <td>{{ run.step_index }}/{{ run.steps|length }} steps</td>
+          <td><span class="badge {{ 'ok' if run.status == 'completed' else ('danger' if run.status == 'failed' else ('muted' if run.status == 'cancelled' else 'brand')) }}">{{ run.status }}</span></td>
+          {% set completed_steps = run.steps|selectattr('status', 'equalto', 'completed')|list|length %}
+          {% set failed_steps = run.steps|selectattr('status', 'equalto', 'failed')|list|length %}
+          {% set skipped_steps = run.steps|selectattr('status', 'equalto', 'skipped')|list|length %}
+          {% set cancelled_steps = run.steps|selectattr('status', 'equalto', 'cancelled')|list|length %}
+          {% set running_steps = run.steps|selectattr('status', 'equalto', 'running')|list|length %}
+          {% set queued_steps = run.steps|selectattr('status', 'equalto', 'queued')|list|length %}
+          {% set total_steps = run.steps|length %}
+          {% set settled_steps = completed_steps + failed_steps + skipped_steps + cancelled_steps %}
+          <td>
+            <strong>{{ settled_steps }}/{{ total_steps }} steps settled</strong>
+            <span class="muted">{{ completed_steps }} completed · {{ running_steps }} running · {{ queued_steps }} queued · {{ failed_steps }} failed · {{ skipped_steps }} skipped · {{ cancelled_steps }} cancelled</span>
+            {% if total_steps %}<progress value="{{ settled_steps }}" max="{{ total_steps }}" aria-label="Workflow step progress"></progress>{% endif %}
+            <details>
+              <summary>Step details{% if run.execution_mode == 'dag' %} · dependency DAG{% endif %}</summary>
+              <ol>
+                {% for step in run.steps %}
+                <li><code>{{ step.step_id or ('step_' ~ loop.index) }}</code> — <span class="badge {{ 'ok' if step.status == 'completed' else ('danger' if step.status == 'failed' else ('muted' if step.status in ['skipped', 'cancelled'] else ('brand' if step.status == 'running' else '')) ) }}">{{ step.status or 'queued' }}</span>
+                  {% if step.depends_on %}<span class="muted">after {{ step.depends_on|join(', ') }}</span>{% elif run.execution_mode == 'dag' %}<span class="muted">root step</span>{% endif %}
+                  {% if step.error %}<span class="muted">— {{ step.error }}</span>{% endif %}
+                </li>
+                {% endfor %}
+              </ol>
+            </details>
+          </td>
           <td>{{ run.created_at }}</td>
           <td>{{ run.error or ('Cancellation requested; active step will finish' if run.cancel_requested else '—') }}</td>
           <td>

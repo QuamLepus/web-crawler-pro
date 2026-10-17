@@ -854,8 +854,14 @@ def test_workflow_console_exposes_run_cancellation(signed_in, monkeypatch):
 
     async def runs(self):
         return Result(True, data={"items": [{"run_id": "wfrun_aaaaaaaaaaaaaaaaaaaa",
-            "name": "Refresh", "status": "running", "step_index": 1,
-            "steps": [{}, {}], "created_at": "today", "cancel_requested": False}]})
+            "name": "Refresh", "status": "running", "execution_mode": "dag",
+            "step_index": 2, "steps": [
+                {"step_id": "seed", "status": "completed", "depends_on": []},
+                {"step_id": "branch_a", "status": "failed", "depends_on": ["seed"],
+                 "error": "crawl failed"},
+                {"step_id": "branch_b", "status": "skipped", "depends_on": ["seed"]},
+                {"step_id": "finish", "status": "queued", "depends_on": ["branch_b"]},
+            ], "created_at": "today", "cancel_requested": False}]})
 
     async def cancel(self, run_id):
         calls.append(run_id)
@@ -867,6 +873,9 @@ def test_workflow_console_exposes_run_cancellation(signed_in, monkeypatch):
     monkeypatch.setattr(Api, "workflow_cancel", cancel)
     page = signed_in.get("/app/workflows")
     assert page.status_code == 200
+    assert "3/4 steps settled" in page.text
+    assert "1 completed · 0 running · 1 queued · 1 failed · 1 skipped · 0 cancelled" in page.text
+    assert "after seed" in page.text
     assert "/app/workflows/runs/wfrun_aaaaaaaaaaaaaaaaaaaa/cancel" in page.text
     response = signed_in.post("/app/workflows/runs/wfrun_aaaaaaaaaaaaaaaaaaaa/cancel",
                               follow_redirects=False)

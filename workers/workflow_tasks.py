@@ -150,10 +150,13 @@ def run_workflow(self, payload: dict) -> dict:
     except Exception as exc:
         record["status"] = "failed"
         record["error"] = str(exc)[:500]
+        finished_at = datetime.now(timezone.utc).isoformat()
         for step in record.get("steps", []):
             if step.get("status") == "running":
-                step["status"] = "failed"
-                step["error"] = record["error"]
+                step.update(status="failed", error=record["error"], completed_at=finished_at)
+            elif step.get("status") == "queued":
+                step.update(status="skipped", error="workflow execution stopped before this step",
+                            completed_at=finished_at)
         _save(redis, run_id, record)
         logger.exception("workflow run %s failed", run_id)
         raise
@@ -229,8 +232,12 @@ def schedule_tick(self, batch: int = 50) -> dict:
                 ))
                 queued += 1
             except Exception as exc:  # keep a failed run record rather than silently dropping it
-                record.update(status="failed", error=f"scheduled dispatch failed: {exc}"[:500],
-                              updated_at=datetime.now(timezone.utc).isoformat())
+                failed_at = datetime.now(timezone.utc).isoformat()
+                dispatch_error = f"scheduled dispatch failed: {exc}"[:500]
+                record.update(status="failed", error=dispatch_error, updated_at=failed_at)
+                for step in record["steps"]:
+                    if step["status"] == "queued":
+                        step.update(status="failed", error=dispatch_error, completed_at=failed_at)
                 redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
                 redis.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), run_id)
             next_run = now + int(interval) * 60
