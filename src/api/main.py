@@ -27,9 +27,9 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Annotated, Any, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -341,9 +341,22 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         return {"status": "ready", "checks": checks}
 
     # ---- REST v1 routers ------------------------------------------------------ #
-    from src.api.routers import (billing, discovery, jobs, knowledge_graph,
-                                 marketplace, provenance, research, search,
-                                 search_index, studio, watch, webhooks, workflows)
+    from src.api.routers import (
+        billing,
+        discovery,
+        jobs,
+        knowledge_graph,
+        marketplace,
+        provenance,
+        research,
+        search,
+        search_index,
+        sso,
+        studio,
+        watch,
+        webhooks,
+        workflows,
+    )
 
     def _build_v1(prefix: str):
         r = APIRouter(prefix=prefix)
@@ -362,10 +375,14 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(search_index.router)
         r.include_router(studio.router)
         r.include_router(workflows.router)
+        r.include_router(sso.router)
         return r
 
     app.include_router(_build_v1(API_PREFIX))   # canonical: /api/v1/*
     app.include_router(_build_v1("/v1"))        # legacy alias: /v1/*
+
+    # ---- tenant-configured OIDC callback routes are public protocol endpoints ---- #
+    app.include_router(sso.auth_router)
 
     # ---- minimal auth helpers so tenants can bootstrap keys via this app ---- #
     _mount_auth_routes(app)
@@ -453,8 +470,7 @@ def _mount_auth_routes(app: FastAPI) -> None:
     and the legacy SDK surface ``/auth/*`` + ``/keys`` — same handlers, so
     old clients keep working while docs push the new prefix.
     """
-    from src.gateway.auth.tokens import decode_token, issue_session, \
-        refresh_access
+    from src.gateway.auth.tokens import issue_session, refresh_access
 
     async def _signup(body: SignupBody, request: Request):
         svc = request.app.state.services

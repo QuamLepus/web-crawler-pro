@@ -750,6 +750,8 @@ See **`.env.example`** for the complete list. Highlights:
 | `REDIS_URL` | `redis://localhost:6379/0` | Frontier + Celery broker/backend |
 | `FRONTIER_NAMESPACE` | `frontier` | Key prefix (multi-tenant frontiers) |
 | `JWT_SECRET` | – | **Required.** Signing key for auth tokens |
+| `WCP_PUBLIC_BASE_URL` | – | Public HTTPS origin used for OIDC callback URLs |
+| `WCP_SSO_ENCRYPTION_KEY` | – | Fernet key required to configure enterprise OIDC SSO |
 | `DEDUPE_THRESHOLD` | `0.9` | MinHash Jaccard duplicate cutoff |
 | `CRAWLER_MAX_PAGES` | `100` | Default page budget per crawl |
 | `CRAWLER_OUTPUT_DIR` | `output` | Where exported items land |
@@ -874,6 +876,11 @@ supports cooperative cancellation between steps, and can schedule recurring runs
 when Celery Beat is active; it is not a general DAG or script engine. Early
 TypeScript SDK and stdio MCP packages expose selected workflow and snapshot
 operations, but are not yet published as stable releases.
+Tenant administrators can configure early OIDC SSO with PKCE, encrypted
+client secrets, verified-domain provisioning controls, and an SSO-only audit
+trail; it is not a complete enterprise identity/compliance offer. See
+[`docs/enterprise-sso.md`](docs/enterprise-sso.md) for prerequisites and limits.
+
 These foundations do not constitute a complete research agent, BI suite, or
 enterprise SSO/connectors/compliance offering. Performance figures remain
 synthetic baselines and targets until validated under production conditions.

@@ -441,6 +441,12 @@ async def login_get(request: Request):
     )
 
 
+@router.get("/login/sso")
+async def login_sso(tenant_id: str = Query(..., pattern=r"^[a-f0-9]{10}$")):
+    """Start SSO for an organization ID; destination is a fixed local route."""
+    return RedirectResponse(f"/api/auth/oidc/{tenant_id}/login", status_code=302)
+
+
 @router.post("/login", response_class=HTMLResponse)
 async def login_post(request: Request, email: str = Form(""), password: str = Form("")):
     api = _anon(request)
@@ -820,6 +826,7 @@ async def data_studio_analytics_export(
     """Export at most 100 grouped full-corpus aggregates as CSV."""
     import csv
     import io
+
     from fastapi.responses import StreamingResponse
 
     api, _me, redirect = await _guard(request)
@@ -853,6 +860,7 @@ async def data_studio_export(request: Request, q: str = Query(..., min_length=1,
     """Download the same bounded own-index result set as a CSV file."""
     import csv
     import io
+
     from fastapi.responses import StreamingResponse
 
     api, _me, redirect = await _guard(request)
@@ -1578,6 +1586,12 @@ async def settings_page(request: Request):
     if redirect:
         return redirect
     hooks = await api.webhooks()
+    sso_config, audit = ({}, {})
+    sso_admin = me.get("role") in {"owner", "admin"}
+    if sso_admin:
+        sso_result, audit_result = await _gather(api.sso_oidc(), api.sso_audit())
+        sso_config = sso_result.data if sso_result.ok else {}
+        audit = audit_result.data if audit_result.ok else {}
     return render(
         request,
         "settings.html",
@@ -1585,11 +1599,50 @@ async def settings_page(request: Request):
         me=me,
         hooks=(hooks.data if hooks.ok else None),
         error=hooks.error,
+        sso_admin=sso_admin, sso_config=sso_config,
+        sso_audit_events=audit.get("items", []),
+        sso_status_error=(sso_result.error if sso_admin and not sso_result.ok and
+                          sso_result.status not in {404} else ""),
         events=webhook_events(),
         has_provider=_has_discovery_provider(),
         stripe_ready=bool(os.getenv("STRIPE_SECRET_KEY")),
         title="Settings — Web Intelligence OS",
     )
+
+
+@router.post("/app/settings/sso/oidc")
+async def settings_sso_oidc(request: Request,
+                            issuer: str = Form("", max_length=2048),
+                            client_id: str = Form("", max_length=256),
+                            client_secret: str = Form("", max_length=4096),
+                            allowed_domains: str = Form("", max_length=4000),
+                            jit_provisioning: bool = Form(False),
+                            default_role: Literal["viewer", "member"] = Form("viewer")):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    if me.get("role") not in {"owner", "admin"}:
+        return _redirect("/app/settings", "SSO setup requires an owner or admin", "danger")
+    domains = list(dict.fromkeys(part.strip().lower() for part in allowed_domains.split(",")
+                                 if part.strip()))
+    result = await api.sso_configure_oidc(
+        issuer=issuer.strip(), client_id=client_id.strip(),
+        client_secret=client_secret, allowed_domains=domains,
+        jit_provisioning=jit_provisioning, default_role=default_role)
+    return _redirect("/app/settings", "OIDC SSO configured" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/settings/sso/oidc/disable")
+async def settings_sso_disable(request: Request):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    if me.get("role") not in {"owner", "admin"}:
+        return _redirect("/app/settings", "SSO setup requires an owner or admin", "danger")
+    result = await api.sso_disable_oidc()
+    return _redirect("/app/settings", "OIDC SSO disabled" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
 
 
 @router.post("/app/settings/webhooks")

@@ -284,6 +284,18 @@ class Api:
     def studio_delete_snapshot(self, snapshot_id: str) -> Any:
         return self.delete(f"/api/v1/studio/snapshots/{snapshot_id}")
 
+    def sso_oidc(self) -> Any:
+        return self.get("/api/v1/sso/oidc")
+
+    def sso_configure_oidc(self, **body) -> Any:
+        return self._call("PUT", "/api/v1/sso/oidc", json=body)
+
+    def sso_disable_oidc(self) -> Any:
+        return self.delete("/api/v1/sso/oidc")
+
+    def sso_audit(self, limit: int = 50) -> Any:
+        return self.get("/api/v1/sso/audit", {"limit": limit})
+
     def index_spell(self, q: str) -> Any:
         return self.get("/api/v1/search-index/spell", {"q": q})
 
