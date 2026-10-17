@@ -251,6 +251,15 @@ class Api:
     def index_levels(self) -> Any:
         return self.get("/api/v1/search-index/levels")
 
+    def studio_saved_queries(self) -> Any:
+        return self.get("/api/v1/studio/saved-queries")
+
+    def studio_save_query(self, **body) -> Any:
+        return self.post("/api/v1/studio/saved-queries", body)
+
+    def studio_delete_query(self, saved_id: str) -> Any:
+        return self.delete(f"/api/v1/studio/saved-queries/{saved_id}")
+
     def index_spell(self, q: str) -> Any:
         return self.get("/api/v1/search-index/spell", {"q": q})
 

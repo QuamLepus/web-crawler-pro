@@ -841,7 +841,9 @@ aggressive sub-1 s goal requires a separately specified test profile); CLS below
 0.1; animation near 60 FPS; and near-real-time job progress. Establish and
 publish repeatable browser/device/network conditions before claiming a target
 is met. Respect reduced-motion preferences; motion should remain brief and
-nonessential.
+nonessential. A synthetic own-index benchmark is available at
+`scripts/bench-search-index.py`; its small sandbox baseline and caveats are
+recorded in [`docs/performance-benchmarks.md`](docs/performance-benchmarks.md).
 
 ## Grounded intelligence and provenance (early building blocks)
 
