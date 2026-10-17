@@ -25,7 +25,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -613,11 +613,44 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
     if q.strip():
         response = await api.index_query(q.strip(), limit=limit, sources=source)
         results = response.data if response.ok and isinstance(response.data, dict) else {"_error": response.error}
-    stats = await api.index_stats()
+    stats, saved = await _gather(api.index_stats(), api.studio_saved_queries())
+    from collections import Counter
+    hits = results.get("results", []) if isinstance(results, dict) else []
+    host_counts = Counter(hit.get("host") or "(unknown)" for hit in hits)
+    source_counts = Counter(hit.get("source") or "(unknown)" for hit in hits)
     return render(request, "studio.html", page="studio", me=me, q=q,
                   limit=limit, source=source, results=results,
+                  saved_queries=saved.get("items", []) if saved.ok else [],
+                  host_counts=host_counts.most_common(8),
+                  source_counts=source_counts.most_common(8),
                   stats=stats.data if stats.ok and isinstance(stats.data, dict) else {},
                   title="Data Studio — Web Intelligence OS")
+
+
+@router.post("/app/studio/save", response_class=HTMLResponse)
+async def data_studio_save(request: Request, name: str = Form("", max_length=100),
+                           q: str = Form("", max_length=2048),
+                           source: str = Form("", max_length=800),
+                           limit: int = Form(25, ge=1, le=100)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.studio_save_query(
+        name=name.strip(), q=q.strip(), limit=limit,
+        sources=[part.strip() for part in source.split(",") if part.strip()])
+    return _redirect("/app/studio?q=" + quote(q.strip()),
+                     "Query saved" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/studio/saved/{saved_id}/delete", response_class=HTMLResponse)
+async def data_studio_delete_saved(request: Request, saved_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.studio_delete_query(saved_id)
+    return _redirect("/app/studio", "Saved query deleted" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
 
 
 @router.get("/app/studio/export")

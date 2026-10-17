@@ -13,11 +13,11 @@ full long-term product plan is already shipped.
 | Python SDK | Early installable package for ask, crawl/status, watch, and research operations | Limited endpoint coverage; release and compatibility policy remain early. |
 | Research console page | Implemented as a UI over `/ask` | It is not a multi-stage autonomous research agent. |
 | Web change monitoring | Scheduled URL watches, one-page crawl snapshots, content hashes, change history, basic text-based price mentions, and `web.changed` webhook event | Not semantic change classification; no DNS-rebinding defense, structured product matching, version replay UI, or customer-specific schedules beyond the minimum interval. Celery Beat and workers must run. |
-| Data Studio | Implemented as an authenticated explorer over the deployment's own search index, with bounded previews and CSV download | Query output only; exports are capped at 100 matches per request. No saved analyses, arbitrary SQL, or chart builder. |
+| Data Studio | Authenticated own-index query explorer with bounded preview, CSV export, tenant-scoped saved queries, and host/source breakdowns over the returned result sample | Exports are capped at 100 matches; breakdowns describe returned hits only, not corpus-wide aggregates. No arbitrary SQL, full chart builder, or persisted datasets. |
 | Workflow builder | Early tenant-scoped sequential crawl recipes with create/list/run/status APIs, a console form, Celery execution, per-step progress, robots checks, and request-budget accounting | Crawl-only (up to 10 steps / 25 pages each); no DAG branching, arbitrary code, schedules, editing/deletion, or cancellation. Requires configured Celery workers. |
 | Agent marketplace | Not implemented | Existing dataset marketplace is separate. |
 | Enterprise connectors, SSO, compliance | Not implemented as a complete offering | Do not claim SOC 2/ISO certification or enterprise-ready private integrations. |
-| Performance targets | Documented as targets | No new latency, LCP, CLS, throughput, or cost benchmarks were measured here. |
+| Performance measurement | Reproducible synthetic own-index query benchmark and a small sandbox baseline are recorded | No production-scale, concurrent/API/browser, reranking, LCP/CLS, or cloud-cost benchmarks; targets remain unverified. |
 | TypeScript SDK + MCP server | Early packages expose ask, research, crawl and watch operations over fetch/stdio | MCP protocol integration tests and published package releases remain; TypeScript integration coverage is limited. |
 
 The implemented endpoints are tenant authenticated and tested with fakeredis.
