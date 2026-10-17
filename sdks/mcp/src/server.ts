@@ -75,6 +75,31 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_workflow_update", "Update a workflow name, ordered steps, or recurring schedule. Omitted fields are unchanged; a null schedule disables recurrence.", {
+    workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
+    name: z.string().min(1).max(100).optional(),
+    steps: z.array(z.object({ url: z.string().url(), max_pages: z.number().int().min(1).max(25).optional(),
+      obey_robots: z.boolean().optional() })).min(1).max(10).optional(),
+    schedule_interval_minutes: z.number().int().min(60).max(10080).nullable().optional(),
+  }, async ({ workflow_id, name, steps, schedule_interval_minutes }) => {
+    try { return result(await client.updateWorkflow(workflow_id, {
+      ...(name === undefined ? {} : { name }),
+      ...(steps === undefined ? {} : { steps: steps.map((step) => ({
+        url: step.url, maxPages: step.max_pages, obeyRobots: step.obey_robots,
+      })) }),
+      ...(schedule_interval_minutes === undefined ? {} :
+        { scheduleIntervalMinutes: schedule_interval_minutes }),
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_delete", "Delete a workflow definition and its schedule. Historical runs are retained; deletion fails while runs are queued or running.", {
+    workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
+  }, async ({ workflow_id }) => {
+    try { return result(await client.deleteWorkflow(workflow_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_workflow_run", "Queue a saved sequential crawl workflow.", {
     workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
   }, async ({ workflow_id }) => {
