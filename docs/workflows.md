@@ -31,8 +31,9 @@ when available; a selector lets users choose another recent run for that workflo
 Its saved-workflow editor retains per-step IDs, dependencies,
 page limits, and robots settings. Recent runs show settled, active, queued,
 failed, skipped, and cancelled step counts plus each step's status and dependencies.
-Recent run history is paginated (20 runs per page); each page's DAG selectors
-show the runs available on that page, with the newest page selected by default.
+Recent run history is paginated (20 runs per page); DAG selectors show runs on
+the current page, and a selected historical overlay remains available while
+browsing other pages. The newest page is selected by default.
 The API, TypeScript/Python SDKs, and MCP tools expose the same definition
 controls.
 

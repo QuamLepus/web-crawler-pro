@@ -93,7 +93,7 @@
           <label>Run status overlay
             <select name="run_id" aria-label="Choose run status for {{ workflow.name }}">
               {% for option in workflow.dag_run_options %}
-              <option value="{{ option.run_id }}" {% if option.run_id == workflow.selected_run_id %}selected{% endif %}>{{ option.created_at }} · {{ option.status }} ({{ option.steps|length }} steps)</option>
+              <option value="{{ option.run_id }}" {% if option.run_id == workflow.selected_run_id %}selected{% endif %}>{{ option.created_at }} · {{ option.status }} ({{ option.steps|length }} steps){% if option.outside_history_page %} · selected from another page{% endif %}</option>
               {% endfor %}
             </select>
           </label>
@@ -151,12 +151,12 @@
   <div class="row wrap" style="justify-content:space-between">
     <div>
       <h2>Recent runs</h2>
-      {% if run_total %}<p class="muted small">{{ run_total }} runs · page {{ run_page }} of {{ run_page_count }}. Graph selectors use runs on this page.</p>{% endif %}
+      {% if run_total %}<p class="muted small">{{ run_total }} runs · page {{ run_page }} of {{ run_page_count }}. Graph selectors use this page's runs and retain the selected overlay while browsing.</p>{% endif %}
     </div>
     {% if run_page_count > 1 %}
     <nav class="row" aria-label="Workflow run history pages">
-      {% if run_page > 1 %}<a class="btn btn-sm" href="/app/workflows?run_page={{ run_page - 1 }}">Newer runs</a>{% endif %}
-      {% if run_page < run_page_count %}<a class="btn btn-sm" href="/app/workflows?run_page={{ run_page + 1 }}">Older runs</a>{% endif %}
+      {% if run_page > 1 %}<a class="btn btn-sm" href="{{ previous_runs_url }}">Newer runs</a>{% endif %}
+      {% if run_page < run_page_count %}<a class="btn btn-sm" href="{{ next_runs_url }}">Older runs</a>{% endif %}
     </nav>
     {% endif %}
   </div>
