@@ -678,7 +678,8 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
     if q.strip():
         response = await api.index_query(q.strip(), limit=limit, sources=source)
         results = response.data if response.ok and isinstance(response.data, dict) else {"_error": response.error}
-    stats, saved = await _gather(api.index_stats(), api.studio_saved_queries())
+    stats, saved, snapshots = await _gather(
+        api.index_stats(), api.studio_saved_queries(), api.studio_snapshots())
     from collections import Counter
     hits = results.get("results", []) if isinstance(results, dict) else []
     host_counts = Counter(hit.get("host") or "(unknown)" for hit in hits)
@@ -689,6 +690,7 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
                   limit=limit, source=source, group_by=group_by, metric=metric,
                   results=results, chart_rows=chart_rows,
                   saved_queries=saved.get("items", []) if saved.ok else [],
+                  snapshots=snapshots.get("items", []) if snapshots.ok else [],
                   host_bars=_studio_bar_rows(host_counts),
                   source_bars=_studio_bar_rows(source_counts),
                   score_points=score_points, scored_hits=scored_hits,
@@ -713,6 +715,55 @@ async def data_studio_save(request: Request, name: str = Form("", max_length=100
     return _redirect("/app/studio?q=" + quote(q.strip()) +
                      "&group_by=" + group_by + "&metric=" + metric,
                      "Query saved" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/studio/snapshot", response_class=HTMLResponse)
+async def data_studio_save_snapshot(request: Request, name: str = Form("", max_length=100),
+                                    q: str = Form("", max_length=2048),
+                                    source: str = Form("", max_length=800),
+                                    limit: int = Form(25, ge=1, le=100),
+                                    group_by: Literal["host", "source"] = Form("host"),
+                                    metric: Literal["count", "avg_score"] = Form("count")):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    queried = await api.index_query(q.strip(), limit=limit, sources=source)
+    if not queried.ok:
+        return _redirect("/app/studio?q=" + quote(q.strip()), queried.error, "danger")
+    hits = queried.get("results", [])
+    if not hits:
+        return _redirect("/app/studio?q=" + quote(q.strip()),
+                         "No results to snapshot", "warn")
+    saved = await api.studio_create_snapshot(
+        name=name.strip(), q=q.strip(),
+        sources=[part.strip() for part in source.split(",") if part.strip()],
+        group_by=group_by, metric=metric, rows=hits)
+    return _redirect("/app/studio?q=" + quote(q.strip()),
+                     "Result snapshot saved" if saved.ok else saved.error,
+                     "ok" if saved.ok else "danger")
+
+
+@router.get("/app/studio/snapshots/{snapshot_id}/download")
+async def data_studio_download_snapshot(request: Request, snapshot_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    snapshot = await api.studio_snapshot(snapshot_id)
+    if not snapshot.ok:
+        return HTMLResponse(snapshot.error, status_code=snapshot.status if snapshot.status >= 400 else 502)
+    return JSONResponse(snapshot.data, headers={
+        "Content-Disposition": 'attachment; filename="studio-snapshot.json"',
+        "Cache-Control": "private, no-store"})
+
+
+@router.post("/app/studio/snapshots/{snapshot_id}/delete", response_class=HTMLResponse)
+async def data_studio_delete_snapshot(request: Request, snapshot_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.studio_delete_snapshot(snapshot_id)
+    return _redirect("/app/studio", "Snapshot deleted" if result.ok else result.error,
                      "ok" if result.ok else "danger")
 
 
@@ -784,6 +835,16 @@ async def workflow_create(request: Request, name: str = Form("", max_length=100)
     result = await api.workflow_create(name=name.strip(), steps=steps)
     return _redirect("/app/workflows", "Workflow created" if result.ok else result.error,
                      "ok" if result.ok else "danger")
+
+
+@router.post("/app/workflows/runs/{run_id}/cancel", response_class=HTMLResponse)
+async def workflow_cancel(request: Request, run_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.workflow_cancel(run_id)
+    message = result.get("message", "Cancellation requested") if result.ok else result.error
+    return _redirect("/app/workflows", message, "ok" if result.ok else "danger")
 
 
 @router.post("/app/workflows/{workflow_id}/run", response_class=HTMLResponse)

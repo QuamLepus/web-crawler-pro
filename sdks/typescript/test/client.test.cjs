@@ -43,3 +43,42 @@ test('non-success response becomes a typed error without disclosing key', async 
     return true;
   });
 });
+
+test('workflow create, status, and cancellation use the tenant API contracts', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'workflow-key', baseUrl: 'https://api.example',
+    fetch: async (url, init) => {
+      calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+      return new Response(JSON.stringify({ status: 'queued' }), { status: 202 });
+    } });
+  await client.createWorkflow('Morning refresh', [{ url: 'https://example.org', maxPages: 4 }]);
+  await client.runWorkflow('workflow_a/b');
+  await client.getWorkflowRun('wfrun_abc');
+  await client.cancelWorkflowRun('wfrun_abc');
+  assert.deepEqual(calls.map((call) => call.url), [
+    'https://api.example/api/v1/workflows',
+    'https://api.example/api/v1/workflows/workflow_a%2Fb/runs',
+    'https://api.example/api/v1/workflows/runs/wfrun_abc',
+    'https://api.example/api/v1/workflows/runs/wfrun_abc/cancel',
+  ]);
+  assert.deepEqual(calls[0].body, { name: 'Morning refresh', steps: [{
+    url: 'https://example.org', max_pages: 4, obey_robots: true,
+  }] });
+});
+
+test('Studio snapshots use bounded row payloads and handle 204 deletion', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'studio-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return init.method === 'DELETE' ? new Response(null, { status: 204 })
+      : new Response(JSON.stringify({ snapshot_id: 'snapshot_abcd' }), { status: 201 });
+  } });
+  const saved = await client.createStudioSnapshot({ name: 'Solar sample', q: 'solar',
+    groupBy: 'source', metric: 'avg_score', rows: [{ rank: 1, url: 'https://example.org', score: 0.8 }] });
+  assert.equal(saved.snapshot_id, 'snapshot_abcd');
+  assert.deepEqual(await client.deleteStudioSnapshot('snapshot/a'), {});
+  assert.equal(calls[0].url, 'http://localhost:8000/api/v1/studio/snapshots');
+  assert.deepEqual(calls[0].body, { name: 'Solar sample', q: 'solar', sources: [],
+    group_by: 'source', metric: 'avg_score', rows: [{ rank: 1, url: 'https://example.org', score: 0.8 }] });
+  assert.equal(calls[1].url, 'http://localhost:8000/api/v1/studio/snapshots/snapshot%2Fa');
+});

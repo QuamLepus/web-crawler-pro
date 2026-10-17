@@ -55,7 +55,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
-    'wio_watch_changes', 'wio_watch_create',
+    'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
+    'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_run', 'wio_workflow_status',
   ]);
   const result = await client.callTool({ name: 'wio_ask', arguments: { question: 'What is cited?' } });
   assert.equal(result.isError, undefined);
@@ -77,6 +78,32 @@ test('MCP tool returns a protocol error when the API rejects a call', async () =
     const response = await client.callTool({ name: 'wio_ask', arguments: { question: 'test query' } });
     assert.equal(response.isError, true);
     assert.match(response.content[0].text, /index unavailable/);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP workflow tool submits bounded sequential steps through the SDK', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'workflow-tool-key', fetch: async (url, init) => {
+    request = { url, key: init.headers['X-API-Key'], body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa', status: 'created' }),
+                        { status: 201 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'workflow-tool-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_workflow_create', arguments: {
+      name: 'Morning sources', steps: [{ url: 'https://example.org', max_pages: 2 }],
+    } });
+    assert.equal(response.isError, undefined);
+    assert.equal(request.url, 'http://localhost:8000/api/v1/workflows');
+    assert.equal(request.key, 'workflow-tool-key');
+    assert.deepEqual(request.body.steps, [{ url: 'https://example.org', max_pages: 2, obey_robots: true }]);
   } finally {
     await client.close();
     await server.close();

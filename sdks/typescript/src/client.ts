@@ -37,6 +37,22 @@ export interface WatchCreateOptions {
   intervalMinutes?: number;
 }
 
+export interface WorkflowCrawlStep {
+  url: string;
+  maxPages?: number;
+  obeyRobots?: boolean;
+}
+
+export interface StudioSnapshotCreateOptions {
+  name: string;
+  q: string;
+  sources?: string[];
+  groupBy?: "host" | "source";
+  metric?: "count" | "avg_score";
+  rows: Array<{ rank: number; url: string; title?: string; host?: string;
+    snippet?: string; score?: number; source?: string }>;
+}
+
 export class WebIntelligenceClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -63,6 +79,7 @@ export class WebIntelligenceClient {
         ...(body ? { body: JSON.stringify(body) } : {}),
         signal: controller.signal,
       });
+      if (response.status === 204) return {} as T;
       let payload: unknown;
       try { payload = await response.json(); }
       catch { payload = null; }
@@ -130,5 +147,44 @@ export class WebIntelligenceClient {
 
   getWatchChanges(watchId: string): Promise<JsonObject> {
     return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes`);
+  }
+
+  createWorkflow(name: string, steps: WorkflowCrawlStep[]): Promise<JsonObject> {
+    return this.request("POST", "workflows", { name, steps: steps.map((step) => ({
+      url: step.url, max_pages: step.maxPages ?? 3,
+      obey_robots: step.obeyRobots ?? true,
+    })) });
+  }
+
+  runWorkflow(workflowId: string): Promise<JsonObject> {
+    return this.request("POST", `workflows/${encodeURIComponent(workflowId)}/runs`);
+  }
+
+  getWorkflowRun(runId: string): Promise<JsonObject> {
+    return this.request("GET", `workflows/runs/${encodeURIComponent(runId)}`);
+  }
+
+  cancelWorkflowRun(runId: string): Promise<JsonObject> {
+    return this.request("POST", `workflows/runs/${encodeURIComponent(runId)}/cancel`);
+  }
+
+  createStudioSnapshot(options: StudioSnapshotCreateOptions): Promise<JsonObject> {
+    return this.request("POST", "studio/snapshots", {
+      name: options.name, q: options.q, sources: options.sources ?? [],
+      group_by: options.groupBy ?? "host", metric: options.metric ?? "count",
+      rows: options.rows,
+    });
+  }
+
+  listStudioSnapshots(): Promise<JsonObject> {
+    return this.request("GET", "studio/snapshots");
+  }
+
+  getStudioSnapshot(snapshotId: string): Promise<JsonObject> {
+    return this.request("GET", `studio/snapshots/${encodeURIComponent(snapshotId)}`);
+  }
+
+  deleteStudioSnapshot(snapshotId: string): Promise<JsonObject> {
+    return this.request("DELETE", `studio/snapshots/${encodeURIComponent(snapshotId)}`);
   }
 }

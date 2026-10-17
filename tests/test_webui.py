@@ -800,3 +800,73 @@ def test_data_studio_charts_are_accessible_and_derive_from_real_result_fields(si
     assert "curlie: 1.0" in grouped.text
     assert "Configurable breakdown computed only from these returned hits" in grouped.text
     assert 'value="source" selected' in grouped.text or "value=\"source\" selected" in grouped.text
+
+
+def test_data_studio_snapshot_save_download_delete_flow(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+    rows = [{"rank": 1, "url": "https://example.org/", "host": "example.org",
+             "title": "Evidence", "snippet": "Saved result", "score": 0.75, "source": "wiki"}]
+
+    async def query(self, q, limit=10, **kwargs):
+        return Result(True, data={"results": rows})
+
+    async def create(self, **body):
+        calls.append(body)
+        return Result(True, data={"snapshot_id": "snapshot_aaaaaaaaaaaaaaaaaaaa"}, status=201)
+
+    async def get_snapshot(self, snapshot_id):
+        return Result(True, data={"snapshot_id": snapshot_id, "rows": rows})
+
+    async def delete_snapshot(self, snapshot_id):
+        calls.append({"delete": snapshot_id})
+        return Result(True, status=204)
+
+    monkeypatch.setattr(Api, "index_query", query)
+    monkeypatch.setattr(Api, "studio_create_snapshot", create)
+    monkeypatch.setattr(Api, "studio_snapshot", get_snapshot)
+    monkeypatch.setattr(Api, "studio_delete_snapshot", delete_snapshot)
+    created = signed_in.post("/app/studio/snapshot", data={
+        "name": "Evidence sample", "q": "solar", "limit": 10,
+        "group_by": "source", "metric": "avg_score"}, follow_redirects=False)
+    assert created.status_code == 303
+    assert calls[0]["rows"] == rows
+    assert calls[0]["group_by"] == "source"
+    downloaded = signed_in.get("/app/studio/snapshots/snapshot_aaaaaaaaaaaaaaaaaaaa/download")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"].startswith("application/json")
+    assert "attachment" in downloaded.headers["content-disposition"]
+    assert downloaded.json()["rows"][0]["title"] == "Evidence"
+    removed = signed_in.post("/app/studio/snapshots/snapshot_aaaaaaaaaaaaaaaaaaaa/delete",
+                             follow_redirects=False)
+    assert removed.status_code == 303
+    assert calls[-1]["delete"] == "snapshot_aaaaaaaaaaaaaaaaaaaa"
+
+
+def test_workflow_console_exposes_run_cancellation(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+
+    async def workflows(self):
+        return Result(True, data={"items": []})
+
+    async def runs(self):
+        return Result(True, data={"items": [{"run_id": "wfrun_aaaaaaaaaaaaaaaaaaaa",
+            "name": "Refresh", "status": "running", "step_index": 1,
+            "steps": [{}, {}], "created_at": "today", "cancel_requested": False}]})
+
+    async def cancel(self, run_id):
+        calls.append(run_id)
+        return Result(True, data={"status": "running", "cancel_requested": True,
+                                  "message": "cancellation requested"})
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+    monkeypatch.setattr(Api, "workflow_cancel", cancel)
+    page = signed_in.get("/app/workflows")
+    assert page.status_code == 200
+    assert "/app/workflows/runs/wfrun_aaaaaaaaaaaaaaaaaaaa/cancel" in page.text
+    response = signed_in.post("/app/workflows/runs/wfrun_aaaaaaaaaaaaaaaaaaaa/cancel",
+                              follow_redirects=False)
+    assert response.status_code == 303
+    assert calls == ["wfrun_aaaaaaaaaaaaaaaaaaaa"]
