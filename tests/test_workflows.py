@@ -128,8 +128,10 @@ def test_workflow_dag_definition_validates_and_preserves_dependencies():
     edited = client.put(f"/api/v1/workflows/{definition['workflow_id']}", headers=headers,
                         json={"steps": [
                             {"step_id": "fresh", "depends_on": [], "url": "https://fresh.example"},
-                            {"step_id": "summary", "depends_on": ["fresh"],
+                            {"step_id": "summary", "depends_on": [],
                              "url": "https://summary.example"},
+                            {"step_id": "join", "depends_on": ["fresh", "summary"],
+                             "url": "https://join.example"},
                         ]})
     assert edited.status_code == 200, edited.text
     assert edited.json()["execution_mode"] == "dag"

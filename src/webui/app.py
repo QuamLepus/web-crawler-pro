@@ -18,6 +18,7 @@ Design rules that shaped this module:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -900,16 +901,36 @@ async def workflows_page(request: Request):
                   title="Workflows — Web Intelligence OS")
 
 
+def _parse_workflow_steps(raw: str) -> tuple[list[dict] | None, str | None]:
+    try:
+        steps = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None, "Step JSON must be a valid JSON array."
+    if not isinstance(steps, list) or not steps:
+        return None, "Step JSON must contain an array with at least one step."
+    if any(not isinstance(step, dict) for step in steps):
+        return None, "Each workflow step must be a JSON object."
+    return steps, None
+
+
 @router.post("/app/workflows/create", response_class=HTMLResponse)
 async def workflow_create(request: Request, name: str = Form("", max_length=100),
                           urls: str = Form("", max_length=12000),
+                          steps_json: str = Form("", max_length=12000),
                           max_pages: int = Form(3, ge=1, le=25),
                           schedule_interval_minutes: int | None = Form(None, ge=60, le=10080)):
     api, _me, redirect = await _guard(request)
     if redirect:
         return redirect
-    steps = [{"url": line.strip(), "max_pages": max_pages, "obey_robots": True}
-             for line in urls.splitlines() if line.strip()]
+    if steps_json.strip():
+        steps, error = _parse_workflow_steps(steps_json)
+        if error:
+            return _redirect("/app/workflows", error, "warn")
+    else:
+        steps = [{"url": line.strip(), "max_pages": max_pages, "obey_robots": True}
+                 for line in urls.splitlines() if line.strip()]
+        if not steps:
+            return _redirect("/app/workflows", "Enter URLs or provide advanced step JSON.", "warn")
     result = await api.workflow_create(name=name.strip(), steps=steps,
                                        schedule_interval_minutes=schedule_interval_minutes)
     return _redirect("/app/workflows", "Workflow created" if result.ok else result.error,
@@ -918,11 +939,20 @@ async def workflow_create(request: Request, name: str = Form("", max_length=100)
 
 @router.post("/app/workflows/{workflow_id}/edit", response_class=HTMLResponse)
 async def workflow_edit(request: Request, workflow_id: str,
-                        name: str = Form("", max_length=100)):
+                        name: str = Form("", max_length=100),
+                        steps_json: str = Form("", max_length=12000)):
     api, _me, redirect = await _guard(request)
     if redirect:
         return redirect
-    result = await api.workflow_update(workflow_id, name=name.strip())
+    changes = {"name": name.strip()} if name.strip() else {}
+    if steps_json.strip():
+        steps, error = _parse_workflow_steps(steps_json)
+        if error:
+            return _redirect("/app/workflows", error, "warn")
+        changes["steps"] = steps
+    if not changes:
+        return _redirect("/app/workflows", "Enter a name or step JSON to update.", "warn")
+    result = await api.workflow_update(workflow_id, **changes)
     return _redirect("/app/workflows", "Workflow updated" if result.ok else result.error,
                      "ok" if result.ok else "danger")
 

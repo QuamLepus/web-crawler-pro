@@ -118,8 +118,9 @@ def _prepare_steps(steps: list[CrawlStep]) -> tuple[list[dict], str]:
     has_explicit_graph = False
     for index, (step, step_id) in enumerate(zip(steps, ids)):
         explicit = "depends_on" in step.model_fields_set and step.depends_on is not None
-        has_explicit_graph |= explicit
-        dependencies = (step.depends_on if explicit else (ids[index - 1:index] if index else []))
+        default_dependencies = ids[index - 1:index] if index else []
+        dependencies = step.depends_on if explicit else default_dependencies
+        has_explicit_graph |= dependencies != default_dependencies
         if step_id in dependencies:
             raise HTTPException(422, f"step {step_id} cannot depend on itself")
         unknown = set(dependencies) - known
