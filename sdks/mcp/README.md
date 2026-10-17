@@ -9,7 +9,8 @@ Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
 `wio_workflow_create`, `wio_workflow_run`, `wio_workflow_status`,
 `wio_workflow_cancel`, and `wio_studio_snapshot_get`. Workflow tools operate on
 bounded sequential crawl recipes; cancellation takes effect after the active
-crawl step completes.
+crawl step completes. Creation can optionally schedule runs (minimum 60 minutes),
+which requires Celery Beat and workflow workers to be running.
 
 ```sh
 cd sdks

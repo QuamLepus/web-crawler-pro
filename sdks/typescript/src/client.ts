@@ -149,11 +149,16 @@ export class WebIntelligenceClient {
     return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes`);
   }
 
-  createWorkflow(name: string, steps: WorkflowCrawlStep[]): Promise<JsonObject> {
-    return this.request("POST", "workflows", { name, steps: steps.map((step) => ({
-      url: step.url, max_pages: step.maxPages ?? 3,
-      obey_robots: step.obeyRobots ?? true,
-    })) });
+  createWorkflow(name: string, steps: WorkflowCrawlStep[],
+                 scheduleIntervalMinutes?: number): Promise<JsonObject> {
+    return this.request("POST", "workflows", {
+      name, steps: steps.map((step) => ({
+        url: step.url, max_pages: step.maxPages ?? 3,
+        obey_robots: step.obeyRobots ?? true,
+      })),
+      ...(scheduleIntervalMinutes === undefined ? {} :
+        { schedule_interval_minutes: scheduleIntervalMinutes }),
+    });
   }
 
   runWorkflow(workflowId: string): Promise<JsonObject> {

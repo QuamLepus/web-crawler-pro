@@ -826,15 +826,28 @@ async def workflows_page(request: Request):
 @router.post("/app/workflows/create", response_class=HTMLResponse)
 async def workflow_create(request: Request, name: str = Form("", max_length=100),
                           urls: str = Form("", max_length=12000),
-                          max_pages: int = Form(3, ge=1, le=25)):
+                          max_pages: int = Form(3, ge=1, le=25),
+                          schedule_interval_minutes: int | None = Form(None, ge=60, le=10080)):
     api, _me, redirect = await _guard(request)
     if redirect:
         return redirect
     steps = [{"url": line.strip(), "max_pages": max_pages, "obey_robots": True}
              for line in urls.splitlines() if line.strip()]
-    result = await api.workflow_create(name=name.strip(), steps=steps)
+    result = await api.workflow_create(name=name.strip(), steps=steps,
+                                       schedule_interval_minutes=schedule_interval_minutes)
     return _redirect("/app/workflows", "Workflow created" if result.ok else result.error,
                      "ok" if result.ok else "danger")
+
+
+@router.post("/app/workflows/{workflow_id}/schedule", response_class=HTMLResponse)
+async def workflow_schedule(request: Request, workflow_id: str,
+                            interval_minutes: int | None = Form(None, ge=60, le=10080)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.workflow_schedule(workflow_id, interval_minutes)
+    message = "Schedule updated" if result.ok else result.error
+    return _redirect("/app/workflows", message, "ok" if result.ok else "danger")
 
 
 @router.post("/app/workflows/runs/{run_id}/cancel", response_class=HTMLResponse)

@@ -67,10 +67,11 @@ export function buildServer(client: WebIntelligenceClient) {
   server.tool("wio_workflow_create", "Create a sequential robots-aware crawl workflow (up to 10 steps; not a general DAG).", {
     name: z.string().min(1).max(100),
     steps: z.array(z.object({ url: z.string().url(), max_pages: z.number().int().min(1).max(25).optional() })).min(1).max(10),
-  }, async ({ name, steps }) => {
+    schedule_interval_minutes: z.number().int().min(60).max(10080).optional(),
+  }, async ({ name, steps, schedule_interval_minutes }) => {
     try { return result(await client.createWorkflow(name, steps.map((step) => ({
       url: step.url, maxPages: step.max_pages, obeyRobots: true,
-    })))); }
+    })), schedule_interval_minutes)); }
     catch (error) { return failure(error); }
   });
 

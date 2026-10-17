@@ -23,6 +23,7 @@ WORKFLOW_KEY = "wcp:v1:workflow:{workflow_id}"
 RUN_KEY = "wcp:v1:workflow_run:{run_id}"
 TENANT_WORKFLOWS = "wcp:v1:workflows:{tenant}"
 TENANT_RUNS = "wcp:v1:workflow_runs:{tenant}"
+SCHEDULED_WORKFLOWS = "wcp:v1:workflow_schedules"
 TTL = 30 * 24 * 60 * 60
 
 
@@ -44,6 +45,7 @@ class CrawlStep(BaseModel):
 class WorkflowCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     steps: list[CrawlStep] = Field(min_length=1, max_length=10)
+    schedule_interval_minutes: int | None = Field(default=None, ge=60, le=10080)
 
     @field_validator("name")
     @classmethod
@@ -53,6 +55,11 @@ class WorkflowCreate(BaseModel):
     @property
     def max_pages(self) -> int:
         return sum(step.max_pages for step in self.steps)
+
+
+class WorkflowScheduleUpdate(BaseModel):
+    interval_minutes: int | None = Field(default=None, ge=60, le=10080,
+                                         description="null disables the schedule")
 
 
 def _decode(raw) -> dict:
@@ -76,13 +83,21 @@ async def create_workflow(body: WorkflowCreate, request: Request, ctx: CtxDep) -
     tenant = str(ctx["tenant"])
     workflow_id = "workflow_" + uuid.uuid4().hex[:20]
     now = datetime.now(timezone.utc).isoformat()
+    next_run = (time.time() + body.schedule_interval_minutes * 60
+                if body.schedule_interval_minutes else None)
     record = {"workflow_id": workflow_id, "tenant": tenant, "name": body.name,
               "steps": [step.model_dump() for step in body.steps],
-              "max_pages": body.max_pages, "created_at": now}
+              "max_pages": body.max_pages,
+              "schedule_interval_minutes": body.schedule_interval_minutes,
+              "next_run_at": (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+                              if next_run else None),
+              "created_at": now}
     redis = request.app.state.services.redis
     pipe = redis.pipeline()
     pipe.set(WORKFLOW_KEY.format(workflow_id=workflow_id), json.dumps(record), ex=TTL)
     pipe.zadd(TENANT_WORKFLOWS.format(tenant=tenant), {workflow_id: time.time()})
+    if next_run:
+        pipe.zadd(SCHEDULED_WORKFLOWS, {workflow_id: next_run})
     pipe.execute()
     return record
 
@@ -127,6 +142,27 @@ async def list_workflow_runs(request: Request, ctx: CtxDep,
 @router.get("/{workflow_id}", summary="Get a workflow definition")
 async def get_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dict:
     return _workflow(request, workflow_id, str(ctx["tenant"]))
+
+
+@router.patch("/{workflow_id}/schedule", summary="Set or disable a recurring workflow schedule")
+async def update_workflow_schedule(workflow_id: str, body: WorkflowScheduleUpdate,
+                                   request: Request, ctx: CtxDep) -> dict:
+    tenant = str(ctx["tenant"])
+    record = _workflow(request, workflow_id, tenant)
+    redis = request.app.state.services.redis
+    interval = body.interval_minutes
+    next_run = time.time() + interval * 60 if interval else None
+    record["schedule_interval_minutes"] = interval
+    record["next_run_at"] = (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+                             if next_run else None)
+    redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),
+              json.dumps(record, separators=(",", ":")), ex=TTL)
+    schedule_index = SCHEDULED_WORKFLOWS
+    if next_run is None:
+        redis.zrem(schedule_index, workflow_id)
+    else:
+        redis.zadd(schedule_index, {workflow_id: next_run})
+    return record
 
 
 @router.post("/{workflow_id}/runs", status_code=202, summary="Run a workflow")
