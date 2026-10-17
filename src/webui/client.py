@@ -162,6 +162,9 @@ class Api:
     def workflow_runs(self) -> Any:
         return self.get("/api/v1/workflows/runs")
 
+    def workflow_cancel(self, run_id: str) -> Any:
+        return self.post(f"/api/v1/workflows/runs/{run_id}/cancel")
+
     # -- knowledge graph ---------------------------------------------------- #
     def graph(self, limit: int = 200) -> Any:
         return self.get("/api/v1/graph", {"limit": limit})
@@ -259,6 +262,18 @@ class Api:
 
     def studio_delete_query(self, saved_id: str) -> Any:
         return self.delete(f"/api/v1/studio/saved-queries/{saved_id}")
+
+    def studio_snapshots(self) -> Any:
+        return self.get("/api/v1/studio/snapshots")
+
+    def studio_create_snapshot(self, **body) -> Any:
+        return self.post("/api/v1/studio/snapshots", body)
+
+    def studio_snapshot(self, snapshot_id: str) -> Any:
+        return self.get(f"/api/v1/studio/snapshots/{snapshot_id}")
+
+    def studio_delete_snapshot(self, snapshot_id: str) -> Any:
+        return self.delete(f"/api/v1/studio/snapshots/{snapshot_id}")
 
     def index_spell(self, q: str) -> Any:
         return self.get("/api/v1/search-index/spell", {"q": q})

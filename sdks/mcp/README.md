@@ -5,7 +5,11 @@ clients. Requires Node.js 18+, a reachable Web Intelligence OS API, and an API
 key with appropriate permissions.
 
 Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
-`wio_crawl_create`, `wio_watch_create`, and `wio_watch_changes`.
+`wio_crawl_create`, `wio_watch_create`, `wio_watch_changes`,
+`wio_workflow_create`, `wio_workflow_run`, `wio_workflow_status`,
+`wio_workflow_cancel`, and `wio_studio_snapshot_get`. Workflow tools operate on
+bounded sequential crawl recipes; cancellation takes effect after the active
+crawl step completes.
 
 ```sh
 cd sdks

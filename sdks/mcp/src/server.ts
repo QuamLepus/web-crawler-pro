@@ -64,6 +64,44 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_workflow_create", "Create a sequential robots-aware crawl workflow (up to 10 steps; not a general DAG).", {
+    name: z.string().min(1).max(100),
+    steps: z.array(z.object({ url: z.string().url(), max_pages: z.number().int().min(1).max(25).optional() })).min(1).max(10),
+  }, async ({ name, steps }) => {
+    try { return result(await client.createWorkflow(name, steps.map((step) => ({
+      url: step.url, maxPages: step.max_pages, obeyRobots: true,
+    })))); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_run", "Queue a saved sequential crawl workflow.", {
+    workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
+  }, async ({ workflow_id }) => {
+    try { return result(await client.runWorkflow(workflow_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_status", "Read status and per-step progress for a workflow run.", {
+    run_id: z.string().regex(/^wfrun_[a-f0-9]{20}$/),
+  }, async ({ run_id }) => {
+    try { return result(await client.getWorkflowRun(run_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_cancel", "Cancel a queued workflow or request cancellation after its active crawl step.", {
+    run_id: z.string().regex(/^wfrun_[a-f0-9]{20}$/),
+  }, async ({ run_id }) => {
+    try { return result(await client.cancelWorkflowRun(run_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_studio_snapshot_get", "Retrieve an immutable bounded Data Studio result snapshot.", {
+    snapshot_id: z.string().regex(/^snapshot_[a-f0-9]{20}$/),
+  }, async ({ snapshot_id }) => {
+    try { return result(await client.getStudioSnapshot(snapshot_id)); }
+    catch (error) { return failure(error); }
+  });
+
   return server;
 }
 

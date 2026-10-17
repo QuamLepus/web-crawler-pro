@@ -162,6 +162,38 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
             "status_url": f"/api/v1/workflows/runs/{run_id}"}
 
 
+@router.post("/runs/{run_id}/cancel", summary="Cancel a queued or running workflow")
+async def cancel_workflow_run(run_id: str, request: Request, ctx: CtxDep) -> dict:
+    if not re.fullmatch(r"wfrun_[a-f0-9]{20}", run_id):
+        raise HTTPException(404, "workflow run not found")
+    tenant = str(ctx["tenant"])
+    redis = request.app.state.services.redis
+    key = RUN_KEY.format(run_id=run_id)
+    raw = redis.get(key)
+    if not raw:
+        raise HTTPException(404, "workflow run not found")
+    record = _decode(raw)
+    if record.get("tenant") != tenant:
+        raise HTTPException(404, "workflow run not found")
+    if record.get("status") not in {"queued", "running"}:
+        raise HTTPException(409, f"workflow run is already {record.get('status')}")
+    now = datetime.now(timezone.utc).isoformat()
+    if record["status"] == "queued":
+        record.update(status="cancelled", cancelled_at=now,
+                      cancel_requested=False)
+        request.app.state.services.scheduler.mark(run_id, "cancelled",
+                                                  cancelled_by=tenant)
+        message = "queued workflow cancelled"
+    else:
+        record.update(cancel_requested=True, cancel_requested_at=now)
+        message = "cancellation requested; the active crawl step will finish first"
+    record["updated_at"] = now
+    redis.set(key, json.dumps(record, separators=(",", ":")), ex=TTL)
+    return {"run_id": run_id, "status": record["status"],
+            "cancel_requested": record.get("cancel_requested", False),
+            "message": message}
+
+
 @router.get("/runs/{run_id}", summary="Get workflow run status")
 async def get_workflow_run(run_id: str, request: Request, ctx: CtxDep) -> dict:
     if not re.fullmatch(r"wfrun_[a-f0-9]{20}", run_id):

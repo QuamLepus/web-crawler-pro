@@ -18,9 +18,11 @@ console.log(job.research_id, answer.citations);
 ```
 
 Available methods cover indexed `ask`, crawl create/status, research create/status,
-and watch create/run/change retrieval. `ask` searches the existing index and
-does not start a crawl. The SDK does not retry automatically, so callers can
-choose retry behavior appropriate to their environment.
+watch create/run/change retrieval, sequential workflow create/run/status/cancel,
+and bounded Data Studio snapshot create/list/get/delete. `ask` searches the existing
+index and does not start a crawl. Workflow cancellation is cooperative between
+crawl steps; snapshots hold at most 100 result rows. The SDK does not retry
+automatically, so callers can choose retry behavior appropriate to their environment.
 
 For local development from the repository root:
 
