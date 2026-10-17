@@ -1009,6 +1009,16 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
                 {"step_id": "research", "status": "failed"},
                 {"step_id": "summary", "status": "queued"},
             ],
+        }, {
+            "run_id": "wfrun_bbbbbbbbbbbbbbbbbbbb",
+            "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa", "name": "Branching",
+            "status": "completed", "execution_mode": "dag", "created_at": "yesterday",
+            "steps": [
+                {"step_id": "seed", "status": "completed"},
+                {"step_id": "news", "status": "completed"},
+                {"step_id": "research", "status": "completed"},
+                {"step_id": "summary", "status": "completed"},
+            ],
         }]})
 
     monkeypatch.setattr(Api, "workflows", workflows)
@@ -1022,12 +1032,23 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
     assert "Visual dependency graph (read-only)" in page.text
-    assert "Latest run: <strong>running</strong>" in page.text
+    assert "Selected run: <strong>running</strong>" in page.text
+    assert "Choose run status for Branching" in page.text
+    assert 'value="wfrun_aaaaaaaaaaaaaaaaaaaa" selected' in page.text
     assert 'data-status="completed"' in page.text
     assert 'data-status="running"' in page.text
     assert 'data-status="failed"' in page.text
     assert "queued</text>" in page.text
     assert '"seed"' in page.text
+
+    historical = signed_in.get("/app/workflows", params={
+        "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa",
+        "run_id": "wfrun_bbbbbbbbbbbbbbbbbbbb",
+    })
+    assert historical.status_code == 200
+    assert "Selected run: <strong>completed</strong>" in historical.text
+    assert 'value="wfrun_bbbbbbbbbbbbbbbbbbbb" selected' in historical.text
+    assert "not in selected run" not in historical.text
 
 
 def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):
