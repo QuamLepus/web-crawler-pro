@@ -59,6 +59,7 @@ NAV: list[dict] = [
     {"group": "Data Engine", "pages": [
         {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
         {"href": "/app/search", "icon": "🔍", "label": "Query the index", "key": "search"},
+        {"href": "/app/studio", "icon": "▤", "label": "Data Studio", "key": "studio"},
         {"href": "/app/index", "icon": "🗂", "label": "Own search index", "key": "index"},
         {"href": "/app/marketplace", "icon": "🛒", "label": "Data exchange", "key": "marketplace"},
     ]},
@@ -597,6 +598,58 @@ async def research_page(request: Request, question: str = Query("", max_length=4
     return render(request, "research.html", page="research", me=me,
                    question=question, result=result,
                    title="AI Research — Web Intelligence OS")
+
+
+@router.get("/app/studio", response_class=HTMLResponse, name="studio")
+async def data_studio(request: Request, q: str = Query("", max_length=2048),
+                      limit: int = Query(25, ge=1, le=100),
+                      source: str = Query("", max_length=80)):
+    """Explore and export a bounded result set from the tenant's own index."""
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    results = {}
+    if q.strip():
+        response = await api.index_query(q.strip(), limit=limit, sources=source)
+        results = response.data if response.ok and isinstance(response.data, dict) else {"_error": response.error}
+    stats = await api.index_stats()
+    return render(request, "studio.html", page="studio", me=me, q=q,
+                  limit=limit, source=source, results=results,
+                  stats=stats.data if stats.ok and isinstance(stats.data, dict) else {},
+                  title="Data Studio — Web Intelligence OS")
+
+
+@router.get("/app/studio/export")
+async def data_studio_export(request: Request, q: str = Query(..., min_length=1, max_length=2048),
+                             limit: int = Query(100, ge=1, le=100),
+                             source: str = Query("", max_length=80)):
+    """Download the same bounded own-index result set as a CSV file."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    response = await api.index_query(q.strip(), limit=limit, sources=source)
+    if not response.ok:
+        return HTMLResponse(response.error, status_code=response.status if response.status >= 400 else 502)
+    hits = response.get("results", [])
+    output = io.StringIO(newline="")
+    columns = ("rank", "title", "url", "host", "snippet", "score", "bm25", "semantic", "authority", "source")
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for hit in hits:
+        row = {key: hit.get(key, "") for key in columns}
+        # Prevent spreadsheet formula execution when exported text is opened.
+        for key, value in row.items():
+            if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                row[key] = "'" + value
+        writer.writerow(row)
+    content = output.getvalue().encode("utf-8-sig")
+    return StreamingResponse(iter([content]), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="search-results.csv"',
+                                      "Cache-Control": "private, no-store"})
 
 
 @router.get("/app/graph", response_class=HTMLResponse, name="graph")

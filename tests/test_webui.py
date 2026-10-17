@@ -662,3 +662,36 @@ def test_speed_failure_never_breaks_a_page(client, monkeypatch):
     res = TestClient(bare).get("/")
     assert res.status_code == 200
     assert "<html" in res.text.lower()
+
+
+def test_data_studio_renders_local_index_empty_state_and_navigation(signed_in):
+    response = signed_in.get("/app/studio")
+    assert response.status_code == 200
+    assert "Data Studio" in response.text
+    assert "indexed documents" in response.text.lower()
+    assert "/app/studio" in signed_in.get("/app").text
+
+
+def test_data_studio_export_requires_session(client):
+    response = client.get("/app/studio/export", params={"q": "solar"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_data_studio_csv_export_is_authenticated_and_spreadsheet_safe(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def fake_index_query(self, q, limit=10, **kwargs):
+        return Result(True, data={"results": [{
+            "rank": 1, "title": "=HYPERLINK(\"https://bad.invalid\")",
+            "url": "https://example.test/a", "host": "example.test",
+            "snippet": "safe excerpt", "score": 0.5, "source": "unit-test",
+        }]})
+
+    monkeypatch.setattr(Api, "index_query", fake_index_query)
+    response = signed_in.get("/app/studio/export", params={"q": "demo"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment; filename=\"search-results.csv\"" in response.headers["content-disposition"]
+    assert "'=HYPERLINK" in response.text
+    assert "safe excerpt" in response.text

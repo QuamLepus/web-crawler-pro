@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Data engine</div><h1>Data Studio</h1><p class="muted">Explore the corpus indexed by this deployment and export a bounded result set.</p></div></div>
+<div class="grid cols-3 mb-3">
+  <div class="card"><div class="muted">Indexed documents</div><strong class="stat">{{ stats.docs|default(0) }}</strong></div>
+  <div class="card"><div class="muted">Index shards</div><strong class="stat">{{ stats.shards|default(0) }}</strong></div>
+  <div class="card"><div class="muted">Index status</div><strong>{{ 'Ready' if stats.available else 'Not built' }}</strong></div>
+</div>
+<section class="card mb-3"><h2>Query and inspect</h2>
+  <form method="get" action="/app/studio" class="row wrap" style="align-items:end">
+    <label class="grow">Query <input name="q" value="{{ q }}" maxlength="2048" required placeholder='"solar panel" site:.edu -blog'></label>
+    <label>Source <input name="source" value="{{ source }}" maxlength="80" placeholder="wikipedia"></label>
+    <label>Rows <select name="limit">{% for n in [10,25,50,100] %}<option value="{{ n }}" {{ 'selected' if n == limit else '' }}>{{ n }}</option>{% endfor %}</select></label>
+    <button class="btn primary" type="submit">Run query</button>
+  </form>
+  <p class="muted mt-2">Uses the local own-index query syntax; this does not crawl the live web. Export is capped at 100 results per request.</p>
+</section>
+{% if results._error %}<div class="alert warn" role="status">{{ results._error }}</div>{% endif %}
+{% if q and results.results is defined %}
+<section class="card"><div class="row wrap" style="justify-content:space-between"><div><h2>Results</h2><p class="muted">{{ results.count }} returned · {{ results.took_ms }} ms · query: <code>{{ results.query }}</code></p></div>
+<a class="btn" href="/app/studio/export?q={{ q|urlencode }}&amp;limit={{ limit }}&amp;source={{ source|urlencode }}">Download CSV</a></div>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>Result</th><th>Score</th><th>Source</th></tr></thead><tbody>
+{% for hit in results.results %}<tr><td>{{ hit.rank }}</td><td><a href="{{ hit.url }}" rel="noopener noreferrer" target="_blank">{{ hit.title or hit.url }}</a><div class="muted small">{{ hit.url }}</div><div>{{ hit.snippet }}</div></td><td>{{ hit.score }}</td><td>{{ hit.source }}</td></tr>{% else %}<tr><td colspan="4" class="muted">No matching results.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% elif not q %}<div class="empty"><div class="empty-icon">▤</div><h2>Build a focused result set</h2><p>Enter a query to preview matching indexed documents, then export the results as CSV.</p></div>{% endif %}
+{% endblock %}
