@@ -1,0 +1,5 @@
+{
+  "name": "@webintelligence/sdks-workspace",
+  "private": true,
+  "workspaces": ["typescript", "mcp"]
+}

@@ -13,6 +13,28 @@ class WebIntelligenceError(RuntimeError):
         self.response = response
 
 
+class ResearchResource:
+    """Research job methods exposed at ``client.research``."""
+    def __init__(self, client: "Client") -> None:
+        self._client = client
+
+    def create(self, topic: str, *, sources: int = 5,
+               max_pages_per_source: int = 3,
+               seeds: list[str] | None = None) -> dict[str, Any]:
+        return self._client._request("POST", "research", json={
+            "topic": topic, "sources": sources,
+            "max_pages_per_source": max_pages_per_source,
+            "seeds": seeds or [],
+        })
+
+    def get(self, research_id: str) -> dict[str, Any]:
+        return self._client._request("GET", f"research/{research_id}")
+
+    def list(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+        return self._client._request("GET", "research", params={
+            "page": page, "page_size": page_size})
+
+
 class Client:
     def __init__(self, api_key: str, *, base_url: str = "http://localhost:8000",
                  timeout: float = 30.0, transport: httpx.BaseTransport | None = None) -> None:
@@ -22,6 +44,7 @@ class Client:
                                   headers={"X-API-Key": api_key,
                                            "Accept": "application/json"},
                                   timeout=timeout, transport=transport)
+        self.research = ResearchResource(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         try:

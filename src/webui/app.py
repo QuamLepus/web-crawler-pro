@@ -50,7 +50,8 @@ NAV: list[dict] = [
         {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
     ]},
     {"group": "Intelligence", "pages": [
-        {"href": "/app/research", "icon": "✧", "label": "AI Research", "key": "research"},
+        {"href": "/app/research", "icon": "✧", "label": "Ask indexed sources", "key": "research"},
+        {"href": "/app/research/agent", "icon": "◎", "label": "Research reports", "key": "research_agent"},
         {"href": "/app/discovery", "icon": "✦", "label": "Topic discovery", "key": "discovery"},
         {"href": "/app/watch", "icon": "◉", "label": "Web monitoring", "key": "watch"},
     ]},
@@ -595,6 +596,47 @@ async def research_page(request: Request, question: str = Query("", max_length=4
     return render(request, "research.html", page="research", me=me,
                    question=question, result=result,
                    title="AI Research — Web Intelligence OS")
+
+
+@router.get("/app/research/agent", response_class=HTMLResponse, name="research_agent")
+async def research_agent_page(request: Request, research_id: str = Query("", max_length=64)):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    jobs = await api.research_list()
+    selected = None
+    if research_id:
+        fetched = await api.research(research_id)
+        selected = fetched.data if fetched.ok else {"error": fetched.error}
+    return render(request, "research_agent.html", page="research_agent", me=me,
+                  jobs=jobs.get("items", []) if jobs.ok else [],
+                  selected=selected, research_id=research_id,
+                  title="Research reports — Web Intelligence OS")
+
+
+@router.post("/app/research/agent", response_class=HTMLResponse, name="research_agent_create")
+async def research_agent_create(request: Request, topic: str = Form("", max_length=512),
+                                sources: int = Form(5, ge=1, le=20),
+                                max_pages_per_source: int = Form(3, ge=1, le=10)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.research_create(topic=topic.strip(), sources=sources,
+                                       max_pages_per_source=max_pages_per_source)
+    if not result.ok:
+        return _redirect("/app/research/agent", result.error, "danger")
+    return _redirect("/app/research/agent?research_id=" + result.get("research_id", ""),
+                      "Research job queued", "ok")
+
+
+@router.get("/app/poll/research/{research_id}", name="poll_research")
+async def poll_research(request: Request, research_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return JSONResponse({"error": "authentication required"}, status_code=401)
+    result = await api.research(research_id)
+    return JSONResponse(result.data if result.ok else {"error": result.error},
+                        status_code=result.status if not result.ok else 200)
 
 
 @router.post("/app/research", response_class=HTMLResponse, name="research_submit")

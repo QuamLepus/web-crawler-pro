@@ -317,6 +317,8 @@ class WebhookEvent(str, Enum):
     discovery_completed = "discovery.completed"
     discovery_approved = "discovery.approved"
     web_changed = "web.changed"
+    research_completed = "research.completed"
+    research_failed = "research.failed"
 
 
 class WebhookCreate(BaseModel):

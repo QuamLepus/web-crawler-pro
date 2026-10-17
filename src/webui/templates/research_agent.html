@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Overview</a><span>/</span><span>Research reports</span></div>
+  <h1>Topic → cited report</h1>
+  <p class="dim">Discover candidate sources, crawl with robots.txt enforcement, and assemble source-linked excerpts. This early version does not independently fact-check claims or use an LLM.</p>
+</div>
+<div class="card card-pad mb-3">
+  <form method="post" action="/app/research/agent" class="stack-sm">
+    <label for="topic"><b>Research topic</b></label>
+    <textarea class="input" id="topic" name="topic" rows="2" required maxlength="512" placeholder="AI chip market 2026"></textarea>
+    <div class="row-wrap">
+      <label class="small">Sources <input class="input" type="number" name="sources" value="5" min="1" max="20" style="width:90px"></label>
+      <label class="small">Max pages per source <input class="input" type="number" name="max_pages_per_source" value="3" min="1" max="10" style="width:100px"></label>
+      <button class="btn btn-primary" data-busy="Planning research…">Start research</button>
+    </div>
+    <p class="tiny muted">Crawl budget is limited to sources × pages per source; access policies are respected. Jobs may take time to complete.</p>
+  </form>
+</div>
+<div class="grid g-main">
+  <section class="card">
+    <div class="card-head"><h2>Recent research jobs</h2></div>
+    {% if jobs %}<div class="table-wrap"><table class="data"><thead><tr><th>Topic</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead><tbody>
+      {% for job in jobs %}<tr><td><a href="/app/research/agent?research_id={{ job.research_id }}">{{ job.topic }}</a></td><td>{{ job.stage }}</td><td><span class="badge">{{ job.status }}</span></td><td>{{ job.created_at }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty"><h3>No research jobs yet</h3><p>Submit a topic to start.</p></div>{% endif %}
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Report</h2></div>
+    {% if selected and selected.get('report') %}
+      {% set report = selected.get('report') %}
+      <div class="card-pad stack-sm">
+        <div class="between"><b>{{ report.topic }}</b><span class="badge ok">{{ selected.status }}</span></div>
+        <p>{{ report.summary }}</p>
+        {% if report.plan %}<div class="small"><b>Research plan:</b> {{ report.plan.stages|join(' → ') }}<br><span class="muted">Discovery queries: {{ report.plan.discovery_queries|join(' · ') }}</span></div>{% endif %}
+        <p class="tiny muted">Verification: exact excerpt presence only · Independent fact-check: no · Calibrated confidence: no</p>
+        {% for claim in report.claims %}<article class="card card-pad">
+          <p>{{ claim.claim }}</p><span class="badge">Heuristic {{ claim.confidence }}</span>
+          {% for citation in claim.citations %}<p class="tiny mt-1"><a href="{{ citation.url }}" rel="noopener noreferrer">{{ citation.url }}</a>{% if citation.collected_at %}<span class="muted"> · {{ citation.collected_at }}</span>{% endif %}<br><code>{{ citation.content_sha256 }}</code><br><span class="dim">“{{ citation.excerpt }}”</span></p>{% endfor %}
+        </article>{% else %}<div class="empty"><p>No source-supported excerpts were extracted.</p></div>{% endfor %}
+      </div>
+    {% elif selected and selected.get('error') %}<div class="alert danger m-2">{{ selected.error }}</div>
+    {% elif selected %}<div class="card-pad" data-research-poll="{{ selected.research_id }}"><div class="skeleton" style="height:14px;width:55%"></div><p class="mt-2">Stage: {{ selected.stage }} · {{ selected.progress }}%</p><progress class="mt-1" max="100" value="{{ selected.progress }}" aria-label="Research progress">{{ selected.progress }}%</progress><p class="tiny muted mt-2">Stages: {% for name, state in selected.stages.items() %}{{ name }} {{ state }}{% if not loop.last %} · {% endif %}{% endfor %}</p></div>
+    {% else %}<div class="empty"><h3>Choose a report</h3><p>Select a research job to inspect its status and citations.</p></div>{% endif %}
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+ const panel = document.querySelector('[data-research-poll]');
+ if (!panel) return;
+ const id = panel.dataset.researchPoll;
+ const refresh = async () => {
+   try {
+     const response = await fetch('/app/poll/research/' + encodeURIComponent(id), {headers: {'Accept':'application/json'}});
+     const job = await response.json();
+     if (job.status === 'completed' || job.status === 'failed') location.reload();
+     else setTimeout(refresh, 3000);
+   } catch (_) { setTimeout(refresh, 5000); }
+ };
+ setTimeout(refresh, 3000);
+})();
+</script>
+{% endblock %}

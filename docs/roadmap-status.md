@@ -6,7 +6,8 @@ full long-term product plan is already shipped.
 | Area | Current status | Important limitation |
 |---|---|---|
 | Topic discovery, crawling, search, APIs, web console | Existing foundation | Existing project behavior; not re-certified by the incremental tests in this change. |
-| Grounded `/ask` and citations | Implemented against existing tenant index | Extractive answer only; no autonomous discovery/crawl, LLM verification, or calibrated confidence. |
+| Grounded `/ask` and citations | Implemented against existing tenant index | Extractive answer only; not an autonomous crawl or independently verified answer. |
+| Topic-to-report research | Async discovery + crawl jobs produce verbatim, timestamped, hashed excerpts with per-claim citations | Not LLM synthesis, independent source verification, or calibrated confidence; needs Celery workers/Beat and discovery providers. |
 | Provenance ledger and manifest | Implemented with tenant-keyed Redis storage; optional HMAC export | Caller supplies provenance; older data is not backfilled; HMAC is not a public-key signature. |
 | Knowledge graph | Redis entity/relationship endpoints and exact Unicode/case-normalized aliases | Not fuzzy/AI entity resolution; no graph visualization or automated extraction. |
 | Python SDK | Early installable package for ask, crawl/status, and watch operations | No TypeScript SDK yet; limited endpoint coverage. |
@@ -15,7 +16,7 @@ full long-term product plan is already shipped.
 | Workflow builder, Data Studio, agent marketplace | Not implemented | Existing dataset marketplace is separate. |
 | Enterprise connectors, SSO, compliance | Not implemented as a complete offering | Do not claim SOC 2/ISO certification or enterprise-ready private integrations. |
 | Performance targets | Documented as targets | No new latency, LCP, CLS, throughput, or cost benchmarks were measured here. |
-| TypeScript SDK, MCP server | Not implemented | Requires separate packaging, protocol tests, and release work. |
+| TypeScript SDK + MCP server | Early packages expose ask, research, crawl and watch operations over fetch/stdio | MCP protocol integration tests and published package releases remain; TypeScript integration coverage is limited. |
 
 The implemented endpoints are tenant authenticated and tested with fakeredis.
 Production deployments must configure Redis and protect

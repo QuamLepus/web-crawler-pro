@@ -28,6 +28,23 @@ architecture:
   making unsupported assumptions. Callers must persist passports alongside
   their collected records; this change does not retroactively annotate data.
 
+## Asynchronous topic research
+
+`POST /api/v1/research` creates a queued tenant-scoped research job with a
+source/page budget. Workers run query planning and topic discovery, crawl the
+selected candidate pages using the existing `obey_robots` crawl path, and store
+an extractive report in Redis. Poll `GET /api/v1/research/{research_id}` or
+list jobs with `GET /api/v1/research`. The console offers this under
+**Intelligence → Research reports**. Celery workers and Redis must be running;
+source discovery needs one or more configured network providers.
+
+Every report claim is a verbatim sentence from a crawled text record, with its
+source URL, collection timestamp, and SHA-256 of the extracted text. Confidence
+is a term-overlap heuristic, not calibrated probability. The source check only
+verifies exact excerpt presence; it is not independent fact-checking, and this
+version does not synthesize an LLM narrative. Failed domains are retained as
+per-source crawl results while other sources can still contribute evidence.
+
 ## Persisted provenance ledger
 
 The authenticated `POST /api/v1/provenance/records` stores caller-provided
@@ -61,18 +78,22 @@ per tenant. Resolution only matches Unicode-normalized, case-folded exact names
 and aliases; ambiguous aliases produce a conflict instead of silently merging.
 This is a graph foundation, not an extraction pipeline or fuzzy resolver.
 
-The installable SDK under `sdks/python/` currently supports `ask`, crawl job
-creation/status, and basic watch creation/run/change retrieval:
+The Python SDK under `sdks/python/` currently supports `ask`, research jobs,
+crawl status, and basic watch operations. Early TypeScript SDK and MCP packages
+are under `sdks/typescript/` and `sdks/mcp/`.
 
 ```python
 from webintelligence import Client
 
 with Client(api_key="YOUR_API_KEY", base_url="https://your-host") as client:
+    job = client.research.create("AI chip market 2026", sources=5,
+                                 max_pages_per_source=3)
+    report_job = client.research.get(job["research_id"])
     answer = client.ask("What do indexed sources say about the topic?")
     print(answer["citations"])
 ```
 
-Install for local development with `pip install -e sdks/python`.
+Install for local Python development with `pip install -e sdks/python`. For TypeScript SDK and MCP builds, run `cd sdks && npm install`; use `npm run test --workspace @webintelligence/sdk` and `npm run build --workspace @webintelligence/mcp-server`. Setup instructions and environment requirements are in the SDK-specific README files.
 
 These APIs and helpers do not claim to deliver autonomous crawling, calibrated
 confidence, legal advice, signed public-key attestations, or enterprise
