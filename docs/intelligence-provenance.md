@@ -28,7 +28,38 @@ architecture:
   making unsupported assumptions. Callers must persist passports alongside
   their collected records; this change does not retroactively annotate data.
 
-These APIs and helpers do not claim to deliver external web crawling, calibrated
+## Persisted provenance ledger
+
+The authenticated `POST /api/v1/provenance/records` stores caller-provided
+passports in Redis under a tenant-specific key. `GET
+/api/v1/provenance/records/{record_id}` reads only that tenant's record, and
+`POST /api/v1/provenance/manifest` exports the tenant's stored records. Manifest
+signing is disabled unless `WCP_PROVENANCE_SIGNING_KEY` is configured; use a
+long random secret from a secret manager. Records are caller-supplied and this
+ledger does not prove that a crawl happened or independently verify a source.
+
+## Entity graph and Python SDK
+
+The authenticated `/api/v1/graph/entities`, `/api/v1/graph/relations`, and
+`/api/v1/graph/entities/{entity_id}` endpoints store a small Redis-backed graph
+per tenant. Resolution only matches Unicode-normalized, case-folded exact names
+and aliases; ambiguous aliases produce a conflict instead of silently merging.
+This is a graph foundation, not an extraction pipeline or fuzzy resolver.
+
+The installable SDK under `sdks/python/` currently supports `ask`, crawl job
+creation, and job retrieval:
+
+```python
+from webintelligence import Client
+
+with Client(api_key="YOUR_API_KEY", base_url="https://your-host") as client:
+    answer = client.ask("What do indexed sources say about the topic?")
+    print(answer["citations"])
+```
+
+Install for local development with `pip install -e sdks/python`.
+
+These APIs and helpers do not claim to deliver autonomous crawling, calibrated
 confidence, legal advice, signed public-key attestations, or enterprise
 certification. Keep source access policy and tenant isolation in the calling
-workflow. Run the focused suite with `python -m pytest tests/test_provenance.py`.
+workflow. Run the focused suite with `JWT_SECRET=test-only-secret-do-not-use-in-production .venv/bin/pytest tests/test_provenance.py tests/test_provenance_api.py tests/test_python_sdk.py tests/test_research_ui.py`.

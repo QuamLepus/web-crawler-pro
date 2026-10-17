@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,7 +12,7 @@
   /* Set the theme before first paint so the page never flashes the wrong one. */
   try {
     var t = localStorage.getItem('wcp.theme');
-    if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (!t) t = 'dark';
     document.documentElement.setAttribute('data-theme', t);
     if (localStorage.getItem('wcp.sidebar') === '1')
       document.documentElement.classList.add('pre-collapsed');

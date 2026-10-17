@@ -182,6 +182,11 @@ class Api:
     def discovery_cancel(self, job_id: str) -> Any:
         return self.post(f"/api/v1/discovery/{job_id}/cancel")
 
+    # -- grounded intelligence --------------------------------------------- #
+    def ask(self, question: str, max_pages: int = 50, max_seconds: int = 60) -> Any:
+        return self.post("/api/v1/ask", {"question": question,
+            "budget": {"max_pages": max_pages, "max_seconds": max_seconds}})
+
     # -- search ------------------------------------------------------------ #
     def vector_search(self, query: str, top_k: int = 10) -> Any:
         return self.post("/api/v1/search", {"query": query, "top_k": top_k})

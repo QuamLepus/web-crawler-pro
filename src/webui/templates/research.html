@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Overview</a><span>/</span><span>AI Research</span></div>
+  <h1>Ask your indexed sources</h1>
+  <p class="dim">Get an extractive answer grounded in your tenant's current search index, with source links. This does not start a new crawl or call an LLM.</p>
+</div>
+<div class="card card-pad mb-3">
+  <form method="post" action="/app/research" class="stack-sm">
+    <label for="research-question"><b>Research question</b></label>
+    <textarea class="input" id="research-question" name="question" rows="3" maxlength="4096" required placeholder="What do indexed sources say about…">{{ question }}</textarea>
+    <div class="between">
+      <span class="tiny muted">Answers may be incomplete; inspect citations and collection dates.</span>
+      <button class="btn btn-primary" data-busy="Searching sources…">Research index</button>
+    </div>
+  </form>
+</div>
+{% if result %}
+  {% if result.get('_error') %}
+    <div class="alert danger" role="alert">{{ result.get('_error') }}</div>
+  {% elif result.get('answer') %}
+    <section class="card card-pad stack-sm" aria-live="polite">
+      <div class="between"><h2>Answer</h2><span class="badge">{{ result.get('method', 'extractive') }}</span></div>
+      <p>{{ result.get('answer') }}</p>
+      <p class="tiny muted">Heuristic confidence: {{ result.get('confidence', 'n/a') }} · Not a calibrated probability.</p>
+      <h3>Sources</h3>
+      {% if result.get('citations') %}
+        <ol>{% for source in result.get('citations', []) %}
+          <li class="mb-1">{% if source.get('url') %}<a href="{{ source.get('url') }}" rel="noopener noreferrer">{{ source.get('url') }}</a>{% else %}{{ source.get('doc_id') }}{% endif %}
+            {% if source.get('collected_at') %}<span class="tiny muted"> · collected {{ source.get('collected_at') }}</span>{% endif %}
+          </li>
+        {% endfor %}</ol>
+      {% else %}<p class="muted">No source metadata was returned with these indexed results.</p>{% endif %}
+    </section>
+  {% else %}<div class="alert info">{{ result.get('note', 'No indexed context was found.') }}</div>{% endif %}
+{% endif %}
+{% endblock %}
