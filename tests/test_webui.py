@@ -888,6 +888,32 @@ def test_workflow_console_updates_schedule(signed_in, monkeypatch):
     assert calls == [("workflow_aaaaaaaaaaaaaaaaaaaa", 1440)]
 
 
+def test_workflow_console_rename_and_delete(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+
+    async def update(self, workflow_id, **body):
+        calls.append(("update", workflow_id, body))
+        return Result(True, data={"workflow_id": workflow_id})
+
+    async def delete(self, workflow_id):
+        calls.append(("delete", workflow_id))
+        return Result(True, data={"deleted": True})
+
+    monkeypatch.setattr(Api, "workflow_update", update)
+    monkeypatch.setattr(Api, "workflow_delete", delete)
+    updated = signed_in.post("/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/edit",
+                             data={"name": "Renamed"}, follow_redirects=False)
+    deleted = signed_in.post("/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/delete",
+                             follow_redirects=False)
+    assert updated.status_code == 303
+    assert deleted.status_code == 303
+    assert calls == [
+        ("update", "workflow_aaaaaaaaaaaaaaaaaaaa", {"name": "Renamed"}),
+        ("delete", "workflow_aaaaaaaaaaaaaaaaaaaa"),
+    ]
+
+
 def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):
     from src.webui.client import Api, Result
     calls = []

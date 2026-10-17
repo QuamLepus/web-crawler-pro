@@ -52,6 +52,44 @@ def test_workflow_create_list_run_and_tenant_isolation():
     assert client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one).status_code == 409
 
 
+def test_workflow_edit_delete_preserves_tenant_and_run_safety():
+    client = _client()
+    owner = _key(client, "workflow-edit-owner@example.test")
+    other = _key(client, "workflow-edit-other@example.test")
+    created = client.post("/api/v1/workflows", headers=owner, json={
+        "name": "Original", "steps": [{"url": "https://old.example", "max_pages": 2}],
+        "schedule_interval_minutes": 60,
+    })
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["workflow_id"]
+    redis = client.app.state.services.redis
+    assert client.put(f"/api/v1/workflows/{workflow_id}", headers=other,
+                      json={"name": "Stolen"}).status_code == 404
+    assert client.delete(f"/api/v1/workflows/{workflow_id}", headers=other).status_code == 404
+    changed = client.put(f"/api/v1/workflows/{workflow_id}", headers=owner, json={
+        "name": "  Revised  recipe ", "steps": [
+            {"url": "https://new.example", "max_pages": 4},
+            {"url": "https://next.example", "max_pages": 1}],
+    })
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["name"] == "Revised recipe"
+    assert changed.json()["max_pages"] == 5
+    assert changed.json()["schedule_interval_minutes"] == 60
+    assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) is not None
+    assert client.put(f"/api/v1/workflows/{workflow_id}", headers=owner,
+                      json={"steps": []}).status_code == 422
+    run = client.post(f"/api/v1/workflows/{workflow_id}/runs", headers=owner).json()
+    blocked = client.delete(f"/api/v1/workflows/{workflow_id}", headers=owner)
+    assert blocked.status_code == 409
+    client.post(f"/api/v1/workflows/runs/{run['run_id']}/cancel", headers=owner)
+    deleted = client.delete(f"/api/v1/workflows/{workflow_id}", headers=owner)
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["historical_runs_retained"] is True
+    assert client.get(f"/api/v1/workflows/{workflow_id}", headers=owner).status_code == 404
+    assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) is None
+    assert client.get(f"/api/v1/workflows/runs/{run['run_id']}", headers=owner).status_code == 200
+
+
 def test_workflow_validates_url_and_limits():
     client = _client()
     headers = _key(client, "workflow-validation@example.test")
@@ -65,8 +103,8 @@ def test_workflow_worker_runs_steps_sequentially_and_saves_progress(monkeypatch)
     redis = fakeredis.FakeStrictRedis(decode_responses=True)
     run_id = "wfrun_aaaaaaaaaaaaaaaaaaaa"
     key = f"wcp:v1:workflow_run:{run_id}"
-    record = {"run_id": run_id, "tenant": "tenant", "status": "queued",
-              "step_index": 0, "steps": [
+    record = {"run_id": run_id, "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa",
+              "tenant": "tenant", "status": "queued", "step_index": 0, "steps": [
                   {"url": "https://one.example", "status": "queued"},
                   {"url": "https://two.example", "status": "queued"}],
               "updated_at": "now"}
@@ -87,6 +125,7 @@ def test_workflow_worker_runs_steps_sequentially_and_saves_progress(monkeypatch)
     assert result["status"] == "completed"
     assert seen == ["https://one.example", "https://two.example"]
     assert [step["status"] for step in saved["steps"]] == ["completed", "completed"]
+    assert redis.zscore("wcp:v1:workflow_active_runs:workflow_aaaaaaaaaaaaaaaaaaaa", run_id) is None
 
 
 def test_running_workflow_cancel_is_tenant_scoped_and_requested():
@@ -202,5 +241,6 @@ def test_scheduler_tick_queues_due_workflow_once_and_advances_due_time(monkeypat
     run = json.loads(redis.get(f"wcp:v1:workflow_run:{run_id}"))
     assert run["scheduled"] is True and run["status"] == "queued"
     assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) > now
+    assert redis.zscore(f"wcp:v1:workflow_active_runs:{workflow_id}", run_id) is not None
     # The short lock prevents duplicate dispatch if two ticks overlap.
     assert workflow_tasks.schedule_tick.run() == {"queued": 0, "locked": True}

@@ -173,6 +173,24 @@ export class WebIntelligenceClient {
     });
   }
 
+  updateWorkflow(workflowId: string, options: {
+    name?: string; steps?: WorkflowCrawlStep[]; scheduleIntervalMinutes?: number | null;
+  }): Promise<JsonObject> {
+    return this.request("PUT", `workflows/${encodeURIComponent(workflowId)}`, {
+      ...(options.name === undefined ? {} : { name: options.name }),
+      ...(options.steps === undefined ? {} : { steps: options.steps.map((step) => ({
+        url: step.url, max_pages: step.maxPages ?? 3,
+        obey_robots: step.obeyRobots ?? true,
+      })) }),
+      ...(options.scheduleIntervalMinutes === undefined ? {} :
+        { schedule_interval_minutes: options.scheduleIntervalMinutes }),
+    });
+  }
+
+  deleteWorkflow(workflowId: string): Promise<JsonObject> {
+    return this.request("DELETE", `workflows/${encodeURIComponent(workflowId)}`);
+  }
+
   runWorkflow(workflowId: string): Promise<JsonObject> {
     return this.request("POST", `workflows/${encodeURIComponent(workflowId)}/runs`);
   }

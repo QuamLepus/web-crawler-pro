@@ -114,6 +114,9 @@ class Api:
     def patch(self, path: str, body: dict | None = None) -> Any:
         return self._call("PATCH", path, json=body or {})
 
+    def put(self, path: str, body: dict | None = None) -> Any:
+        return self._call("PUT", path, json=body or {})
+
     def delete(self, path: str) -> Any:
         return self._call("DELETE", path)
 
@@ -155,6 +158,12 @@ class Api:
 
     def workflow_create(self, **body) -> Any:
         return self.post("/api/v1/workflows", body)
+
+    def workflow_update(self, workflow_id: str, **body) -> Any:
+        return self.put(f"/api/v1/workflows/{workflow_id}", body)
+
+    def workflow_delete(self, workflow_id: str) -> Any:
+        return self.delete(f"/api/v1/workflows/{workflow_id}")
 
     def workflow_run(self, workflow_id: str) -> Any:
         return self.post(f"/api/v1/workflows/{workflow_id}/runs")
