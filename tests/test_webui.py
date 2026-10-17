@@ -1086,6 +1086,61 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
     assert "Historical batch 3" in beyond_history.text
 
 
+def test_workflow_overlay_persists_when_browsing_run_history(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    workflow_id = "workflow_aaaaaaaaaaaaaaaaaaaa"
+    selected_run_id = "wfrun_bbbbbbbbbbbbbbbbbbbb"
+    selected_calls = []
+
+    async def workflows(self):
+        return Result(True, data={"items": [{
+            "workflow_id": workflow_id, "name": "Status overlay",
+            "execution_mode": "dag", "max_pages": 1,
+            "schedule_interval_minutes": None, "created_at": "today",
+            "steps": [{"step_id": "seed", "depends_on": [],
+                       "url": "https://seed.example", "max_pages": 1,
+                       "obey_robots": True}],
+        }]})
+
+    async def runs(self, page=1, page_size=20):
+        return Result(True, data={"items": [{
+            "run_id": f"wfrun_{page:020d}", "workflow_id": workflow_id,
+            "name": f"Page run {page}", "status": "completed", "created_at": "today",
+            "execution_mode": "dag", "steps": [{"step_id": "seed", "status": "completed"}],
+        }], "total": 41, "page": page, "page_size": page_size})
+
+    async def run_status(self, run_id):
+        selected_calls.append(run_id)
+        return Result(True, data={"run_id": selected_run_id,
+            "workflow_id": workflow_id, "name": "Selected older run",
+            "status": "failed", "created_at": "yesterday", "execution_mode": "dag",
+            "steps": [{"step_id": "seed", "status": "failed"}]})
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+    monkeypatch.setattr(Api, "workflow_run_status", run_status)
+
+    selected_page = signed_in.get("/app/workflows", params={
+        "run_page": 2, "workflow_id": workflow_id, "run_id": selected_run_id,
+    })
+    assert selected_page.status_code == 200
+    assert "page 2 of 3" in selected_page.text
+    assert 'data-status="failed"' in selected_page.text
+    assert "selected from another page" in selected_page.text
+    assert "run_page=1&amp;workflow_id=workflow_aaaaaaaaaaaaaaaaaaaa&amp;run_id=" \
+        + selected_run_id in selected_page.text
+
+    previous_page = signed_in.get("/app/workflows", params={
+        "run_page": 1, "workflow_id": workflow_id, "run_id": selected_run_id,
+    })
+    assert previous_page.status_code == 200
+    assert "page 1 of 3" in previous_page.text
+    assert "Selected run: <strong>failed</strong>" in previous_page.text
+    assert 'data-status="failed"' in previous_page.text
+    assert selected_calls == [selected_run_id, selected_run_id]
+
+
 def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):
     from src.webui.client import Api, Result
     calls = []

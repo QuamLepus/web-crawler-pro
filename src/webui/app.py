@@ -26,7 +26,7 @@ import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -991,14 +991,31 @@ async def workflows_page(request: Request,
         workflow_id = run.get("workflow_id")
         if workflow_id:
             runs_by_workflow.setdefault(workflow_id, []).append(run)
+    selected_run_record = None
+    if selected_workflow_id and selected_run_id:
+        selected_run_record = next((run for run in run_items
+                                    if run.get("run_id") == selected_run_id
+                                    and run.get("workflow_id") == selected_workflow_id), None)
+        if selected_run_record is None:
+            selected_result = await api.workflow_run_status(selected_run_id)
+            candidate = selected_result.data if selected_result.ok else None
+            if (isinstance(candidate, dict)
+                    and candidate.get("workflow_id") == selected_workflow_id):
+                selected_run_record = candidate
     rendered_workflows = []
     for workflow in workflows:
         preview = _workflow_dag_preview(workflow)
-        workflow_runs = runs_by_workflow.get(workflow.get("workflow_id"), [])
+        workflow_id = workflow.get("workflow_id")
+        workflow_runs = runs_by_workflow.get(workflow_id, [])
         current_run = workflow_runs[0] if workflow_runs else None
-        if (workflow.get("workflow_id") == selected_workflow_id and selected_run_id):
-            current_run = next((run for run in workflow_runs
-                                if run.get("run_id") == selected_run_id), current_run)
+        if (selected_run_record is not None
+                and workflow_id == selected_workflow_id):
+            current_run = selected_run_record
+        run_options = list(workflow_runs)
+        if (preview is not None and current_run is selected_run_record
+                and current_run is not None
+                and all(run.get("run_id") != current_run.get("run_id") for run in run_options)):
+            run_options.append({**current_run, "outside_history_page": True})
         if preview is not None and current_run is not None:
             statuses = {step.get("step_id"): step.get("status", "queued")
                         for step in current_run.get("steps", [])}
@@ -1009,9 +1026,21 @@ async def workflows_page(request: Request,
         rendered_workflows.append({
             **workflow,
             "dag_preview": preview,
-            "dag_run_options": workflow_runs if preview is not None else [],
+            "dag_run_options": run_options if preview is not None else [],
             "selected_run_id": current_run.get("run_id") if current_run else "",
         })
+    selected_workflow_id = (selected_workflow_id if selected_run_record else None)
+    selected_run_id = selected_run_id if selected_run_record else None
+    previous_runs_url = "/app/workflows?" + urlencode({
+        "run_page": run_page - 1,
+        **({"workflow_id": selected_workflow_id, "run_id": selected_run_id}
+           if selected_run_record else {}),
+    }) if run_page > 1 else ""
+    next_runs_url = "/app/workflows?" + urlencode({
+        "run_page": run_page + 1,
+        **({"workflow_id": selected_workflow_id, "run_id": selected_run_id}
+           if selected_run_record else {}),
+    }) if run_page < run_page_count else ""
     return render(request, "workflows.html", page="workflows", me=me,
                   workflows=rendered_workflows,
                   runs=run_items,
@@ -1019,6 +1048,8 @@ async def workflows_page(request: Request,
                   run_page_count=run_page_count,
                   run_total=run_total,
                   run_page_size=run_page_size,
+                  previous_runs_url=previous_runs_url,
+                  next_runs_url=next_runs_url,
                   error=result.error if not result.ok else "",
                   title="Workflows — Web Intelligence OS")
 
