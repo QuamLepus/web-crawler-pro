@@ -9,9 +9,9 @@ full long-term product plan is already shipped.
 | Grounded `/ask` and citations | Implemented against existing tenant index | Extractive answer only; no autonomous discovery/crawl, LLM verification, or calibrated confidence. |
 | Provenance ledger and manifest | Implemented with tenant-keyed Redis storage; optional HMAC export | Caller supplies provenance; older data is not backfilled; HMAC is not a public-key signature. |
 | Knowledge graph | Redis entity/relationship endpoints and exact Unicode/case-normalized aliases | Not fuzzy/AI entity resolution; no graph visualization or automated extraction. |
-| Python SDK | Early installable package for ask/crawl/status | No TypeScript SDK yet; SDK covers only these endpoints. |
+| Python SDK | Early installable package for ask, crawl/status, and watch operations | No TypeScript SDK yet; limited endpoint coverage. |
 | Research console page | Implemented as a UI over `/ask` | It is not a multi-stage autonomous research agent. |
-| Web change monitoring | Not implemented end-to-end | No scheduled watch execution, crawler observation hook, change classifier, or alert lifecycle. |
+| Web change monitoring | Scheduled URL watches, one-page crawl snapshots, content hashes, change history, basic text-based price mentions, and `web.changed` webhook event | Not semantic change classification; no DNS-rebinding defense, structured product matching, version replay UI, or customer-specific schedules beyond the minimum interval. Celery Beat and workers must run. |
 | Workflow builder, Data Studio, agent marketplace | Not implemented | Existing dataset marketplace is separate. |
 | Enterprise connectors, SSO, compliance | Not implemented as a complete offering | Do not claim SOC 2/ISO certification or enterprise-ready private integrations. |
 | Performance targets | Documented as targets | No new latency, LCP, CLS, throughput, or cost benchmarks were measured here. |

@@ -46,67 +46,26 @@ router = APIRouter(include_in_schema=False)
 # navigation — one source of truth for the sidebar, the palette and the footer
 # --------------------------------------------------------------------------- #
 NAV: list[dict] = [
-    {
-        "group": "Overview",
-        "pages": [
-            {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
-            {
-                "href": "/app/search",
-                "icon": "🔍",
-                "label": "Query the index",
-                "key": "search",
-            },
-            {"href": "/app/research", "icon": "✧", "label": "AI Research", "key": "research"},
-            {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
-            {
-                "href": "/app/discovery",
-                "icon": "✦",
-                "label": "Topic discovery",
-                "key": "discovery",
-            },
-        ],
-    },
-    {
-        "group": "Data Engine",
-        "pages": [
-            {
-                "href": "/app/index",
-                "icon": "🗂",
-                "label": "Own search index",
-                "key": "index",
-            },
-            {
-                "href": "/app/marketplace",
-                "icon": "🛒",
-                "label": "Data exchange",
-                "key": "marketplace",
-            },
-        ],
-    },
-    {
-        "group": "Developers & settings",
-        "pages": [
-            {"href": "/app/keys", "icon": "🔑", "label": "API keys", "key": "keys"},
-            {
-                "href": "/app/billing",
-                "icon": "💳",
-                "label": "Billing & usage",
-                "key": "billing",
-            },
-            {
-                "href": "/app/settings",
-                "icon": "⚙",
-                "label": "Settings",
-                "key": "settings",
-            },
-            {
-                "href": "/app/docs",
-                "icon": "📘",
-                "label": "API reference",
-                "key": "docs",
-            },
-        ],
-    },
+    {"group": "Overview", "pages": [
+        {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
+    ]},
+    {"group": "Intelligence", "pages": [
+        {"href": "/app/research", "icon": "✧", "label": "AI Research", "key": "research"},
+        {"href": "/app/discovery", "icon": "✦", "label": "Topic discovery", "key": "discovery"},
+        {"href": "/app/watch", "icon": "◉", "label": "Web monitoring", "key": "watch"},
+    ]},
+    {"group": "Data Engine", "pages": [
+        {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
+        {"href": "/app/search", "icon": "🔍", "label": "Query the index", "key": "search"},
+        {"href": "/app/index", "icon": "🗂", "label": "Own search index", "key": "index"},
+        {"href": "/app/marketplace", "icon": "🛒", "label": "Data exchange", "key": "marketplace"},
+    ]},
+    {"group": "Developers & settings", "pages": [
+        {"href": "/app/keys", "icon": "🔑", "label": "API keys", "key": "keys"},
+        {"href": "/app/billing", "icon": "💳", "label": "Billing & usage", "key": "billing"},
+        {"href": "/app/settings", "icon": "⚙", "label": "Settings", "key": "settings"},
+        {"href": "/app/docs", "icon": "📘", "label": "API reference", "key": "docs"},
+    ]},
 ]
 
 PLANS = [
@@ -655,6 +614,57 @@ async def research_submit(request: Request, question: str = Form("", max_length=
                   title="AI Research — Web Intelligence OS")
 
 
+@router.get("/app/watch", response_class=HTMLResponse, name="watch")
+async def watch_page(request: Request, watch_id: str = Query("", max_length=64)):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    watches_result = await api.watches()
+    items = watches_result.get("items", []) if watches_result.ok else []
+    events = []
+    if watch_id:
+        event_result = await api.watch_changes(watch_id)
+        events = event_result.get("items", []) if event_result.ok else []
+    return render(request, "watch.html", page="watch", me=me, watches=items,
+                  selected_watch=watch_id, events=events,
+                  error=(watches_result.error if not watches_result.ok else ""),
+                  title="Web Monitoring — Web Intelligence OS")
+
+
+@router.post("/app/watch", response_class=HTMLResponse, name="watch_create")
+async def watch_create(request: Request, url: str = Form("", max_length=4096),
+                       interval_minutes: int = Form(60, ge=15, le=10080)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.watch_create(url.strip(), interval_minutes)
+    if not result.ok:
+        return _redirect("/app/watch", result.error, "danger")
+    return _redirect("/app/watch?watch_id=" + result.get("watch_id", ""),
+                      "Watch created. Use Run now for the first snapshot; later checks follow the interval.", "ok")
+
+
+@router.post("/app/watch/{watch_id}/run", response_class=HTMLResponse)
+async def watch_run(request: Request, watch_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.watch_run(watch_id)
+    return _redirect("/app/watch?watch_id=" + watch_id,
+                      "Watch crawl queued" if result.ok else result.error,
+                      "ok" if result.ok else "danger")
+
+
+@router.post("/app/watch/{watch_id}/delete", response_class=HTMLResponse)
+async def watch_delete(request: Request, watch_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.watch_delete(watch_id)
+    return _redirect("/app/watch", "Watch stopped" if result.ok else result.error,
+                      "ok" if result.ok else "danger")
+
+
 @router.get("/app/crawl", response_class=HTMLResponse, name="crawl")
 async def crawl_list(request: Request):
     api, me, redirect = await _guard(request)
@@ -1138,6 +1148,7 @@ def webhook_events() -> list[str]:
             "dataset.sold",
             "discovery.completed",
             "discovery.approved",
+            "web.changed",
         ]
 
 

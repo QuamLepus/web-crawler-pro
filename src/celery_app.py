@@ -39,6 +39,10 @@ app.conf.update(
     timezone="UTC",
     # Beat schedule example (enable with `celery -A src.celery_app beat`)
     beat_schedule={
+        "wcp-watch-poll": {
+            "task": "workers.crawl_tasks.watch_tick",
+            "schedule": 60.0,
+        },
         # "nightly-full-crawl": {
         #     "task": "workers.crawl_tasks.seed_frontier",
         #     "schedule": 86400.0,

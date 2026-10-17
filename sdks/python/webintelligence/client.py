@@ -59,6 +59,16 @@ class Client:
     def get_job(self, job_id: str) -> dict[str, Any]:
         return self._request("GET", f"jobs/{job_id}")
 
+    def create_watch(self, url: str, *, interval_minutes: int = 60) -> dict[str, Any]:
+        return self._request("POST", "watch", json={"url": url,
+                             "interval_minutes": interval_minutes})
+
+    def run_watch(self, watch_id: str) -> dict[str, Any]:
+        return self._request("POST", f"watch/{watch_id}/run")
+
+    def watch_changes(self, watch_id: str) -> dict[str, Any]:
+        return self._request("GET", f"watch/{watch_id}/changes")
+
     def close(self) -> None:
         self._http.close()
 

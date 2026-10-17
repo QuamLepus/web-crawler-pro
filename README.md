@@ -2,7 +2,7 @@
 
 **Discover. Extract. Understand. Automate.**
 
-Web Intelligence OS builds on the Web Crawler Pro foundation: a self-hostable platform for topic discovery, distributed crawling, data extraction, and search. Its goal is to help users move from a research question to traceable, useful web data—not just submit URLs. The current implementation includes the crawler, topic discovery, APIs, search, an extractive `/ask` endpoint with citations, a tenant-isolated provenance ledger, an early Redis-backed entity graph, and an early Python SDK. It is an evolving product; autonomous research, continuous monitoring, and workflow automation are not yet implemented as complete end-to-end features.
+Web Intelligence OS builds on the Web Crawler Pro foundation: a self-hostable platform for topic discovery, distributed crawling, data extraction, and search. Its goal is to help users move from a research question to traceable, useful web data—not just submit URLs. The current implementation includes the crawler, topic discovery, APIs, search, an extractive `/ask` endpoint with citations, a tenant-isolated provenance ledger, an early Redis-backed entity graph, and an early Python SDK. It is an evolving product; monitoring now supports scheduled one-page snapshots and basic diffs, while semantic monitoring, autonomous multi-stage research, and workflow automation remain incomplete.
 
 It ships in three usable layers, alongside topic discovery and indexed retrieval:
 
@@ -15,7 +15,8 @@ It ships in three usable layers, alongside topic discovery and indexed retrieval
 | **Grounded intelligence (early)** | Ask against indexed tenant data and receive extractive answers with source citations | `POST /api/v1/ask` |
 | **Provenance ledger** | Tenant-isolated Redis passports and optional HMAC-signed manifest export | `POST /api/v1/provenance/records` |
 | **Knowledge graph (early)** | Tenant-isolated entities, exact normalized alias resolution, and typed relationships | `POST /api/v1/graph/entities` |
-| **Python SDK (early)** | Typed HTTPX client for grounded ask and crawl job APIs | `sdks/python/` |
+| **Web monitoring (early)** | Scheduled, robots-aware one-page crawls; snapshot history, basic text diffs and `web.changed` webhooks | `POST /api/v1/watch` |
+| **Python SDK (early)** | Typed HTTPX client for ask, crawl jobs, and watch APIs | `sdks/python/` |
 
 ---
 
