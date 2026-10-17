@@ -1,8 +1,10 @@
-# 🕷️ Web Crawler Pro
+# 🕸️ Web Intelligence OS
 
-**Enterprise-grade, cloud-native, distributed web scraping & data-ingestion platform** — a self-hosted alternative to Scrapy Cloud / Zyte, with stealth fetching, quality engineering, and AI-powered extraction built in.
+**Discover. Extract. Understand. Automate.**
 
-It ships in three layers, usable independently:
+Web Intelligence OS builds on the Web Crawler Pro foundation: a self-hostable platform for topic discovery, distributed crawling, data extraction, and search. Its goal is to help users move from a research question to traceable, useful web data—not just submit URLs. The current implementation includes the crawler, topic discovery, APIs, search, and an early grounded `/ask` endpoint with citations and provenance-manifest utilities. It is an evolving product; autonomous research, continuous monitoring, and workflow automation are not yet implemented as complete end-to-end features.
+
+It ships in three usable layers, alongside topic discovery and indexed retrieval:
 
 | Layer | What you get | Entry point |
 |---|---|---|
@@ -10,6 +12,8 @@ It ships in three layers, usable independently:
 | **Distributed crawl platform** | Celery + Redis frontier, stealth/anti-bot, quality pipeline | `workers/crawl_tasks.py` |
 | **Hosted API (SaaS)** | Multi-tenant REST + GraphQL, API keys, quotas, billing, webhooks, marketplace | `src/api/main.py` |
 | **Topic discovery** | Give it a *topic* and a number instead of URLs — it finds the websites itself | `python -m src.cli discover` |
+| **Grounded intelligence (early)** | Ask against indexed tenant data and receive extractive answers with source citations | `POST /api/v1/ask` |
+| **Provenance utilities (early)** | Build per-record passports and HMAC-signed dataset manifests; callers integrate persistence | `src.api.provenance` |
 
 ---
 
