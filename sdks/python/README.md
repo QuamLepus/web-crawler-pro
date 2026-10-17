@@ -26,8 +26,11 @@ with Client(api_key="YOUR_API_KEY", base_url="https://your-host") as client:
 `client.workflows` supports `create`, `list`, `get`, `update`, `delete`,
 `set_schedule`, `run`, `list_runs`, `get_run`, and `cancel_run`. Methods use
 snake_case payload fields and escape IDs in URL paths. `WorkflowStep` provides
-the typed URL, page-limit, and robots-policy shape; dictionaries matching the
-REST API step schema are also accepted.
+the typed URL, page-limit, robots-policy, and optional `step_id`/`depends_on`
+shape; dictionaries matching the REST API step schema are also accepted. Omit
+dependencies for legacy sequential order; use `depends_on=[]` for a DAG root.
+DAG nodes are processed serially, and failure skips descendants while independent
+branches continue.
 
 For `update`, omitted parameters remain unchanged. In particular,
 `client.workflows.update(id, schedule_interval_minutes=None)` explicitly turns

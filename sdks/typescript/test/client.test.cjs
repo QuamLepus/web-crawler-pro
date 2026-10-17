@@ -81,6 +81,24 @@ test('workflow list and read methods forward pagination and encoded IDs', async 
   ]);
 });
 
+test('workflow client preserves explicit step IDs and DAG dependencies', async () => {
+  let parsed;
+  const client = new WebIntelligenceClient({ apiKey: 'workflow-dag-key', fetch: async (_url, init) => {
+    parsed = JSON.parse(init.body);
+    return new Response(JSON.stringify({ workflow_id: 'workflow_abcd' }), { status: 201 });
+  } });
+  await client.createWorkflow('Branched recipe', [
+    { url: 'https://root.example', stepId: 'root', dependsOn: [] },
+    { url: 'https://child.example', stepId: 'child', dependsOn: ['root'], maxPages: 2 },
+  ]);
+  assert.deepEqual(parsed.steps, [
+    { url: 'https://root.example', max_pages: 3, obey_robots: true,
+      step_id: 'root', depends_on: [] },
+    { url: 'https://child.example', max_pages: 2, obey_robots: true,
+      step_id: 'child', depends_on: ['root'] },
+  ]);
+});
+
 test('workflow update and deletion use encoded tenant endpoints and snake-case fields', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'workflow-key', fetch: async (url, init) => {

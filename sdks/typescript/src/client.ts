@@ -41,6 +41,8 @@ export interface WorkflowCrawlStep {
   url: string;
   maxPages?: number;
   obeyRobots?: boolean;
+  stepId?: string;
+  dependsOn?: string[];
 }
 
 export interface StudioAnalyticsOptions {
@@ -167,6 +169,8 @@ export class WebIntelligenceClient {
       name, steps: steps.map((step) => ({
         url: step.url, max_pages: step.maxPages ?? 3,
         obey_robots: step.obeyRobots ?? true,
+        ...(step.stepId === undefined ? {} : { step_id: step.stepId }),
+        ...(step.dependsOn === undefined ? {} : { depends_on: step.dependsOn }),
       })),
       ...(scheduleIntervalMinutes === undefined ? {} :
         { schedule_interval_minutes: scheduleIntervalMinutes }),
@@ -193,6 +197,8 @@ export class WebIntelligenceClient {
       ...(options.steps === undefined ? {} : { steps: options.steps.map((step) => ({
         url: step.url, max_pages: step.maxPages ?? 3,
         obey_robots: step.obeyRobots ?? true,
+        ...(step.stepId === undefined ? {} : { step_id: step.stepId }),
+        ...(step.dependsOn === undefined ? {} : { depends_on: step.dependsOn }),
       })) }),
       ...(options.scheduleIntervalMinutes === undefined ? {} :
         { schedule_interval_minutes: options.scheduleIntervalMinutes }),

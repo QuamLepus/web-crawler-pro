@@ -18,10 +18,12 @@ _UNSET = _UnsetType()
 
 @dataclass(frozen=True)
 class WorkflowStep:
-    """One HTTP(S) crawl step in an ordered workflow definition."""
+    """One HTTP(S) crawl step; explicit dependencies enable bounded DAG branching."""
     url: str
     max_pages: int = 3
     obey_robots: bool = True
+    step_id: str | None = None
+    depends_on: list[str] | None = None
 
 
 class WorkflowResource:
@@ -31,11 +33,19 @@ class WorkflowResource:
 
     @staticmethod
     def _steps_payload(steps: list[WorkflowStep | Mapping[str, Any]]) -> list[dict[str, Any]]:
-        return [
-            {"url": step.url, "max_pages": step.max_pages, "obey_robots": step.obey_robots}
-            if isinstance(step, WorkflowStep) else dict(step)
-            for step in steps
-        ]
+        payloads = []
+        for step in steps:
+            if not isinstance(step, WorkflowStep):
+                payloads.append(dict(step))
+                continue
+            item: dict[str, Any] = {"url": step.url, "max_pages": step.max_pages,
+                                    "obey_robots": step.obey_robots}
+            if step.step_id is not None:
+                item["step_id"] = step.step_id
+            if step.depends_on is not None:
+                item["depends_on"] = step.depends_on
+            payloads.append(item)
+        return payloads
 
     @staticmethod
     def _id(value: str) -> str:

@@ -18,12 +18,15 @@ console.log(job.research_id, answer.citations);
 ```
 
 Available methods cover indexed `ask`, crawl create/status, research create/status,
-watch create/run/change retrieval, sequential workflow create/run/status/cancel,
-and Data Studio full-corpus aggregate queries plus bounded snapshot create/list/get/delete. `ask` searches the existing
-index and does not start a crawl. Workflow cancellation is cooperative between
-crawl steps; recurring workflows support intervals of at least 60 minutes and
-require Celery Beat/workers. Snapshots hold at most 100 result rows. The SDK does not retry
-automatically, so callers can choose retry behavior appropriate to their environment.
+watch create/run/change retrieval, workflow create/list/get/update/delete,
+schedule/run/history/status/cancel, and Data Studio aggregate/snapshot operations.
+Workflow step IDs and `dependsOn` dependencies enable bounded DAG branching; nodes
+still run serially, failed nodes skip descendants, and independent branches continue.
+`ask` searches the existing index and does not start a crawl. Workflow cancellation
+is cooperative between crawl steps; recurring workflows support intervals of at
+least 60 minutes and require Celery Beat/workers. Snapshots hold at most 100 result
+rows. The SDK does not retry automatically, so callers can choose retry behavior
+appropriate to their environment.
 
 For local development from the repository root:
 
