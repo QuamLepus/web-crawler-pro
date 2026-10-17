@@ -958,8 +958,8 @@ def _workflow_dag_preview(workflow: dict) -> dict | None:
         target = positions[step_id]
         for dependency in dependencies[step_id]:
             source = positions[dependency]
-            edges.append({"x1": source["x"] + 210, "y1": source["y"] + 41,
-                          "x2": target["x"], "y2": target["y"] + 41})
+            edges.append({"x1": source["x"] + 210, "y1": source["y"] + 51,
+                          "x2": target["x"], "y2": target["y"] + 51})
     width = 48 + (max(columns, default=0) + 1) * 300
     height = max(170, max(map(len, columns.values()), default=1) * 120 + 48)
     return {"width": width, "height": height, "nodes": nodes, "edges": edges}
@@ -972,11 +972,24 @@ async def workflows_page(request: Request):
         return redirect
     result, runs = await _gather(api.workflows(), api.workflow_runs())
     workflows = result.get("items", []) if result.ok else []
-    workflows = [{**workflow, "dag_preview": _workflow_dag_preview(workflow)}
-                 for workflow in workflows]
+    run_items = runs.get("items", []) if runs.ok else []
+    latest_run_by_workflow = {}
+    for run in run_items:
+        latest_run_by_workflow.setdefault(run.get("workflow_id"), run)
+    rendered_workflows = []
+    for workflow in workflows:
+        preview = _workflow_dag_preview(workflow)
+        latest_run = latest_run_by_workflow.get(workflow.get("workflow_id"))
+        if preview is not None and latest_run is not None:
+            statuses = {step.get("step_id"): step.get("status", "queued")
+                        for step in latest_run.get("steps", [])}
+            preview["latest_run_status"] = latest_run.get("status", "unknown")
+            for node in preview["nodes"]:
+                node["status"] = statuses.get(node["step_id"], "not in latest run")
+        rendered_workflows.append({**workflow, "dag_preview": preview})
     return render(request, "workflows.html", page="workflows", me=me,
-                  workflows=workflows,
-                  runs=runs.get("items", []) if runs.ok else [],
+                  workflows=rendered_workflows,
+                  runs=run_items,
                   error=result.error if not result.ok else "",
                   title="Workflows — Web Intelligence OS")
 

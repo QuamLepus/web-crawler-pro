@@ -26,9 +26,10 @@ All endpoints below require an authenticated tenant API key with crawl access.
 
 The web console provides a simple URL-list form for sequential recipes, an
 advanced JSON editor for DAG step definitions, and a read-only visual dependency
-preview. Its saved-workflow editor retains per-step IDs, dependencies, page
-limits, and robots settings. Recent runs show settled, active, queued, failed,
-skipped, and cancelled step counts plus each step's status and dependencies.
+preview. The preview colors and labels nodes with the latest run's per-step status
+when available. Its saved-workflow editor retains per-step IDs, dependencies,
+page limits, and robots settings. Recent runs show settled, active, queued,
+failed, skipped, and cancelled step counts plus each step's status and dependencies.
 The API, TypeScript/Python SDKs, and MCP tools expose the same definition
 controls.
 

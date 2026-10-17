@@ -999,7 +999,17 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
         }]})
 
     async def runs(self):
-        return Result(True, data={"items": []})
+        return Result(True, data={"items": [{
+            "run_id": "wfrun_aaaaaaaaaaaaaaaaaaaa",
+            "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa", "name": "Branching",
+            "status": "running", "execution_mode": "dag", "created_at": "today",
+            "steps": [
+                {"step_id": "seed", "status": "completed"},
+                {"step_id": "news", "status": "running"},
+                {"step_id": "research", "status": "failed"},
+                {"step_id": "summary", "status": "queued"},
+            ],
+        }]})
 
     monkeypatch.setattr(Api, "workflows", workflows)
     monkeypatch.setattr(Api, "workflow_runs", runs)
@@ -1012,6 +1022,11 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
     assert "Visual dependency graph (read-only)" in page.text
+    assert "Latest run: <strong>running</strong>" in page.text
+    assert 'data-status="completed"' in page.text
+    assert 'data-status="running"' in page.text
+    assert 'data-status="failed"' in page.text
+    assert "queued</text>" in page.text
     assert '"seed"' in page.text
 
 
