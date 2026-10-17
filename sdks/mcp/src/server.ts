@@ -75,6 +75,29 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_workflow_list", "List workflows belonging to the authenticated tenant.", {
+    page: z.number().int().min(1).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+  }, async ({ page, page_size }) => {
+    try { return result(await client.listWorkflows(page, page_size)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_get", "Read one workflow definition owned by the authenticated tenant.", {
+    workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
+  }, async ({ workflow_id }) => {
+    try { return result(await client.getWorkflow(workflow_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_workflow_runs", "List recent workflow runs belonging to the authenticated tenant.", {
+    page: z.number().int().min(1).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+  }, async ({ page, page_size }) => {
+    try { return result(await client.listWorkflowRuns(page, page_size)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_workflow_update", "Update a workflow name, ordered steps, or recurring schedule. Omitted fields are unchanged; a null schedule disables recurrence.", {
     workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
     name: z.string().min(1).max(100).optional(),

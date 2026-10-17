@@ -6,7 +6,8 @@ key with appropriate permissions.
 
 Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
 `wio_crawl_create`, `wio_watch_create`, `wio_watch_changes`,
-`wio_workflow_create`, `wio_workflow_update`, `wio_workflow_delete`,
+`wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
+`wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,
 `wio_studio_analytics`, and `wio_studio_snapshot_get`. Workflow tools operate on
 bounded sequential crawl recipes; cancellation takes effect after the active

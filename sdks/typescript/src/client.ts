@@ -173,6 +173,18 @@ export class WebIntelligenceClient {
     });
   }
 
+  listWorkflows(page = 1, pageSize = 20): Promise<JsonObject> {
+    return this.request("GET", `workflows?page=${page}&page_size=${pageSize}`);
+  }
+
+  getWorkflow(workflowId: string): Promise<JsonObject> {
+    return this.request("GET", `workflows/${encodeURIComponent(workflowId)}`);
+  }
+
+  listWorkflowRuns(page = 1, pageSize = 20): Promise<JsonObject> {
+    return this.request("GET", `workflows/runs?page=${page}&page_size=${pageSize}`);
+  }
+
   updateWorkflow(workflowId: string, options: {
     name?: string; steps?: WorkflowCrawlStep[]; scheduleIntervalMinutes?: number | null;
   }): Promise<JsonObject> {
