@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.routers.jobs import CtxDep
@@ -23,6 +25,8 @@ class SavedQueryCreate(BaseModel):
     q: str = Field(min_length=1, max_length=2048)
     limit: int = Field(default=25, ge=1, le=100)
     sources: list[str] = Field(default_factory=list, max_length=10)
+    group_by: Literal["host", "source"] = "host"
+    metric: Literal["count", "avg_score"] = "count"
 
     @field_validator("name", "q")
     @classmethod
@@ -63,6 +67,7 @@ async def save_query(body: SavedQueryCreate, request: Request, ctx: CtxDep) -> d
     saved_id = "saved_" + uuid.uuid4().hex[:20]
     record = {"saved_id": saved_id, "tenant": tenant, "name": body.name,
               "q": body.q, "limit": body.limit, "sources": body.sources,
+              "group_by": body.group_by, "metric": body.metric,
               "created_at": datetime.now(timezone.utc).isoformat()}
     redis = request.app.state.services.redis
     pipe = redis.pipeline()

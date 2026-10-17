@@ -24,7 +24,7 @@ import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Form, Query, Request
@@ -633,10 +633,43 @@ def _studio_score_points(hits: list[dict]) -> tuple[str, int]:
     return " ".join(points), len(values)
 
 
+def _studio_group_rows(hits: list[dict], group_by: str, metric: str,
+                       *, limit: int = 10, max_width: int = 360) -> list[dict]:
+    """Aggregate the bounded result sample by one approved dimension/metric."""
+    from collections import defaultdict
+
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for hit in hits:
+        label = str(hit.get(group_by) or "(unknown)")[:256]
+        if metric == "count":
+            grouped[label].append(1.0)
+            continue
+        try:
+            score = float(hit.get("score", 0))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(score):
+            grouped[label].append(score)
+    values = []
+    for label, items in grouped.items():
+        if not items:
+            continue
+        value = float(len(items)) if metric == "count" else sum(items) / len(items)
+        values.append((label, value))
+    values.sort(key=lambda pair: (-pair[1], pair[0]))
+    values = values[:limit]
+    max_abs = max((abs(value) for _, value in values), default=0.0) or 1.0
+    return [{"label": label, "value": int(value) if metric == "count" else round(value, 3),
+             "width": round(max_width * abs(value) / max_abs)}
+            for label, value in values]
+
+
 @router.get("/app/studio", response_class=HTMLResponse, name="studio")
 async def data_studio(request: Request, q: str = Query("", max_length=2048),
                       limit: int = Query(25, ge=1, le=100),
-                      source: str = Query("", max_length=80)):
+                      source: str = Query("", max_length=80),
+                      group_by: Literal["host", "source"] = "host",
+                      metric: Literal["count", "avg_score"] = "count"):
     """Explore and export a bounded result set from the tenant's own index."""
     api, me, redirect = await _guard(request)
     if redirect:
@@ -651,8 +684,10 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
     host_counts = Counter(hit.get("host") or "(unknown)" for hit in hits)
     source_counts = Counter(hit.get("source") or "(unknown)" for hit in hits)
     score_points, scored_hits = _studio_score_points(hits)
+    chart_rows = _studio_group_rows(hits, group_by, metric)
     return render(request, "studio.html", page="studio", me=me, q=q,
-                  limit=limit, source=source, results=results,
+                  limit=limit, source=source, group_by=group_by, metric=metric,
+                  results=results, chart_rows=chart_rows,
                   saved_queries=saved.get("items", []) if saved.ok else [],
                   host_bars=_studio_bar_rows(host_counts),
                   source_bars=_studio_bar_rows(source_counts),
@@ -665,14 +700,18 @@ async def data_studio(request: Request, q: str = Query("", max_length=2048),
 async def data_studio_save(request: Request, name: str = Form("", max_length=100),
                            q: str = Form("", max_length=2048),
                            source: str = Form("", max_length=800),
-                           limit: int = Form(25, ge=1, le=100)):
+                           limit: int = Form(25, ge=1, le=100),
+                           group_by: Literal["host", "source"] = Form("host"),
+                           metric: Literal["count", "avg_score"] = Form("count")):
     api, _me, redirect = await _guard(request)
     if redirect:
         return redirect
     result = await api.studio_save_query(
         name=name.strip(), q=q.strip(), limit=limit,
-        sources=[part.strip() for part in source.split(",") if part.strip()])
-    return _redirect("/app/studio?q=" + quote(q.strip()),
+        sources=[part.strip() for part in source.split(",") if part.strip()],
+        group_by=group_by, metric=metric)
+    return _redirect("/app/studio?q=" + quote(q.strip()) +
+                     "&group_by=" + group_by + "&metric=" + metric,
                      "Query saved" if result.ok else result.error,
                      "ok" if result.ok else "danger")
 

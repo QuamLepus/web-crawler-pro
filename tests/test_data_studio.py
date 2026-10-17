@@ -25,10 +25,13 @@ def test_saved_queries_are_tenant_scoped_and_deletable():
     two = _key(client, "studio-two@example.test")
     response = client.post("/api/v1/studio/saved-queries", headers=one, json={
         "name": "Solar research", "q": '"solar panel" site:.edu',
-        "limit": 50, "sources": ["wikipedia", "curlie", "wikipedia"]})
+        "limit": 50, "sources": ["wikipedia", "curlie", "wikipedia"],
+        "group_by": "source", "metric": "avg_score"})
     assert response.status_code == 201, response.text
     saved = response.json()
     assert saved["sources"] == ["wikipedia", "curlie"]
+    assert saved["group_by"] == "source"
+    assert saved["metric"] == "avg_score"
     assert client.get("/api/v1/studio/saved-queries", headers=one).json()["items"][0]["saved_id"] == saved["saved_id"]
     assert client.get("/api/v1/studio/saved-queries", headers=two).json()["total"] == 0
     assert client.delete(f"/api/v1/studio/saved-queries/{saved['saved_id']}", headers=two).status_code == 404
@@ -41,4 +44,7 @@ def test_saved_query_validation_and_authentication():
     headers = _key(client, "studio-validation@example.test")
     assert client.post("/api/v1/studio/saved-queries", headers=headers,
                        json={"name": "  ", "q": "test"}).status_code == 422
+    assert client.post("/api/v1/studio/saved-queries", headers=headers,
+                       json={"name": "bad chart", "q": "test",
+                             "group_by": "tenant", "metric": "sum"}).status_code == 422
     assert client.get("/api/v1/studio/saved-queries").status_code == 401

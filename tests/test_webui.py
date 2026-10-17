@@ -750,10 +750,13 @@ def test_data_studio_console_saves_and_deletes_queries(signed_in, monkeypatch):
     monkeypatch.setattr(Api, "studio_save_query", save)
     monkeypatch.setattr(Api, "studio_delete_query", delete)
     saved = signed_in.post("/app/studio/save", data={
-        "name": "Solar", "q": "solar panels", "source": "wikipedia,curlie", "limit": 30},
+        "name": "Solar", "q": "solar panels", "source": "wikipedia,curlie", "limit": 30,
+        "group_by": "source", "metric": "avg_score"},
         follow_redirects=False)
     assert saved.status_code == 303
     assert calls[0]["sources"] == ["wikipedia", "curlie"]
+    assert calls[0]["group_by"] == "source"
+    assert calls[0]["metric"] == "avg_score"
     removed = signed_in.post("/app/studio/saved/saved_aaaaaaaaaaaaaaaaaaaa/delete",
                              follow_redirects=False)
     assert removed.status_code == 303
@@ -784,6 +787,16 @@ def test_data_studio_charts_are_accessible_and_derive_from_real_result_fields(si
     assert 'data-viz="host"' in response.text
     assert 'data-viz="source"' in response.text
     assert 'data-viz="score-rank"' in response.text
+    assert 'data-viz="custom-breakdown"' in response.text
     assert 'role="img"' in response.text
     assert "a.example" in response.text and "wiki: 2" in response.text
     assert 'points="24.0,30.0' in response.text
+
+    grouped = signed_in.get("/app/studio", params={
+        "q": "solar", "group_by": "source", "metric": "avg_score"})
+    assert grouped.status_code == 200
+    assert "Mean score by source" in grouped.text
+    assert "wiki: 2.5" in grouped.text
+    assert "curlie: 1.0" in grouped.text
+    assert "Configurable breakdown computed only from these returned hits" in grouped.text
+    assert 'value="source" selected' in grouped.text or "value=\"source\" selected" in grouped.text
