@@ -852,7 +852,7 @@ def test_workflow_console_exposes_run_cancellation(signed_in, monkeypatch):
     async def workflows(self):
         return Result(True, data={"items": []})
 
-    async def runs(self):
+    async def runs(self, **params):
         return Result(True, data={"items": [{"run_id": "wfrun_aaaaaaaaaaaaaaaaaaaa",
             "name": "Refresh", "status": "running", "execution_mode": "dag",
             "step_index": 2, "steps": [
@@ -998,7 +998,7 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
             ],
         }]})
 
-    async def runs(self):
+    async def runs(self, **params):
         return Result(True, data={"items": [{
             "run_id": "wfrun_aaaaaaaaaaaaaaaaaaaa",
             "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa", "name": "Branching",
@@ -1049,6 +1049,41 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert "Selected run: <strong>completed</strong>" in historical.text
     assert 'value="wfrun_bbbbbbbbbbbbbbbbbbbb" selected' in historical.text
     assert "not in selected run" not in historical.text
+
+
+def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def workflows(self):
+        return Result(True, data={"items": []})
+
+    async def runs(self, page=1, page_size=20):
+        assert page_size == 20
+        return Result(True, data={"items": [{
+            "run_id": f"wfrun_{page:020d}", "name": f"Historical batch {page}",
+            "status": "completed", "steps": [], "created_at": "today",
+        }], "total": 41, "page": page, "page_size": page_size})
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+
+    first = signed_in.get("/app/workflows")
+    assert first.status_code == 200
+    assert "41 runs · page 1 of 3" in first.text
+    assert "/app/workflows?run_page=2" in first.text
+    assert "Older runs" in first.text
+
+    second = signed_in.get("/app/workflows", params={"run_page": 2})
+    assert second.status_code == 200
+    assert "Historical batch 2" in second.text
+    assert "41 runs · page 2 of 3" in second.text
+    assert "/app/workflows?run_page=1" in second.text
+    assert "/app/workflows?run_page=3" in second.text
+
+    beyond_history = signed_in.get("/app/workflows", params={"run_page": 999})
+    assert beyond_history.status_code == 200
+    assert "41 runs · page 3 of 3" in beyond_history.text
+    assert "Historical batch 3" in beyond_history.text
 
 
 def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):

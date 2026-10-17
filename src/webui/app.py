@@ -968,11 +968,22 @@ def _workflow_dag_preview(workflow: dict) -> dict | None:
 @router.get("/app/workflows", response_class=HTMLResponse, name="workflows")
 async def workflows_page(request: Request,
                          selected_workflow_id: str | None = Query(None, alias="workflow_id"),
-                         selected_run_id: str | None = Query(None, alias="run_id")):
+                         selected_run_id: str | None = Query(None, alias="run_id"),
+                         run_page: int = Query(1, ge=1)):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
-    result, runs = await _gather(api.workflows(), api.workflow_runs())
+    result, runs = await _gather(api.workflows(),
+                                api.workflow_runs(page=run_page, page_size=20))
+    run_total = max(0, runs.get("total", len(runs.get("items", []))))
+    run_page_size = max(1, runs.get("page_size", 20))
+    run_page_count = max(1, math.ceil(run_total / run_page_size))
+    if runs.ok and run_page > run_page_count:
+        run_page = run_page_count
+        runs = await api.workflow_runs(page=run_page, page_size=run_page_size)
+        run_total = max(0, runs.get("total", run_total))
+        run_page_size = max(1, runs.get("page_size", run_page_size))
+        run_page_count = max(1, math.ceil(run_total / run_page_size))
     workflows = result.get("items", []) if result.ok else []
     run_items = runs.get("items", []) if runs.ok else []
     runs_by_workflow: dict[str, list[dict]] = {}
@@ -1004,6 +1015,10 @@ async def workflows_page(request: Request,
     return render(request, "workflows.html", page="workflows", me=me,
                   workflows=rendered_workflows,
                   runs=run_items,
+                  run_page=run_page,
+                  run_page_count=run_page_count,
+                  run_total=run_total,
+                  run_page_size=run_page_size,
                   error=result.error if not result.ok else "",
                   title="Workflows — Web Intelligence OS")
 
