@@ -966,27 +966,41 @@ def _workflow_dag_preview(workflow: dict) -> dict | None:
 
 
 @router.get("/app/workflows", response_class=HTMLResponse, name="workflows")
-async def workflows_page(request: Request):
+async def workflows_page(request: Request,
+                         selected_workflow_id: str | None = Query(None, alias="workflow_id"),
+                         selected_run_id: str | None = Query(None, alias="run_id")):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
     result, runs = await _gather(api.workflows(), api.workflow_runs())
     workflows = result.get("items", []) if result.ok else []
     run_items = runs.get("items", []) if runs.ok else []
-    latest_run_by_workflow = {}
+    runs_by_workflow: dict[str, list[dict]] = {}
     for run in run_items:
-        latest_run_by_workflow.setdefault(run.get("workflow_id"), run)
+        workflow_id = run.get("workflow_id")
+        if workflow_id:
+            runs_by_workflow.setdefault(workflow_id, []).append(run)
     rendered_workflows = []
     for workflow in workflows:
         preview = _workflow_dag_preview(workflow)
-        latest_run = latest_run_by_workflow.get(workflow.get("workflow_id"))
-        if preview is not None and latest_run is not None:
+        workflow_runs = runs_by_workflow.get(workflow.get("workflow_id"), [])
+        current_run = workflow_runs[0] if workflow_runs else None
+        if (workflow.get("workflow_id") == selected_workflow_id and selected_run_id):
+            current_run = next((run for run in workflow_runs
+                                if run.get("run_id") == selected_run_id), current_run)
+        if preview is not None and current_run is not None:
             statuses = {step.get("step_id"): step.get("status", "queued")
-                        for step in latest_run.get("steps", [])}
-            preview["latest_run_status"] = latest_run.get("status", "unknown")
+                        for step in current_run.get("steps", [])}
+            preview["run_status"] = current_run.get("status", "unknown")
+            preview["run_id"] = current_run.get("run_id")
             for node in preview["nodes"]:
-                node["status"] = statuses.get(node["step_id"], "not in latest run")
-        rendered_workflows.append({**workflow, "dag_preview": preview})
+                node["status"] = statuses.get(node["step_id"], "not in selected run")
+        rendered_workflows.append({
+            **workflow,
+            "dag_preview": preview,
+            "dag_run_options": workflow_runs if preview is not None else [],
+            "selected_run_id": current_run.get("run_id") if current_run else "",
+        })
     return render(request, "workflows.html", page="workflows", me=me,
                   workflows=rendered_workflows,
                   runs=run_items,

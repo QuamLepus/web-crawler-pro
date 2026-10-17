@@ -86,9 +86,22 @@
       {% if workflow.dag_preview %}
       <details class="mt-2">
         <summary>Visual dependency graph (read-only)</summary>
-        {% if workflow.dag_preview.latest_run_status %}<p class="muted small">Latest run: <strong>{{ workflow.dag_preview.latest_run_status }}</strong> · node outlines and labels show per-step status.</p>{% endif %}
+        {% if workflow.dag_run_options|length > 1 %}
+        <form method="get" action="/app/workflows" class="row wrap mt-2">
+          <input type="hidden" name="workflow_id" value="{{ workflow.workflow_id }}">
+          <label>Run status overlay
+            <select name="run_id" aria-label="Choose run status for {{ workflow.name }}">
+              {% for option in workflow.dag_run_options %}
+              <option value="{{ option.run_id }}" {% if option.run_id == workflow.selected_run_id %}selected{% endif %}>{{ option.created_at }} · {{ option.status }} ({{ option.steps|length }} steps)</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="btn btn-sm" type="submit">Show run</button>
+        </form>
+        {% endif %}
+        {% if workflow.dag_preview.run_status %}<p class="muted small">Selected run: <strong>{{ workflow.dag_preview.run_status }}</strong> · node outlines and labels show per-step status.</p>{% endif %}
         <div class="workflow-dag-scroll mt-2">
-          <svg class="workflow-dag" data-viz="workflow-dag" width="{{ workflow.dag_preview.width }}" height="{{ workflow.dag_preview.height }}" viewBox="0 0 {{ workflow.dag_preview.width }} {{ workflow.dag_preview.height }}" role="img" aria-label="Dependency DAG for {{ workflow.name }} with {{ workflow.steps|length }} crawl steps{% if workflow.dag_preview.latest_run_status %}; latest run {{ workflow.dag_preview.latest_run_status }}{% endif %}">
+          <svg class="workflow-dag" data-viz="workflow-dag" width="{{ workflow.dag_preview.width }}" height="{{ workflow.dag_preview.height }}" viewBox="0 0 {{ workflow.dag_preview.width }} {{ workflow.dag_preview.height }}" role="img" aria-label="Dependency DAG for {{ workflow.name }} with {{ workflow.steps|length }} crawl steps{% if workflow.dag_preview.run_status %}; selected run {{ workflow.dag_preview.run_status }}{% endif %}">
             <title>Workflow dependencies: {{ workflow.name }}</title>
             <defs>
               <marker id="workflow-arrow-{{ workflow.workflow_id }}" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
