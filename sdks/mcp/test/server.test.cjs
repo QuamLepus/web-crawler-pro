@@ -55,7 +55,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
-    'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
+    'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_run', 'wio_workflow_status',
   ]);
   const result = await client.callTool({ name: 'wio_ask', arguments: { question: 'What is cited?' } });
@@ -106,6 +106,34 @@ test('MCP workflow tool submits bounded sequential steps through the SDK', async
     assert.equal(request.key, 'workflow-tool-key');
     assert.deepEqual(request.body.steps, [{ url: 'https://example.org', max_pages: 2, obey_robots: true }]);
     assert.equal(request.body.schedule_interval_minutes, 60);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP Studio analytics tool forwards bounded full-corpus filters', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'analytics-key', fetch: async (url, init) => {
+    request = { url, method: init.method };
+    return new Response(JSON.stringify({ matched_documents: 10, group_count: 2, rows: [] }), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'studio-analytics-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_studio_analytics', arguments: {
+      group_by: 'source', metric: 'avg_quality', source: 'wiki', limit: 10,
+    } });
+    assert.equal(response.isError, undefined);
+    assert.equal(request.method, 'GET');
+    const url = new URL(request.url);
+    assert.equal(url.pathname, '/api/v1/studio/analytics');
+    assert.equal(url.searchParams.get('group_by'), 'source');
+    assert.equal(url.searchParams.get('metric'), 'avg_quality');
+    assert.equal(url.searchParams.get('source'), 'wiki');
   } finally {
     await client.close();
     await server.close();

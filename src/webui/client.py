@@ -258,6 +258,11 @@ class Api:
     def index_levels(self) -> Any:
         return self.get("/api/v1/search-index/levels")
 
+    def studio_analytics(self, **params) -> Any:
+        return self.get("/api/v1/studio/analytics",
+                        {key: value for key, value in params.items()
+                         if value not in (None, "")})
+
     def studio_saved_queries(self) -> Any:
         return self.get("/api/v1/studio/saved-queries")
 

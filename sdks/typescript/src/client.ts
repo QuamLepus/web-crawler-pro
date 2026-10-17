@@ -43,6 +43,18 @@ export interface WorkflowCrawlStep {
   obeyRobots?: boolean;
 }
 
+export interface StudioAnalyticsOptions {
+  groupBy?: "source" | "host" | "lang" | "snapshot" | "day";
+  metric?: "count" | "avg_authority" | "avg_quality" | "avg_body_chars";
+  source?: string;
+  host?: string;
+  lang?: string;
+  indexedFrom?: string;
+  indexedTo?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface StudioSnapshotCreateOptions {
   name: string;
   q: string;
@@ -171,6 +183,20 @@ export class WebIntelligenceClient {
 
   cancelWorkflowRun(runId: string): Promise<JsonObject> {
     return this.request("POST", `workflows/runs/${encodeURIComponent(runId)}/cancel`);
+  }
+
+  studioAnalytics(options: StudioAnalyticsOptions = {}): Promise<JsonObject> {
+    const params = new URLSearchParams();
+    const fields: Record<string, string | number | undefined> = {
+      group_by: options.groupBy, metric: options.metric, source: options.source,
+      host: options.host, lang: options.lang, indexed_from: options.indexedFrom,
+      indexed_to: options.indexedTo, limit: options.limit, offset: options.offset,
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    const query = params.toString();
+    return this.request("GET", `studio/analytics${query ? `?${query}` : ""}`);
   }
 
   createStudioSnapshot(options: StudioSnapshotCreateOptions): Promise<JsonObject> {

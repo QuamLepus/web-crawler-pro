@@ -176,6 +176,10 @@ class SearchIndex:
         self.close()
 
     # -- inspection ---------------------------------------------------------- #
+    def analytics(self, **filters) -> dict:
+        """Aggregate bounded dimensions over every indexed document, not top-k hits."""
+        return self._store.analytics(**filters)
+
     def stats(self) -> IndexStats:
         from src.search_index.indexer import STATE_FILE
 

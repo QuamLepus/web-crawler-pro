@@ -886,3 +886,36 @@ def test_workflow_console_updates_schedule(signed_in, monkeypatch):
                               data={"interval_minutes": "1440"}, follow_redirects=False)
     assert response.status_code == 303
     assert calls == [("workflow_aaaaaaaaaaaaaaaaaaaa", 1440)]
+
+
+def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+
+    async def fake_analytics(self, **params):
+        calls.append(params)
+        return Result(True, data={"matched_documents": 250, "group_count": 2,
+            "group_by": params.get("group_by"), "metric": params.get("metric"),
+            "rows": [{"label": '=HYPERLINK("https://bad.invalid")', "value": 200},
+                     {"label": "curlie", "value": 50}],
+            "offset": params.get("offset", 0), "limit": params.get("limit", 50)})
+
+    monkeypatch.setattr(Api, "studio_analytics", fake_analytics)
+    response = signed_in.get("/app/studio", params={
+        "corpus_group_by": "source", "corpus_metric": "count", "corpus_source": "wiki"})
+    assert response.status_code == 200
+    assert "Full-corpus analytics" in response.text
+    assert "250 matching documents" in response.text
+    assert "Download aggregate CSV" in response.text
+    assert "wiki" in response.text and "200" in response.text
+    assert calls[0]["source"] == "wiki"
+
+    exported = signed_in.get("/app/studio/analytics.csv", params={
+        "group_by": "host", "metric": "avg_quality", "source": "wiki"})
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert "studio-corpus-analytics.csv" in exported.headers["content-disposition"]
+    assert exported.text.lstrip("\ufeff").startswith("host,avg_quality,matched_documents")
+    assert "'=HYPERLINK" in exported.text
+    assert calls[-1]["limit"] == 100
+    assert calls[-1]["source"] == "wiki"
