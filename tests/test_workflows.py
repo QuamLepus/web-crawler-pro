@@ -58,6 +58,58 @@ def test_workflow_create_list_run_and_tenant_isolation():
     assert client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one).status_code == 409
 
 
+def test_workflow_run_history_search_status_and_date_filters():
+    client = _client()
+    headers = _key(client, "workflow-history-filters@example.test")
+    definition = client.post("/api/v1/workflows", headers=headers, json={
+        "name": "Alpha refresh", "steps": [{"url": "https://example.org"}],
+    }).json()
+    redis = client.app.state.services.redis
+    run_ids = []
+    for index, (status, created_at) in enumerate([
+        ("completed", "2026-05-01T12:00:00+00:00"),
+        ("failed", "2026-05-02T12:00:00+00:00"),
+        ("queued", "2026-05-03T12:00:00+00:00"),
+    ]):
+        queued = client.post(
+            f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=headers)
+        assert queued.status_code == 202
+        run_id = queued.json()["run_id"]
+        run_ids.append(run_id)
+        key = f"wcp:v1:workflow_run:{run_id}"
+        record = json.loads(redis.get(key))
+        record.update(status=status, created_at=created_at)
+        redis.set(key, json.dumps(record), ex=3600)
+
+    filtered = client.get("/api/v1/workflows/runs", headers=headers, params={
+        "q": "alpha refresh", "status": "failed",
+        "date_from": "2026-05-02", "date_to": "2026-05-03", "page_size": 5,
+    })
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+    assert [run["run_id"] for run in filtered.json()["items"]] == [run_ids[1]]
+
+    by_id = client.get("/api/v1/workflows/runs", headers=headers,
+                       params={"q": run_ids[2]})
+    assert by_id.json()["total"] == 1
+    assert by_id.json()["items"][0]["run_id"] == run_ids[2]
+    other_tenant = _key(client, "workflow-history-other@example.test")
+    hidden = client.get("/api/v1/workflows/runs", headers=other_tenant,
+                        params={"q": run_ids[2]})
+    assert hidden.json()["total"] == 0
+
+    second_page = client.get("/api/v1/workflows/runs", headers=headers,
+                             params={"date_from": "2026-05-01", "page": 2,
+                                     "page_size": 1})
+    assert second_page.json()["total"] == 3
+    assert [run["run_id"] for run in second_page.json()["items"]] == [run_ids[1]]
+
+    assert client.get("/api/v1/workflows/runs", headers=headers,
+                      params={"status": "unknown"}).status_code == 422
+    assert client.get("/api/v1/workflows/runs", headers=headers,
+                      params={"date_from": "2026-05-04", "date_to": "2026-05-01"}).status_code == 422
+
+
 def test_workflow_edit_delete_preserves_tenant_and_run_safety():
     client = _client()
     owner = _key(client, "workflow-edit-owner@example.test")

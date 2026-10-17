@@ -1057,8 +1057,11 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
     async def workflows(self):
         return Result(True, data={"items": []})
 
-    async def runs(self, page=1, page_size=20):
+    calls = []
+
+    async def runs(self, page=1, page_size=20, **filters):
         assert page_size == 20
+        calls.append((page, filters))
         return Result(True, data={"items": [{
             "run_id": f"wfrun_{page:020d}", "name": f"Historical batch {page}",
             "status": "completed", "steps": [], "created_at": "today",
@@ -1085,6 +1088,19 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
     assert "41 runs · page 3 of 3" in beyond_history.text
     assert "Historical batch 3" in beyond_history.text
 
+    filtered_page = signed_in.get("/app/workflows", params={
+        "run_q": "Alpha", "run_status": "failed",
+        "run_from": "2026-05-01", "run_to": "2026-05-03",
+    })
+    assert filtered_page.status_code == 200
+    assert 'name="run_q" maxlength="100" value="Alpha"' in filtered_page.text
+    assert 'name="run_status" aria-label="Filter runs by status"' in filtered_page.text
+    assert "41 matching runs" in filtered_page.text
+    assert "run_q=Alpha&amp;run_status=failed&amp;run_from=2026-05-01&amp;run_to=2026-05-03" \
+        in filtered_page.text
+    assert calls[-1] == (1, {"q": "Alpha", "status": "failed",
+                              "date_from": "2026-05-01", "date_to": "2026-05-03"})
+
 
 def test_workflow_overlay_persists_when_browsing_run_history(signed_in, monkeypatch):
     from src.webui.client import Api, Result
@@ -1103,7 +1119,7 @@ def test_workflow_overlay_persists_when_browsing_run_history(signed_in, monkeypa
                        "obey_robots": True}],
         }]})
 
-    async def runs(self, page=1, page_size=20):
+    async def runs(self, page=1, page_size=20, **filters):
         return Result(True, data={"items": [{
             "run_id": f"wfrun_{page:020d}", "workflow_id": workflow_id,
             "name": f"Page run {page}", "status": "completed", "created_at": "today",
