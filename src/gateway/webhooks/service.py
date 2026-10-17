@@ -31,6 +31,7 @@ EVENT_TYPES = (
     # public v1 aliases (src/api/schemas.WebhookEvent)
     "crawl.completed", "crawl.failed", "data.ready",
     "export.ready", "dataset.sold", "web.changed",
+    "research.completed", "research.failed",
 )
 
 MAX_ATTEMPTS = 5

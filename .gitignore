@@ -51,3 +51,7 @@ cache/
 # Optional native tokeniser, built by scripts/build-native.sh
 src/search_index/libwcpfast.so
 *.so
+
+# JavaScript/TypeScript SDK workspace
+**/node_modules/
+**/dist/

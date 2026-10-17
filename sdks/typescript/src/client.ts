@@ -1,0 +1,134 @@
+export type JsonObject = Record<string, unknown>;
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export class WebIntelligenceError extends Error {
+  readonly statusCode?: number;
+  readonly response?: unknown;
+  constructor(message: string, statusCode?: number, response?: unknown) {
+    super(message);
+    this.name = "WebIntelligenceError";
+    this.statusCode = statusCode;
+    this.response = response;
+  }
+}
+
+export interface ClientOptions {
+  apiKey: string;
+  baseUrl?: string;
+  timeoutMs?: number;
+  fetch?: FetchLike;
+}
+
+export interface AskOptions {
+  maxPages?: number;
+  maxSeconds?: number;
+  topK?: number;
+}
+
+export interface ResearchCreateOptions {
+  topic: string;
+  sources?: number;
+  maxPagesPerSource?: number;
+  seeds?: string[];
+}
+
+export interface WatchCreateOptions {
+  url: string;
+  intervalMinutes?: number;
+}
+
+export class WebIntelligenceClient {
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: FetchLike;
+
+  constructor(options: ClientOptions) {
+    if (!options.apiKey?.trim()) throw new TypeError("apiKey must not be empty");
+    this.apiKey = options.apiKey;
+    this.baseUrl = (options.baseUrl ?? "http://localhost:8000").replace(/\/+$/, "");
+    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  private async request<T extends JsonObject>(method: string, path: string,
+                                               body?: JsonObject): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/api/v1/${path.replace(/^\/+/, "")}`, {
+        method,
+        headers: { "X-API-Key": this.apiKey, Accept: "application/json",
+                   ...(body ? { "Content-Type": "application/json" } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: controller.signal,
+      });
+      let payload: unknown;
+      try { payload = await response.json(); }
+      catch { payload = null; }
+      if (!response.ok) {
+        let message = response.statusText || `HTTP ${response.status}`;
+        if (payload && typeof payload === "object") {
+          const data = payload as Record<string, unknown>;
+          const error = data.error && typeof data.error === "object"
+            ? (data.error as Record<string, unknown>).message : undefined;
+          message = String(error ?? data.detail ?? message);
+        }
+        throw new WebIntelligenceError(message, response.status, payload);
+      }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new WebIntelligenceError("API returned a non-object JSON response", response.status, payload);
+      }
+      return payload as T;
+    } catch (error) {
+      if (error instanceof WebIntelligenceError) throw error;
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new WebIntelligenceError("API request timed out");
+      }
+      throw new WebIntelligenceError(`API request failed: ${error instanceof Error ? error.message : "network error"}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  ask(question: string, options: AskOptions = {}): Promise<JsonObject> {
+    return this.request("POST", "ask", { question,
+      budget: { max_pages: options.maxPages ?? 50, max_seconds: options.maxSeconds ?? 60 },
+      top_k: options.topK ?? 8 });
+  }
+
+  createCrawl(url: string, options: { maxPages?: number; obeyRobots?: boolean } = {}): Promise<JsonObject> {
+    return this.request("POST", "jobs/crawl", { url,
+      max_pages: options.maxPages ?? 10, obey_robots: options.obeyRobots ?? true });
+  }
+
+  getJob(jobId: string): Promise<JsonObject> {
+    return this.request("GET", `jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  createResearch(options: ResearchCreateOptions): Promise<JsonObject> {
+    return this.request("POST", "research", {
+      topic: options.topic, sources: options.sources ?? 5,
+      max_pages_per_source: options.maxPagesPerSource ?? 3,
+      seeds: options.seeds ?? [],
+    });
+  }
+
+  getResearch(researchId: string): Promise<JsonObject> {
+    return this.request("GET", `research/${encodeURIComponent(researchId)}`);
+  }
+
+  createWatch(options: WatchCreateOptions): Promise<JsonObject> {
+    return this.request("POST", "watch", {
+      url: options.url, interval_minutes: options.intervalMinutes ?? 60,
+    });
+  }
+
+  runWatch(watchId: string): Promise<JsonObject> {
+    return this.request("POST", `watch/${encodeURIComponent(watchId)}/run`);
+  }
+
+  getWatchChanges(watchId: string): Promise<JsonObject> {
+    return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes`);
+  }
+}

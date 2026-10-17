@@ -149,6 +149,16 @@ class Api:
     def cancel_job(self, job_id: str) -> Any:
         return self.post(f"/api/v1/jobs/{job_id}/cancel")
 
+    # -- research ----------------------------------------------------------- #
+    def research_create(self, **body) -> Any:
+        return self.post("/api/v1/research", body)
+
+    def research_list(self) -> Any:
+        return self.get("/api/v1/research")
+
+    def research(self, research_id: str) -> Any:
+        return self.get(f"/api/v1/research/{research_id}")
+
     # -- monitoring -------------------------------------------------------- #
     def watches(self) -> Any:
         return self.get("/api/v1/watch")

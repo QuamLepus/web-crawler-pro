@@ -489,6 +489,7 @@ def test_scheduler_maps_discovery_to_real_celery_tasks():
     """A stale task name is accepted by the broker and silently dropped."""
     from workers.discovery_tasks import app as celery_app
 
+    celery_app.loader.import_default_modules()
     for kind, name in SchedulerService._TASK_MAP.items():
         assert name in celery_app.tasks, (
             f"kind {kind!r} maps to {name!r}, which is not a registered task")
