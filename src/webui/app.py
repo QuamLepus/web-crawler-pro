@@ -25,6 +25,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -46,7 +47,7 @@ router = APIRouter(include_in_schema=False)
 # --------------------------------------------------------------------------- #
 NAV: list[dict] = [
     {
-        "group": "Workspace",
+        "group": "Overview",
         "pages": [
             {"href": "/app", "icon": "▦", "label": "Dashboard", "key": "overview"},
             {
@@ -55,6 +56,7 @@ NAV: list[dict] = [
                 "label": "Query the index",
                 "key": "search",
             },
+            {"href": "/app/research", "icon": "✧", "label": "AI Research", "key": "research"},
             {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
             {
                 "href": "/app/discovery",
@@ -65,7 +67,7 @@ NAV: list[dict] = [
         ],
     },
     {
-        "group": "Data",
+        "group": "Data Engine",
         "pages": [
             {
                 "href": "/app/index",
@@ -82,7 +84,7 @@ NAV: list[dict] = [
         ],
     },
     {
-        "group": "Account",
+        "group": "Developers & settings",
         "pages": [
             {"href": "/app/keys", "icon": "🔑", "label": "API keys", "key": "keys"},
             {
@@ -608,6 +610,49 @@ async def search_page(
         collapse=collapse,
         title=(f"{q} — Search" if q else "Search — Web Intelligence OS"),
     )
+
+
+def _sanitize_research_result(response):
+    if not response.ok or not isinstance(response.data, dict):
+        return {"_error": response.error}
+    result = response.data
+    for citation in result.get("citations", []):
+        url = citation.get("url")
+        parsed = urlsplit(url) if isinstance(url, str) else None
+        if not parsed or parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            citation["url"] = None
+    return result
+
+
+@router.get("/app/research", response_class=HTMLResponse, name="research")
+async def research_page(request: Request, question: str = Query("", max_length=4096)):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = None
+    if question:
+        response = await api.ask(question)
+        result = _sanitize_research_result(response)
+    return render(request, "research.html", page="research", me=me,
+                   question=question, result=result,
+                   title="AI Research — Web Intelligence OS")
+
+
+@router.post("/app/research", response_class=HTMLResponse, name="research_submit")
+async def research_submit(request: Request, question: str = Form("", max_length=4096)):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    question = question.strip()
+    if len(question) < 3:
+        return render(request, "research.html", page="research", me=me,
+                      question=question, result={"_error": "Enter at least three characters."},
+                      title="AI Research — Web Intelligence OS")
+    response = await api.ask(question)
+    result = _sanitize_research_result(response)
+    return render(request, "research.html", page="research", me=me,
+                  question=question, result=result,
+                  title="AI Research — Web Intelligence OS")
 
 
 @router.get("/app/crawl", response_class=HTMLResponse, name="crawl")

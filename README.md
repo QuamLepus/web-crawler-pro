@@ -2,7 +2,7 @@
 
 **Discover. Extract. Understand. Automate.**
 
-Web Intelligence OS builds on the Web Crawler Pro foundation: a self-hostable platform for topic discovery, distributed crawling, data extraction, and search. Its goal is to help users move from a research question to traceable, useful web data—not just submit URLs. The current implementation includes the crawler, topic discovery, APIs, search, and an early grounded `/ask` endpoint with citations and provenance-manifest utilities. It is an evolving product; autonomous research, continuous monitoring, and workflow automation are not yet implemented as complete end-to-end features.
+Web Intelligence OS builds on the Web Crawler Pro foundation: a self-hostable platform for topic discovery, distributed crawling, data extraction, and search. Its goal is to help users move from a research question to traceable, useful web data—not just submit URLs. The current implementation includes the crawler, topic discovery, APIs, search, an extractive `/ask` endpoint with citations, a tenant-isolated provenance ledger, an early Redis-backed entity graph, and an early Python SDK. It is an evolving product; autonomous research, continuous monitoring, and workflow automation are not yet implemented as complete end-to-end features.
 
 It ships in three usable layers, alongside topic discovery and indexed retrieval:
 
@@ -13,7 +13,9 @@ It ships in three usable layers, alongside topic discovery and indexed retrieval
 | **Hosted API (SaaS)** | Multi-tenant REST + GraphQL, API keys, quotas, billing, webhooks, marketplace | `src/api/main.py` |
 | **Topic discovery** | Give it a *topic* and a number instead of URLs — it finds the websites itself | `python -m src.cli discover` |
 | **Grounded intelligence (early)** | Ask against indexed tenant data and receive extractive answers with source citations | `POST /api/v1/ask` |
-| **Provenance utilities (early)** | Build per-record passports and HMAC-signed dataset manifests; callers integrate persistence | `src.api.provenance` |
+| **Provenance ledger** | Tenant-isolated Redis passports and optional HMAC-signed manifest export | `POST /api/v1/provenance/records` |
+| **Knowledge graph (early)** | Tenant-isolated entities, exact normalized alias resolution, and typed relationships | `POST /api/v1/graph/entities` |
+| **Python SDK (early)** | Typed HTTPX client for grounded ask and crawl job APIs | `sdks/python/` |
 
 ---
 
@@ -827,6 +829,17 @@ Next up:
 
 ---
 
+## Frontend performance and motion targets
+
+The current web console remains FastAPI + Jinja2 with local static assets and no
+required CDN. These are **targets, not measured results**: cached navigation
+100–200 ms; ordinary read API p95 below 200 ms; LCP below 2.5 s (the more
+aggressive sub-1 s goal requires a separately specified test profile); CLS below
+0.1; animation near 60 FPS; and near-real-time job progress. Establish and
+publish repeatable browser/device/network conditions before claiming a target
+is met. Respect reduced-motion preferences; motion should remain brief and
+nonessential.
+
 ## Grounded intelligence and provenance (early building blocks)
 
 The authenticated `POST /api/v1/ask` endpoint searches the tenant's existing
@@ -835,18 +848,21 @@ an implicit crawl. The request's page/time budget is reserved for future
 retrieval expansion; cost is reported as unavailable, and confidence is a
 heuristic coverage indicator rather than calibrated probability. See
 [`docs/intelligence-provenance.md`](docs/intelligence-provenance.md) for a curl
-example and limits.
+example and limits. See [`docs/roadmap-status.md`](docs/roadmap-status.md) for
+an honest implemented/partial/not-yet-implemented matrix.
 
-`src.api.provenance` provides JSON-serializable record passports and HMAC-SHA256
-manifest signing for callers to attach to records and dataset exports. It does
-not retroactively add lineage to stored datasets or infer legal permissions;
-unknown license and robots states remain explicitly unknown. HMAC is an
-integrity mechanism, not an independent public signature.
+The provenance API stores caller-supplied passports in tenant-isolated Redis and
+can export a signed manifest when `WCP_PROVENANCE_SIGNING_KEY` is configured.
+It does not retroactively annotate older records or infer legal permissions;
+unknown license and robots states remain explicit. HMAC is an integrity
+mechanism, not an independent public signature.
 
-These are incremental foundations, not claims that the proposed research agent,
-watch engine, visual workflow builder, graph, SDKs, or enterprise compliance
-capabilities are complete. Engineering targets in this project must be
-benchmarked under documented conditions before being described as achieved.
+The early Redis-backed knowledge graph supports entities, exact normalized
+alias matching, and relationships. The Python SDK currently covers ask and
+crawl-job operations. These foundations do not constitute a complete research
+agent, change-monitoring service, workflow builder, or enterprise compliance
+suite. Performance figures remain targets until measured under documented
+conditions.
 
 ---
 

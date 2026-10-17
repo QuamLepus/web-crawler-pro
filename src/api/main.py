@@ -341,8 +341,9 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         return {"status": "ready", "checks": checks}
 
     # ---- REST v1 routers ------------------------------------------------------ #
-    from src.api.routers import (billing, discovery, jobs, marketplace,
-                                 search, search_index, webhooks)
+    from src.api.routers import (billing, discovery, jobs, knowledge_graph,
+                                 marketplace, provenance, search, search_index,
+                                 webhooks)
 
     def _build_v1(prefix: str):
         r = APIRouter(prefix=prefix)
@@ -351,6 +352,8 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(search.router)
         from src.api.routers import ask
         r.include_router(ask.router)
+        r.include_router(provenance.router)
+        r.include_router(knowledge_graph.router)
         r.include_router(webhooks.router)
         r.include_router(billing.router)
         r.include_router(marketplace.router)

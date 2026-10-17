@@ -37,7 +37,7 @@
   --accent-500: #06b6d4;
   --accent-600: #0891b2;
 
-  --gold-400: #f5c76b;   /* the one warm note in the palette; used sparingly */
+  --gold-400: #c4a66a;   /* the one warm note in the palette; used sparingly */
 
   /* semantic (light) */
   --bg: #f6f7fb;
@@ -96,16 +96,16 @@
 }
 
 html[data-theme="dark"] {
-  --bg: #070912;
-  --bg-elev: #0e1220;
+  --bg: #080b12;
+  --bg-elev: #101622;
   --bg-sunken: #05070e;
-  --surface: #101526;
-  --surface-2: #151b2e;
-  --border: #212a44;
-  --border-strong: #2e3a5c;
-  --text: #eef1f9;
-  --text-2: #b0b8cd;
-  --text-3: #7b8499;
+  --surface: #151d2b;
+  --surface-2: #101622;
+  --border: #212a3b;
+  --border-strong: #344158;
+  --text: #f8fafc;
+  --text-2: #94a3b8;
+  --text-3: #748199;
   --link: #a5b4fc;
   --link-visited: #c4b5fd;
 
