@@ -370,7 +370,7 @@ def render(request: Request, template: str, **ctx) -> HTMLResponse:
     base = str(request.base_url).rstrip("/")
     ctx.setdefault("request", request)
     ctx.setdefault("page", "")
-    ctx.setdefault("title", "WebCrawler Pro")
+    ctx.setdefault("title", "Web Intelligence OS")
     ctx.setdefault("token", token)
     ctx.setdefault("api", Api(base_url=base, token=token, app=_asgi_app(request)))
     ctx.setdefault("path", request.url.path)
@@ -443,7 +443,7 @@ async def landing(request: Request):
         request,
         "landing.html",
         page="landing",
-        title="WebCrawler Pro — crawl, discover, own your index",
+        title="Web Intelligence OS — crawl, discover, own your index",
         features=FEATURES,
         plans=PLANS,
     )
@@ -456,7 +456,7 @@ async def pricing(request: Request):
         "pricing.html",
         page="pricing",
         plans=PLANS,
-        title="Pricing — WebCrawler Pro",
+        title="Pricing — Web Intelligence OS",
     )
 
 
@@ -472,7 +472,7 @@ async def login_get(request: Request):
         "login.html",
         page="login",
         mode="login",
-        title="Sign in — WebCrawler Pro",
+        title="Sign in — Web Intelligence OS",
     )
 
 
@@ -488,7 +488,7 @@ async def login_post(request: Request, email: str = Form(""), password: str = Fo
             mode="login",
             errors=[res.error or "Invalid email or password"],
             email=email,
-            title="Sign in — WebCrawler Pro",
+            title="Sign in — Web Intelligence OS",
         )
     token = res.get("access_token", "")
     response = _redirect("/app", "Welcome back", "ok")
@@ -505,7 +505,7 @@ async def signup_get(request: Request):
         "login.html",
         page="signup",
         mode="signup",
-        title="Create your account — WebCrawler Pro",
+        title="Create your account — Web Intelligence OS",
     )
 
 
@@ -527,7 +527,7 @@ async def signup_post(
             errors=[res.error or "Could not create the account"],
             email=email,
             org_name=org_name,
-            title="Create your account — WebCrawler Pro",
+            title="Create your account — Web Intelligence OS",
         )
     response = _redirect("/app", "Workspace created — you are in", "ok")
     set_session(response, res.get("access_token", ""))
@@ -561,7 +561,7 @@ async def dashboard(request: Request):
         usage=usage,
         index=index,
         keys=keys,
-        title="Dashboard — WebCrawler Pro",
+        title="Dashboard — Web Intelligence OS",
     )
 
 
@@ -606,7 +606,7 @@ async def search_page(
         source=source,
         rerank=rerank,
         collapse=collapse,
-        title=(f"{q} — Search" if q else "Search — WebCrawler Pro"),
+        title=(f"{q} — Search" if q else "Search — Web Intelligence OS"),
     )
 
 
@@ -623,7 +623,7 @@ async def crawl_list(request: Request):
         me=me,
         jobs=(jobs.data if jobs.ok else None),
         error=jobs.error,
-        title="Crawl jobs — WebCrawler Pro",
+        title="Crawl jobs — Web Intelligence OS",
     )
 
 
@@ -656,7 +656,7 @@ async def crawl_create(
             jobs=(jobs.data if jobs.ok else None),
             errors=[res.error],
             url=url,
-            title="Crawl jobs — WebCrawler Pro",
+            title="Crawl jobs — Web Intelligence OS",
         )
     job_id = res.get("job_id", "")
     return _redirect(
@@ -679,7 +679,7 @@ async def crawl_detail(request: Request, job_id: str):
         me=me,
         job=job.data,
         job_id=job_id,
-        title=f"Job {job_id[:12]} — WebCrawler Pro",
+        title=f"Job {job_id[:12]} — Web Intelligence OS",
     )
 
 
@@ -740,7 +740,7 @@ async def discovery_list(request: Request):
         jobs=(jobs.data if jobs.ok else None),
         error=jobs.error,
         has_provider=_has_discovery_provider(),
-        title="Topic discovery — WebCrawler Pro",
+        title="Topic discovery — Web Intelligence OS",
     )
 
 
@@ -783,7 +783,7 @@ async def discovery_create(
             topic=topic,
             count=count,
             has_provider=_has_discovery_provider(),
-            title="Topic discovery — WebCrawler Pro",
+            title="Topic discovery — Web Intelligence OS",
         )
 
     res = await api.discovery_create(**body)
@@ -798,7 +798,7 @@ async def discovery_create(
             errors=[res.error],
             topic=topic,
             has_provider=_has_discovery_provider(),
-            title="Topic discovery — WebCrawler Pro",
+            title="Topic discovery — Web Intelligence OS",
         )
     job_id = res.get("job_id", "")
     return _redirect(
@@ -897,7 +897,7 @@ async def index_page(request: Request):
         stats=(stats.data if stats.ok else {}),
         stats_error=stats.error,
         levels=levels,
-        title="Own search index — WebCrawler Pro",
+        title="Own search index — Web Intelligence OS",
     )
 
 
@@ -924,7 +924,7 @@ async def marketplace(request: Request, q: str = Query(""), tag: str = Query("")
         bounties=(bounties.data if bounties.ok else None),
         jobs=rows,
         error=datasets.error,
-        title="Marketplace — WebCrawler Pro",
+        title="Marketplace — Web Intelligence OS",
     )
 
 
@@ -988,7 +988,7 @@ async def keys_page(request: Request):
         keys=(keys.data if keys.ok else None),
         error=keys.error,
         issued=issued,
-        title="API keys — WebCrawler Pro",
+        title="API keys — Web Intelligence OS",
     )
 
 
@@ -1068,7 +1068,7 @@ async def billing_page(request: Request):
         plans=cards,
         rates=(raw_plans.get("usage_based") or {}),
         error=usage.error,
-        title="Billing — WebCrawler Pro",
+        title="Billing — Web Intelligence OS",
     )
 
 
@@ -1112,7 +1112,7 @@ async def settings_page(request: Request):
         events=webhook_events(),
         has_provider=_has_discovery_provider(),
         stripe_ready=bool(os.getenv("STRIPE_SECRET_KEY")),
-        title="Settings — WebCrawler Pro",
+        title="Settings — Web Intelligence OS",
     )
 
 
@@ -1191,7 +1191,7 @@ async def docs_page(request: Request):
         page="docs",
         me=me,
         endpoints=_ENDPOINTS,
-        title="API reference — WebCrawler Pro",
+        title="API reference — Web Intelligence OS",
     )
 
 
