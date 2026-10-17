@@ -14,7 +14,8 @@ full long-term product plan is already shipped.
 | Research console page | Implemented as a UI over `/ask` | It is not a multi-stage autonomous research agent. |
 | Web change monitoring | Scheduled URL watches, one-page crawl snapshots, content hashes, change history, basic text-based price mentions, and `web.changed` webhook event | Not semantic change classification; no DNS-rebinding defense, structured product matching, version replay UI, or customer-specific schedules beyond the minimum interval. Celery Beat and workers must run. |
 | Data Studio | Implemented as an authenticated explorer over the deployment's own search index, with bounded previews and CSV download | Query output only; exports are capped at 100 matches per request. No saved analyses, arbitrary SQL, or chart builder. |
-| Workflow builder, agent marketplace | Not implemented | Existing dataset marketplace is separate. |
+| Workflow builder | Early tenant-scoped sequential crawl recipes with create/list/run/status APIs, a console form, Celery execution, per-step progress, robots checks, and request-budget accounting | Crawl-only (up to 10 steps / 25 pages each); no DAG branching, arbitrary code, schedules, editing/deletion, or cancellation. Requires configured Celery workers. |
+| Agent marketplace | Not implemented | Existing dataset marketplace is separate. |
 | Enterprise connectors, SSO, compliance | Not implemented as a complete offering | Do not claim SOC 2/ISO certification or enterprise-ready private integrations. |
 | Performance targets | Documented as targets | No new latency, LCP, CLS, throughput, or cost benchmarks were measured here. |
 | TypeScript SDK + MCP server | Early packages expose ask, research, crawl and watch operations over fetch/stdio | MCP protocol integration tests and published package releases remain; TypeScript integration coverage is limited. |

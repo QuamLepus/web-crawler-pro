@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Automation</div><h1>Workflows</h1><p class="muted">Build and run an ordered set of robots-aware crawl steps.</p></div></div>
+<div class="alert warn mb-3">This first workflow runner supports sequential crawl steps only (maximum 10 URLs, 25 pages per URL). Runs require a configured Celery worker. It is not a general-purpose DAG or script engine.</div>
+<section class="card mb-3"><h2>Create crawl workflow</h2><form method="post" action="/app/workflows/create" class="stack">
+<label>Workflow name<input name="name" required maxlength="100" placeholder="Weekly source refresh"></label>
+<label>URLs — one per line<textarea name="urls" rows="5" required maxlength="12000" placeholder="https://example.org/\nhttps://another.example/news"></textarea></label>
+<label>Maximum pages per URL<input name="max_pages" type="number" min="1" max="25" value="3"></label>
+<p class="muted">Robots.txt checks are enabled for every step. The API rejects non-HTTP(S) URLs.</p><button class="btn primary" type="submit">Save workflow</button></form></section>
+{% if error %}<div class="alert warn">{{ error }}</div>{% endif %}
+<section class="card"><h2>Saved workflows</h2>
+{% if workflows %}<div class="stack">{% for workflow in workflows %}<article class="card subtle"><div class="row wrap" style="justify-content:space-between"><div><h3>{{ workflow.name }}</h3><p class="muted">{{ workflow.steps|length }} sequential steps · up to {{ workflow.max_pages }} pages · created {{ workflow.created_at }}</p></div><form method="post" action="/app/workflows/{{ workflow.workflow_id }}/run"><button class="btn" type="submit">Run now</button></form></div><ol>{% for step in workflow.steps %}<li><code>{{ step.url }}</code> <span class="muted">({{ step.max_pages }} pages, robots {{ 'on' if step.obey_robots else 'off' }})</span></li>{% endfor %}</ol></article>{% endfor %}</div>{% else %}<div class="empty"><div class="empty-icon">⇢</div><p>No workflows created yet.</p></div>{% endif %}
+</section>
+<section class="card mt-3"><h2>Recent runs</h2>{% if runs %}<div class="table-wrap"><table><thead><tr><th>Workflow</th><th>Status</th><th>Progress</th><th>Created</th><th>Error</th></tr></thead><tbody>{% for run in runs %}<tr><td>{{ run.name }}</td><td><span class="badge {{ 'ok' if run.status == 'completed' else ('danger' if run.status == 'failed' else 'brand') }}">{{ run.status }}</span></td><td>{{ run.step_index }}/{{ run.steps|length }} steps</td><td>{{ run.created_at }}</td><td>{{ run.error or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">No workflow runs yet.</p>{% endif %}</section>
+{% endblock %}

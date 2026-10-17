@@ -60,6 +60,7 @@ NAV: list[dict] = [
         {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
         {"href": "/app/search", "icon": "🔍", "label": "Query the index", "key": "search"},
         {"href": "/app/studio", "icon": "▤", "label": "Data Studio", "key": "studio"},
+        {"href": "/app/workflows", "icon": "⇢", "label": "Workflows", "key": "workflows"},
         {"href": "/app/index", "icon": "🗂", "label": "Own search index", "key": "index"},
         {"href": "/app/marketplace", "icon": "🛒", "label": "Data exchange", "key": "marketplace"},
     ]},
@@ -650,6 +651,43 @@ async def data_studio_export(request: Request, q: str = Query(..., min_length=1,
     return StreamingResponse(iter([content]), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": 'attachment; filename="search-results.csv"',
                                       "Cache-Control": "private, no-store"})
+
+
+@router.get("/app/workflows", response_class=HTMLResponse, name="workflows")
+async def workflows_page(request: Request):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result, runs = await _gather(api.workflows(), api.workflow_runs())
+    return render(request, "workflows.html", page="workflows", me=me,
+                  workflows=result.get("items", []) if result.ok else [],
+                  runs=runs.get("items", []) if runs.ok else [],
+                  error=result.error if not result.ok else "",
+                  title="Workflows — Web Intelligence OS")
+
+
+@router.post("/app/workflows/create", response_class=HTMLResponse)
+async def workflow_create(request: Request, name: str = Form("", max_length=100),
+                          urls: str = Form("", max_length=12000),
+                          max_pages: int = Form(3, ge=1, le=25)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    steps = [{"url": line.strip(), "max_pages": max_pages, "obey_robots": True}
+             for line in urls.splitlines() if line.strip()]
+    result = await api.workflow_create(name=name.strip(), steps=steps)
+    return _redirect("/app/workflows", "Workflow created" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/workflows/{workflow_id}/run", response_class=HTMLResponse)
+async def workflow_run(request: Request, workflow_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.workflow_run(workflow_id)
+    message = (f"Run queued: {result.get('run_id', '')}" if result.ok else result.error)
+    return _redirect("/app/workflows", message, "ok" if result.ok else "danger")
 
 
 @router.get("/app/graph", response_class=HTMLResponse, name="graph")

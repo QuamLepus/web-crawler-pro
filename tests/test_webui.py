@@ -678,6 +678,14 @@ def test_data_studio_export_requires_session(client):
     assert response.headers["location"] == "/login"
 
 
+def test_workflow_builder_page_is_authenticated_and_shows_boundaries(signed_in):
+    response = signed_in.get("/app/workflows")
+    assert response.status_code == 200
+    assert "Create crawl workflow" in response.text
+    assert "maximum 10 URLs" in response.text
+    assert "/app/workflows" in signed_in.get("/app").text
+
+
 def test_data_studio_csv_export_is_authenticated_and_spreadsheet_safe(signed_in, monkeypatch):
     from src.webui.client import Api, Result
 

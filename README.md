@@ -861,11 +861,15 @@ unknown license and robots states remain explicit. HMAC is an integrity
 mechanism, not an independent public signature.
 
 The early Redis-backed knowledge graph supports entities, exact normalized
-alias matching, and relationships. The Python SDK currently covers ask and
-crawl-job operations. These foundations do not constitute a complete research
-agent, change-monitoring service, workflow builder, or enterprise compliance
-suite. Performance figures remain targets until measured under documented
-conditions.
+alias matching, and relationships. Scheduled URL monitoring and extractive
+multi-stage research jobs are available with Celery workers/Beat; reports are
+not independently fact-checked. The early Python and TypeScript SDKs plus a
+stdio MCP server cover selected API operations but are not yet published as
+stable releases. The initial tenant-scoped workflow builder runs ordered,
+robots-aware crawl steps (not general DAGs or scripts). These foundations do
+not constitute a complete research agent, full BI/Data Studio, or enterprise
+SSO/connectors/compliance suite. Performance figures remain targets until
+measured under documented conditions.
 
 ---
 

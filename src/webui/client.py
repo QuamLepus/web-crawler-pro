@@ -149,6 +149,19 @@ class Api:
     def cancel_job(self, job_id: str) -> Any:
         return self.post(f"/api/v1/jobs/{job_id}/cancel")
 
+    # -- sequential crawl workflows ----------------------------------------- #
+    def workflows(self) -> Any:
+        return self.get("/api/v1/workflows")
+
+    def workflow_create(self, **body) -> Any:
+        return self.post("/api/v1/workflows", body)
+
+    def workflow_run(self, workflow_id: str) -> Any:
+        return self.post(f"/api/v1/workflows/{workflow_id}/runs")
+
+    def workflow_runs(self) -> Any:
+        return self.get("/api/v1/workflows/runs")
+
     # -- knowledge graph ---------------------------------------------------- #
     def graph(self, limit: int = 200) -> Any:
         return self.get("/api/v1/graph", {"limit": limit})
