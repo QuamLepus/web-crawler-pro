@@ -26,8 +26,10 @@ All endpoints below require an authenticated tenant API key with crawl access.
 
 The web console provides a simple URL-list form for sequential recipes and an
 advanced JSON editor for DAG step definitions; its saved-workflow editor retains
-per-step IDs, dependencies, page limits, and robots settings. The API,
-TypeScript/Python SDKs, and MCP tools expose the same definition controls.
+per-step IDs, dependencies, page limits, and robots settings. Recent runs show
+settled, active, queued, failed, skipped, and cancelled step counts plus each
+step's status and dependencies. The API, TypeScript/Python SDKs, and MCP tools
+expose the same definition controls.
 
 Definition edits, run creation, schedule changes, deletion, and scheduled dispatch
 coordinate through a short-lived Redis lock. This prevents a scheduled dispatch

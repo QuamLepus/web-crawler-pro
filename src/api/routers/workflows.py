@@ -376,8 +376,13 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         try:
             request.app.state.services.scheduler.submit(spec)
         except Exception as exc:
+            failed_at = datetime.now(timezone.utc).isoformat()
             record.update(status="failed", error="workflow backend unavailable",
-                          updated_at=datetime.now(timezone.utc).isoformat())
+                          updated_at=failed_at)
+            for step in record["steps"]:
+                if step["status"] == "queued":
+                    step.update(status="failed", error="workflow backend unavailable",
+                                completed_at=failed_at)
             pipe = redis.pipeline()
             pipe.set(run_key, json.dumps(record), ex=TTL)
             pipe.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), run_id)
@@ -411,6 +416,9 @@ async def cancel_workflow_run(run_id: str, request: Request, ctx: CtxDep) -> dic
     if record["status"] == "queued":
         record.update(status="cancelled", cancelled_at=now,
                       cancel_requested=False)
+        for step in record.get("steps", []):
+            if step.get("status") == "queued":
+                step.update(status="cancelled", completed_at=now)
         request.app.state.services.scheduler.mark(run_id, "cancelled",
                                                   cancelled_by=tenant)
         message = "queued workflow cancelled"

@@ -52,7 +52,9 @@ def test_workflow_create_list_run_and_tenant_isolation():
     cancelled = client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one)
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "cancelled"
-    assert client.get(f"/api/v1/workflows/runs/{run_id}", headers=one).json()["status"] == "cancelled"
+    cancelled_state = client.get(f"/api/v1/workflows/runs/{run_id}", headers=one).json()
+    assert cancelled_state["status"] == "cancelled"
+    assert [step["status"] for step in cancelled_state["steps"]] == ["cancelled", "cancelled"]
     assert client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one).status_code == 409
 
 
@@ -210,6 +212,29 @@ def test_workflow_dag_skips_dependants_after_failure_but_runs_independent_branch
     assert saved["status"] == "failed"
     assert seen == ["https://bad.example", "https://independent.example"]
     assert [step["status"] for step in saved["steps"]] == ["failed", "skipped", "completed"]
+
+
+def test_sequential_failure_marks_unstarted_steps_skipped(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    run_id = "wfrun_12345678901234567890"
+    key = f"wcp:v1:workflow_run:{run_id}"
+    redis.set(key, json.dumps({"run_id": run_id, "workflow_id": "workflow_12345678901234567890",
+        "tenant": "tenant", "status": "queued", "execution_mode": "sequential",
+        "step_index": 0, "steps": [
+            {"step_id": "step_1", "depends_on": [], "status": "queued"},
+            {"step_id": "step_2", "depends_on": ["step_1"], "status": "queued"},
+        ]}))
+    monkeypatch.setattr(workflow_tasks, "_redis", lambda: redis)
+    monkeypatch.setattr("workers.crawl_tasks.run_crawl", lambda *_args, **_kwargs: {
+        "failures": ["crawl failed"], "pages_done": 0, "items": 0, "collected": []})
+    with pytest.raises(RuntimeError, match="crawl failed"):
+        workflow_tasks.run_workflow.run({"run_id": run_id, "tenant": "tenant", "steps": [
+            {"step_id": "step_1", "depends_on": [], "url": "https://one.example"},
+            {"step_id": "step_2", "depends_on": ["step_1"], "url": "https://two.example"},
+        ]})
+    saved = json.loads(redis.get(key))
+    assert saved["status"] == "failed"
+    assert [step["status"] for step in saved["steps"]] == ["failed", "skipped"]
 
 
 def test_workflow_worker_runs_steps_sequentially_and_saves_progress(monkeypatch):
