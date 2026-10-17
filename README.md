@@ -823,6 +823,29 @@ Next up:
 
 ---
 
+## Grounded intelligence and provenance (early building blocks)
+
+The authenticated `POST /api/v1/ask` endpoint searches the tenant's existing
+index and returns extractive answers with source citations. It does not launch
+an implicit crawl. The request's page/time budget is reserved for future
+retrieval expansion; cost is reported as unavailable, and confidence is a
+heuristic coverage indicator rather than calibrated probability. See
+[`docs/intelligence-provenance.md`](docs/intelligence-provenance.md) for a curl
+example and limits.
+
+`src.api.provenance` provides JSON-serializable record passports and HMAC-SHA256
+manifest signing for callers to attach to records and dataset exports. It does
+not retroactively add lineage to stored datasets or infer legal permissions;
+unknown license and robots states remain explicitly unknown. HMAC is an
+integrity mechanism, not an independent public signature.
+
+These are incremental foundations, not claims that the proposed research agent,
+watch engine, visual workflow builder, graph, SDKs, or enterprise compliance
+capabilities are complete. Engineering targets in this project must be
+benchmarked under documented conditions before being described as achieved.
+
+---
+
 ## 📝 License
 
 MIT — see the repository for details.
