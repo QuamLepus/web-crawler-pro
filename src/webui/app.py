@@ -888,14 +888,68 @@ async def data_studio_export(request: Request, q: str = Query(..., min_length=1,
                                       "Cache-Control": "private, no-store"})
 
 
+def _workflow_dag_preview(workflow: dict) -> dict | None:
+    """Return a bounded, server-laid-out SVG graph model for a valid workflow DAG."""
+    if workflow.get("execution_mode") != "dag":
+        return None
+    steps = workflow.get("steps", [])
+    if not steps:
+        return None
+    ids = [step.get("step_id") or f"step_{index + 1}" for index, step in enumerate(steps)]
+    known = set(ids)
+    by_id = dict(zip(ids, steps))
+    dependencies = {
+        step_id: [dependency for dependency in step.get("depends_on", []) if dependency in known]
+        for step_id, step in zip(ids, steps)
+    }
+    pending = set(ids)
+    levels: dict[str, int] = {}
+    while pending:
+        ready = [step_id for step_id in ids if step_id in pending
+                 and set(dependencies[step_id]) <= levels.keys()]
+        if not ready:
+            return None
+        for step_id in ready:
+            levels[step_id] = max((levels[dependency] + 1
+                                   for dependency in dependencies[step_id]), default=0)
+            pending.remove(step_id)
+    columns: dict[int, list[str]] = {}
+    for step_id in ids:
+        columns.setdefault(levels[step_id], []).append(step_id)
+    positions = {}
+    for level, step_ids in columns.items():
+        for row, step_id in enumerate(step_ids):
+            positions[step_id] = {"x": 24 + level * 300, "y": 24 + row * 120}
+    nodes = []
+    for step_id in ids:
+        step = by_id[step_id]
+        nodes.append({**positions[step_id], "step_id": step_id, "url": step.get("url", ""),
+                      "max_pages": step.get("max_pages", 3),
+                      "obey_robots": step.get("obey_robots", True),
+                      "depends_on": dependencies[step_id]})
+    edges = []
+    for step_id in ids:
+        target = positions[step_id]
+        for dependency in dependencies[step_id]:
+            source = positions[dependency]
+            edges.append({"x1": source["x"] + 210, "y1": source["y"] + 41,
+                          "x2": target["x"], "y2": target["y"] + 41})
+    width = 48 + (max(columns, default=0) + 1) * 300
+    height = max(170, max(map(len, columns.values()), default=1) * 120 + 48)
+    return {"width": width, "height": height, "nodes": nodes, "edges": edges}
+
+
 @router.get("/app/workflows", response_class=HTMLResponse, name="workflows")
 async def workflows_page(request: Request):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
     result, runs = await _gather(api.workflows(), api.workflow_runs())
+    workflows = result.get("items", []) if result.ok else []
+    workflows = [{**workflow, "dag_preview": _workflow_dag_preview(workflow)}
+                 for workflow in workflows]
     return render(request, "workflows.html", page="workflows", me=me,
-                  workflows=result.get("items", []) if result.ok else [],
+                  workflows=workflows,
                   runs=runs.get("items", []) if runs.ok else [],
                   error=result.error if not result.ok else "",
                   title="Workflows — Web Intelligence OS")
