@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% set nodes = graph.get('nodes', []) %}
+{% set edges = graph.get('edges', []) %}
+{% block head %}<style>
+.graph-canvas{display:block;width:100%;height:440px;background:radial-gradient(ellipse at center,rgba(99,102,241,.08),transparent 65%);border:1px solid var(--border);border-radius:var(--r)}
+.graph-legend{display:flex;gap:12px;flex-wrap:wrap}.graph-legend span{font-size:12px;color:var(--text-2)}
+.graph-forms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media(max-width:760px){.graph-forms{grid-template-columns:1fr}.graph-canvas{height:340px}}
+</style>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Overview</a><span>/</span><span>Knowledge graph</span></div>
+  <div class="between"><div><h1>Knowledge graph</h1><p class="dim">Explore tenant-owned entities and relationships. Alias resolution is conservative exact matching; data is not automatically extracted from pages.</p></div><span class="badge">{{ nodes|length }} entities · {{ edges|length }} links</span></div>
+</div>
+{% if error %}<div class="alert danger mb-3">{{ error }}</div>{% endif %}
+<div class="card card-pad mb-3">
+  {% if nodes %}
+    <canvas id="graph-canvas" class="graph-canvas" role="img" aria-label="Interactive graph of {{ nodes|length }} entities and {{ edges|length }} relationships"></canvas>
+    <div class="graph-legend mt-2"><span>Hover nodes to highlight relationships · Click a node to inspect it</span><span class="push">Canvas visualization · no third-party assets</span></div>
+    <div id="graph-detail" class="alert info mt-2" aria-live="polite">Select an entity to inspect its relationships.</div>
+  {% else %}<div class="empty"><h3>No entities yet</h3><p>Add a few entities and connect them. Graph information is tenant-isolated.</p></div>{% endif %}
+</div>
+<div class="graph-forms">
+  <section class="card card-pad">
+    <h2 class="mb-2">Add entity</h2>
+    <form method="post" action="/app/graph/entities" class="stack-sm">
+      <label>Name<input class="input" name="name" required maxlength="256" placeholder="Example Corporation"></label>
+      <label>Type<input class="input" name="entity_type" maxlength="80" value="Company"></label>
+      <label>Aliases, comma separated<input class="input" name="aliases" maxlength="2048" placeholder="Example Corp, Example Co"></label>
+      <button class="btn btn-primary">Save entity</button>
+    </form>
+  </section>
+  <section class="card card-pad">
+    <h2 class="mb-2">Connect entities</h2>
+    {% if nodes|length >= 2 %}<form method="post" action="/app/graph/relations" class="stack-sm">
+      <label>From<select class="select" name="source_id">{% for n in nodes %}<option value="{{ n.entity_id }}">{{ n.name }} ({{ n.entity_type }})</option>{% endfor %}</select></label>
+      <label>Relationship<input class="input" name="relation" required maxlength="80" placeholder="makes, partners with, competes with"></label>
+      <label>To<select class="select" name="target_id">{% for n in nodes %}<option value="{{ n.entity_id }}">{{ n.name }} ({{ n.entity_type }})</option>{% endfor %}</select></label>
+      <button class="btn btn-primary">Connect</button>
+    </form>{% else %}<p class="muted">Add at least two entities before creating a relationship.</p>{% endif %}
+  </section>
+</div>
+{% if nodes %}<details class="card card-pad mt-3"><summary>Accessible entity and relationship list</summary><ul class="mt-2">{% for n in nodes %}<li><b>{{ n.name }}</b> — {{ n.entity_type }}{% if n.aliases %}; aliases: {{ n.aliases|join(', ') }}{% endif %}</li>{% endfor %}</ul><ul class="mt-2">{% for e in edges %}<li>{{ e.source_id }} — {{ e.relation }} → {{ e.target_id }}</li>{% endfor %}</ul></details>{% endif %}
+{% endblock %}
+{% block scripts %}{% if nodes %}<script>
+(() => {
+ const data = {{ graph|tojson }};
+ const canvas = document.getElementById('graph-canvas');
+ const ctx = canvas.getContext('2d');
+ const detail = document.getElementById('graph-detail');
+ let points = [], hover = -1;
+ const palette = ['#818cf8','#22d3ee','#c4a66a','#34d399','#fb7185','#a78bfa'];
+ function resize(){
+   const rect=canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+   canvas.width=Math.max(1,Math.round(rect.width*dpr)); canvas.height=Math.max(1,Math.round(rect.height*dpr));
+   ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+ }
+ function draw(){
+   const w=canvas.clientWidth,h=canvas.clientHeight,cx=w/2,cy=h/2,r=Math.max(80,Math.min(w,h)*.36);
+   points=data.nodes.map((node,i)=>{const a=-Math.PI/2+2*Math.PI*i/data.nodes.length;return {x:cx+r*Math.cos(a),y:cy+r*Math.sin(a),node,index:i};});
+   ctx.clearRect(0,0,w,h);
+   data.edges.forEach(edge=>{
+     const a=points.find(p=>p.node.entity_id===edge.source_id), b=points.find(p=>p.node.entity_id===edge.target_id); if(!a||!b)return;
+     const active=hover<0||a.index===hover||b.index===hover;
+     ctx.strokeStyle=active?'rgba(148,163,184,.56)':'rgba(148,163,184,.12)';ctx.lineWidth=active?1.5:1;
+     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+     if(active){ctx.fillStyle='#94a3b8';ctx.font='11px system-ui';ctx.fillText(edge.relation,(a.x+b.x)/2+4,(a.y+b.y)/2-4);}
+   });
+   points.forEach((p,i)=>{
+     const connected=hover<0||i===hover||data.edges.some(e=>(e.source_id===p.node.entity_id&&points[hover]?.node.entity_id===e.target_id)||(e.target_id===p.node.entity_id&&points[hover]?.node.entity_id===e.source_id));
+     const color=palette[Math.abs(String(p.node.entity_type).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%palette.length];
+     ctx.globalAlpha=connected?1:.22;ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,i===hover?12:9,0,Math.PI*2);ctx.fill();
+     ctx.globalAlpha=1;ctx.fillStyle='#f8fafc';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText(p.node.name.slice(0,28),p.x,p.y+25);
+   });
+ }
+ function nearest(ev){const r=canvas.getBoundingClientRect(),x=ev.clientX-r.left,y=ev.clientY-r.top;let best=-1,dist=22;
+   points.forEach((p,i)=>{const d=Math.hypot(p.x-x,p.y-y);if(d<dist){best=i;dist=d;}});return best;}
+ canvas.addEventListener('mousemove',e=>{hover=nearest(e);canvas.style.cursor=hover<0?'default':'pointer';draw();});
+ canvas.addEventListener('mouseleave',()=>{hover=-1;draw();});
+ canvas.addEventListener('click',e=>{const i=nearest(e);if(i<0)return;const n=points[i].node;const links=data.edges.filter(x=>x.source_id===n.entity_id||x.target_id===n.entity_id).map(x=>`${x.relation}: ${x.source_id===n.entity_id?x.target_id:x.source_id}`);detail.textContent=`${n.name} (${n.entity_type})${n.aliases?.length?` · aliases: ${n.aliases.join(', ')}`:''}${links.length?` · ${links.join(' · ')}`:' · no relationships yet'}`;});
+ new ResizeObserver(resize).observe(canvas);resize();
+})();
+</script>{% endif %}{% endblock %}

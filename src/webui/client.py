@@ -149,6 +149,16 @@ class Api:
     def cancel_job(self, job_id: str) -> Any:
         return self.post(f"/api/v1/jobs/{job_id}/cancel")
 
+    # -- knowledge graph ---------------------------------------------------- #
+    def graph(self, limit: int = 200) -> Any:
+        return self.get("/api/v1/graph", {"limit": limit})
+
+    def graph_entity(self, **body) -> Any:
+        return self.post("/api/v1/graph/entities", body)
+
+    def graph_relation(self, **body) -> Any:
+        return self.post("/api/v1/graph/relations", body)
+
     # -- research ----------------------------------------------------------- #
     def research_create(self, **body) -> Any:
         return self.post("/api/v1/research", body)
