@@ -142,6 +142,7 @@ class SchedulerService:
         "discover": "workers.discovery_tasks.run_discovery",
         "discover_and_crawl": "workers.discovery_tasks.discover_then_crawl",
         "research": "workers.research_tasks.run_research",
+        "workflow": "workers.workflow_tasks.run_workflow",
     }
 
     # Per-kind quota gate: ``kind -> (metric, payload key, fallback amount)``.
@@ -156,6 +157,7 @@ class SchedulerService:
         "discover": ("requests_month", "count", 1),
         "discover_and_crawl": ("requests_month", "count", 1),
         "research": ("requests_month", "estimated_pages", 1),
+        "workflow": ("requests_month", "estimated_pages", 1),
     }
 
     def _submit_celery(self, spec: JobSpec) -> None:  # pragma: no cover - needs broker

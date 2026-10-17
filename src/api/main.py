@@ -343,7 +343,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
     # ---- REST v1 routers ------------------------------------------------------ #
     from src.api.routers import (billing, discovery, jobs, knowledge_graph,
                                  marketplace, provenance, research, search,
-                                 search_index, watch, webhooks)
+                                 search_index, watch, webhooks, workflows)
 
     def _build_v1(prefix: str):
         r = APIRouter(prefix=prefix)
@@ -360,6 +360,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(billing.router)
         r.include_router(marketplace.router)
         r.include_router(search_index.router)
+        r.include_router(workflows.router)
         return r
 
     app.include_router(_build_v1(API_PREFIX))   # canonical: /api/v1/*
