@@ -38,6 +38,27 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
 
+  sdk-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: sdks/package-lock.json
+      - name: Install SDK workspace dependencies
+        working-directory: sdks
+        run: npm ci
+      - name: Build and test all SDK packages
+        working-directory: sdks
+        run: npm test --workspaces --if-present
+      - name: Verify packages can be packed
+        working-directory: sdks
+        run: |
+          npm pack --workspace @webintelligence/sdk --dry-run
+          npm pack --workspace @webintelligence/mcp-server --dry-run
+
   build-and-push:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'

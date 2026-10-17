@@ -18,7 +18,7 @@ full long-term product plan is already shipped.
 | Agent marketplace | Not implemented | Existing dataset marketplace is separate. |
 | Enterprise connectors, SSO, compliance | Not implemented as a complete offering | Do not claim SOC 2/ISO certification or enterprise-ready private integrations. |
 | Performance measurement | Reproducible synthetic own-index query benchmark and a small sandbox baseline are recorded | No production-scale, concurrent/API/browser, reranking, LCP/CLS, or cloud-cost benchmarks; targets remain unverified. |
-| TypeScript SDK + MCP server | Early packages expose ask, research, crawl and watch operations over fetch/stdio | MCP protocol integration tests and published package releases remain; TypeScript integration coverage is limited. |
+| TypeScript SDK + MCP server | Early packages expose ask, research, crawl and watch operations; CI builds/tests both and checks package tarballs; MCP stdio protocol smoke tests cover initialize/list/call/error paths | Not published to npm; MCP HTTP/API integration coverage and SDK endpoint coverage remain limited; no stable compatibility/release policy yet. |
 
 The implemented endpoints are tenant authenticated and tested with fakeredis.
 Production deployments must configure Redis and protect
