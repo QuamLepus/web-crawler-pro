@@ -875,8 +875,9 @@ The tenant-scoped workflow builder supports legacy ordered recipes plus bounded
 step-dependency DAGs (up to 10 steps), cooperative cancellation, and recurring
 runs when Celery Beat is active. DAG steps run serially; failures skip dependent
 steps while independent branches continue. It is not a parallel DAG or script
-engine. Early TypeScript SDK and stdio MCP packages expose workflow and snapshot
-operations, but are not yet published as stable releases.
+engine. Early Python/TypeScript SDK and stdio MCP packages expose workflow
+operations; TypeScript/MCP also expose selected snapshot operations. They are
+not yet published as stable releases.
 Tenant administrators can configure early OIDC SSO with PKCE, encrypted
 client secrets, verified-domain provisioning controls, and an SSO-only audit
 trail; it is not a complete enterprise identity/compliance offer. See

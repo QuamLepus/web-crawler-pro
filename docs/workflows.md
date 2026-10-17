@@ -24,10 +24,10 @@ All endpoints below require an authenticated tenant API key with crawl access.
 | `POST /api/v1/workflows/{workflow_id}/runs` | Queue a run using the current definition snapshot. |
 | `PATCH /api/v1/workflows/{workflow_id}/schedule` | Set or disable the recurring interval without replacing other definition fields. |
 
-The web console supports renaming and deletion; step-by-step definition edits are
-available through the API, TypeScript/Python SDKs, and MCP tools so that
-per-step page limits and robots settings are not silently flattened by a
-simplified form.
+The web console provides a simple URL-list form for sequential recipes and an
+advanced JSON editor for DAG step definitions; its saved-workflow editor retains
+per-step IDs, dependencies, page limits, and robots settings. The API,
+TypeScript/Python SDKs, and MCP tools expose the same definition controls.
 
 Definition edits, run creation, schedule changes, deletion, and scheduled dispatch
 coordinate through a short-lived Redis lock. This prevents a scheduled dispatch

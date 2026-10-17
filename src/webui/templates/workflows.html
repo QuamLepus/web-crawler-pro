@@ -1,16 +1,115 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><div><div class="eyebrow">Automation</div><h1>Workflows</h1><p class="muted">Build and run an ordered set of robots-aware crawl steps.</p></div></div>
-<div class="alert warn mb-3">This first workflow runner supports sequential crawl steps only (maximum 10 URLs, 25 pages per URL). Runs require a configured Celery worker. It is not a general-purpose DAG or script engine.</div>
-<section class="card mb-3"><h2>Create crawl workflow</h2><form method="post" action="/app/workflows/create" class="stack">
-<label>Workflow name<input name="name" required maxlength="100" placeholder="Weekly source refresh"></label>
-<label>URLs — one per line<textarea name="urls" rows="5" required maxlength="12000" placeholder="https://example.org/\nhttps://another.example/news"></textarea></label>
-<label>Maximum pages per URL<input name="max_pages" type="number" min="1" max="25" value="3"></label>
-<label>Recurring schedule <select name="schedule_interval_minutes"><option value="">Manual only</option><option value="60">Every hour</option><option value="360">Every 6 hours</option><option value="1440">Daily</option><option value="10080">Weekly</option></select></label>
-<p class="muted">Robots.txt checks are enabled for every step. The API rejects non-HTTP(S) URLs. Scheduled runs require Celery Beat and workers.</p><button class="btn primary" type="submit">Save workflow</button></form></section>
-{% if error %}<div class="alert warn">{{ error }}</div>{% endif %}
-<section class="card"><h2>Saved workflows</h2>
-{% if workflows %}<div class="stack">{% for workflow in workflows %}<article class="card subtle"><div class="row wrap" style="justify-content:space-between"><div><h3>{{ workflow.name }}</h3><p class="muted">{{ workflow.steps|length }} sequential steps · up to {{ workflow.max_pages }} pages · {% if workflow.schedule_interval_minutes %}every {{ workflow.schedule_interval_minutes }} minutes; next {{ workflow.next_run_at }}{% else %}manual only{% endif %} · created {{ workflow.created_at }}</p></div><div class="row wrap"><form method="post" action="/app/workflows/{{ workflow.workflow_id }}/run"><button class="btn" type="submit">Run now</button></form><form method="post" action="/app/workflows/{{ workflow.workflow_id }}/schedule" class="row"><select name="interval_minutes" aria-label="Workflow recurrence"><option value="">Manual only</option><option value="60">Hourly</option><option value="360">Every 6 hours</option><option value="1440">Daily</option><option value="10080">Weekly</option></select><button class="btn btn-sm" type="submit">Update schedule</button></form></div></div><ol>{% for step in workflow.steps %}<li><code>{{ step.url }}</code> <span class="muted">({{ step.max_pages }} pages, robots {{ 'on' if step.obey_robots else 'off' }})</span></li>{% endfor %}</ol><details class="mt-2"><summary>Rename workflow</summary><form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="row"><label>Name<input name="name" required maxlength="100" value="{{ workflow.name }}"></label><button class="btn btn-sm" type="submit">Save name</button></form><p class="muted">Step definitions can be edited through the tenant API or SDK; changing the name here preserves all step options.</p></details><form method="post" action="/app/workflows/{{ workflow.workflow_id }}/delete" class="mt-2" onsubmit="return confirm('Delete this workflow? Historical runs will remain. Active runs must finish or be cancelled first.');"><button class="btn btn-sm danger" type="submit">Delete workflow</button></form></article>{% endfor %}</div>{% else %}<div class="empty"><div class="empty-icon">⇢</div><p>No workflows created yet.</p></div>{% endif %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Automation</div>
+    <h1>Workflows</h1>
+    <p class="muted">Build and run robots-aware crawl steps, including dependency-based branches.</p>
+  </div>
+</div>
+<div class="alert warn mb-3">
+  Workflows support up to 10 crawl steps and 25 pages per step. DAG steps run serially; a failed step skips its descendants while independent branches continue. Runs require a configured Celery worker.
+</div>
+<section class="card mb-3">
+  <h2>Create crawl workflow</h2>
+  <form method="post" action="/app/workflows/create" class="stack">
+    <label>Workflow name<input name="name" required maxlength="100" placeholder="Weekly source refresh"></label>
+    <label>URLs — one per line for a simple sequential workflow<textarea name="urls" rows="5" maxlength="12000" placeholder="https://example.org/\nhttps://another.example/news"></textarea></label>
+    <label>Maximum pages per URL<input name="max_pages" type="number" min="1" max="25" value="3"></label>
+    <details>
+      <summary>Advanced: define step IDs and dependencies</summary>
+      <p class="muted">Enter a JSON array of step objects. Each step needs a URL. Use a unique <code>step_id</code> and <code>depends_on</code> list for branching; an empty list marks a root step. Omit dependencies to keep the previous-step sequence.</p>
+      <textarea name="steps_json" rows="12" maxlength="12000" spellcheck="false" aria-label="Advanced workflow steps JSON" placeholder='[{"step_id":"seed","depends_on":[],"url":"https://example.org","max_pages":3,"obey_robots":true},{"step_id":"branch","depends_on":["seed"],"url":"https://example.net","max_pages":2,"obey_robots":true}]'></textarea>
+    </details>
+    <label>Recurring schedule
+      <select name="schedule_interval_minutes">
+        <option value="">Manual only</option><option value="60">Every hour</option>
+        <option value="360">Every 6 hours</option><option value="1440">Daily</option>
+        <option value="10080">Weekly</option>
+      </select>
+    </label>
+    <p class="muted">The advanced JSON field takes precedence over the URL list. Robots.txt checks are enabled in the simple form; scheduled runs require Celery Beat and workers.</p>
+    <button class="btn primary" type="submit">Save workflow</button>
+  </form>
 </section>
-<section class="card mt-3"><h2>Recent runs</h2>{% if runs %}<div class="table-wrap"><table><thead><tr><th>Workflow</th><th>Status</th><th>Progress</th><th>Created</th><th>Error</th><th>Actions</th></tr></thead><tbody>{% for run in runs %}<tr><td>{{ run.name }}</td><td><span class="badge {{ 'ok' if run.status == 'completed' else ('danger' if run.status == 'failed' else 'brand') }}">{{ run.status }}</span></td><td>{{ run.step_index }}/{{ run.steps|length }} steps</td><td>{{ run.created_at }}</td><td>{{ run.error or ('Cancellation requested; active step will finish' if run.cancel_requested else '—') }}</td><td>{% if run.status in ['queued', 'running'] and not run.cancel_requested %}<form method="post" action="/app/workflows/runs/{{ run.run_id }}/cancel"><button class="btn btn-sm danger" type="submit">Cancel</button></form>{% elif run.cancel_requested %}<span class="muted">Stopping after current step</span>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">No workflow runs yet.</p>{% endif %}</section>
+{% if error %}<div class="alert warn">{{ error }}</div>{% endif %}
+<section class="card">
+  <h2>Saved workflows</h2>
+  {% if workflows %}
+  <div class="stack">
+    {% for workflow in workflows %}
+    <article class="card subtle">
+      <div class="row wrap" style="justify-content:space-between">
+        <div>
+          <h3>{{ workflow.name }}</h3>
+          <p class="muted">{{ workflow.steps|length }} steps · {{ 'dependency DAG' if workflow.execution_mode == 'dag' else 'sequential' }} · up to {{ workflow.max_pages }} pages · {% if workflow.schedule_interval_minutes %}every {{ workflow.schedule_interval_minutes }} minutes; next {{ workflow.next_run_at }}{% else %}manual only{% endif %} · created {{ workflow.created_at }}</p>
+        </div>
+        <div class="row wrap">
+          <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/run"><button class="btn" type="submit">Run now</button></form>
+          <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/schedule" class="row">
+            <select name="interval_minutes" aria-label="Workflow recurrence">
+              <option value="">Manual only</option><option value="60">Hourly</option>
+              <option value="360">Every 6 hours</option><option value="1440">Daily</option>
+              <option value="10080">Weekly</option>
+            </select>
+            <button class="btn btn-sm" type="submit">Update schedule</button>
+          </form>
+        </div>
+      </div>
+      <ol>
+        {% for step in workflow.steps %}
+        <li><code>{{ step.step_id or ('step_' ~ loop.index) }}</code> — <code>{{ step.url }}</code>
+          <span class="muted">({{ step.max_pages }} pages, robots {{ 'on' if step.obey_robots else 'off' }}
+            {% if workflow.execution_mode == 'dag' %}{% if step.depends_on %}; depends on {{ step.depends_on|join(', ') }}{% else %}; root step{% endif %}
+            {% elif loop.first %}; root step{% else %}; depends on step_{{ loop.index0 }}{% endif %})
+          </span>
+        </li>
+        {% endfor %}
+      </ol>
+      <details class="mt-2">
+        <summary>Edit workflow definition</summary>
+        <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="stack">
+          <label>Name<input name="name" required maxlength="100" value="{{ workflow.name }}"></label>
+          <label>Steps JSON — edit <code>step_id</code>, <code>depends_on</code>, URL, page limit, and robots policy
+            <textarea name="steps_json" rows="12" required maxlength="12000" spellcheck="false">{{ workflow.steps|tojson(indent=2) }}</textarea>
+          </label>
+          <button class="btn btn-sm" type="submit">Save definition</button>
+        </form>
+      </details>
+      <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/delete" class="mt-2" onsubmit="return confirm('Delete this workflow? Historical runs will remain. Active runs must finish or be cancelled first.');">
+        <button class="btn btn-sm danger" type="submit">Delete workflow</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty"><div class="empty-icon">⇢</div><p>No workflows created yet.</p></div>
+  {% endif %}
+</section>
+<section class="card mt-3">
+  <h2>Recent runs</h2>
+  {% if runs %}
+  <div class="table-wrap">
+    <table><thead><tr><th>Workflow</th><th>Status</th><th>Progress</th><th>Created</th><th>Error</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>{{ run.name }}</td>
+          <td><span class="badge {{ 'ok' if run.status == 'completed' else ('danger' if run.status == 'failed' else 'brand') }}">{{ run.status }}</span></td>
+          <td>{{ run.step_index }}/{{ run.steps|length }} steps</td>
+          <td>{{ run.created_at }}</td>
+          <td>{{ run.error or ('Cancellation requested; active step will finish' if run.cancel_requested else '—') }}</td>
+          <td>
+            {% if run.status in ['queued', 'running'] and not run.cancel_requested %}
+            <form method="post" action="/app/workflows/runs/{{ run.run_id }}/cancel"><button class="btn btn-sm danger" type="submit">Cancel</button></form>
+            {% elif run.cancel_requested %}<span class="muted">Stopping after current step</span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
+</section>
 {% endblock %}

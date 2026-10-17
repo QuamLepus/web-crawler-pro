@@ -682,7 +682,8 @@ def test_workflow_builder_page_is_authenticated_and_shows_boundaries(signed_in):
     response = signed_in.get("/app/workflows")
     assert response.status_code == 200
     assert "Create crawl workflow" in response.text
-    assert "maximum 10 URLs" in response.text
+    assert "up to 10 crawl steps" in response.text
+    assert "Advanced: define step IDs and dependencies" in response.text
     assert "Recurring schedule" in response.text
     assert "/app/workflows" in signed_in.get("/app").text
 
@@ -912,6 +913,69 @@ def test_workflow_console_rename_and_delete(signed_in, monkeypatch):
         ("update", "workflow_aaaaaaaaaaaaaaaaaaaa", {"name": "Renamed"}),
         ("delete", "workflow_aaaaaaaaaaaaaaaaaaaa"),
     ]
+
+
+def test_workflow_console_creates_and_edits_dependency_graphs(signed_in, monkeypatch):
+    import json
+
+    from src.webui.client import Api, Result
+
+    calls = []
+
+    async def create(self, **body):
+        calls.append(("create", body))
+        return Result(True, data={"workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa"})
+
+    async def update(self, workflow_id, **body):
+        calls.append(("update", workflow_id, body))
+        return Result(True, data={"workflow_id": workflow_id})
+
+    monkeypatch.setattr(Api, "workflow_create", create)
+    monkeypatch.setattr(Api, "workflow_update", update)
+    steps = [
+        {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+        {"step_id": "branch", "depends_on": ["seed"],
+         "url": "https://branch.example", "max_pages": 2},
+    ]
+    created = signed_in.post("/app/workflows/create", data={
+        "name": "Branched", "steps_json": json.dumps(steps),
+    }, follow_redirects=False)
+    updated = signed_in.post("/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/edit", data={
+        "name": "Branched v2", "steps_json": json.dumps(steps),
+    }, follow_redirects=False)
+    assert created.status_code == updated.status_code == 303
+    assert calls[0] == ("create", {"name": "Branched", "steps": steps,
+                                    "schedule_interval_minutes": None})
+    assert calls[1] == ("update", "workflow_aaaaaaaaaaaaaaaaaaaa",
+                        {"name": "Branched v2", "steps": steps})
+
+
+def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def workflows(self):
+        return Result(True, data={"items": [{
+            "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa", "name": "Branching",
+            "execution_mode": "dag", "max_pages": 3, "schedule_interval_minutes": None,
+            "created_at": "today", "steps": [
+                {"step_id": "seed", "depends_on": [], "url": "https://seed.example",
+                 "max_pages": 1, "obey_robots": True},
+                {"step_id": "branch", "depends_on": ["seed"],
+                 "url": "https://branch.example", "max_pages": 2, "obey_robots": True},
+            ],
+        }]})
+
+    async def runs(self):
+        return Result(True, data={"items": []})
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+    page = signed_in.get("/app/workflows")
+    assert page.status_code == 200
+    assert "dependency DAG" in page.text
+    assert "depends on seed" in page.text
+    assert '"depends_on": [' in page.text
+    assert '"seed"' in page.text
 
 
 def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch):
