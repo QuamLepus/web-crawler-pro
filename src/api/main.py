@@ -349,6 +349,8 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(jobs.router)
         r.include_router(discovery.router)
         r.include_router(search.router)
+        from src.api.routers import ask
+        r.include_router(ask.router)
         r.include_router(webhooks.router)
         r.include_router(billing.router)
         r.include_router(marketplace.router)
