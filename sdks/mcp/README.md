@@ -10,8 +10,9 @@ Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,
 `wio_studio_analytics`, and `wio_studio_snapshot_get`. Workflow tools operate on
-bounded sequential crawl recipes; cancellation takes effect after the active
-crawl step completes. Creation can optionally schedule runs (minimum 60 minutes),
+bounded sequential or dependency-DAG crawl recipes; DAG steps run serially,
+and failed steps skip descendants while independent branches continue. Workflow
+cancellation takes effect after the active crawl step completes. Creation can optionally schedule runs (minimum 60 minutes),
 which requires Celery Beat and workflow workers to be running.
 
 ```sh

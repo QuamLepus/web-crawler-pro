@@ -129,7 +129,11 @@ test('MCP workflow update and delete tools preserve API semantics', async () => 
   try {
     const updated = await client.callTool({ name: 'wio_workflow_update', arguments: {
       workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa', name: 'Revised',
-      steps: [{ url: 'https://example.net', max_pages: 5, obey_robots: false }],
+      steps: [
+        { url: 'https://example.net', max_pages: 5, obey_robots: false,
+          step_id: 'seed', depends_on: [] },
+        { url: 'https://result.example', step_id: 'result', depends_on: ['seed'] },
+      ],
       schedule_interval_minutes: null,
     } });
     const deleted = await client.callTool({ name: 'wio_workflow_delete', arguments: {
@@ -141,7 +145,12 @@ test('MCP workflow update and delete tools preserve API semantics', async () => 
     assert.equal(requests[0].url,
       'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa');
     assert.deepEqual(requests[0].body, { name: 'Revised',
-      steps: [{ url: 'https://example.net', max_pages: 5, obey_robots: false }],
+      steps: [
+        { url: 'https://example.net', max_pages: 5, obey_robots: false,
+          step_id: 'seed', depends_on: [] },
+        { url: 'https://result.example', max_pages: 3, obey_robots: true,
+          step_id: 'result', depends_on: ['seed'] },
+      ],
       schedule_interval_minutes: null });
     assert.equal(requests[1].method, 'DELETE');
     assert.equal(requests[1].url, requests[0].url);

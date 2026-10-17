@@ -1,7 +1,8 @@
-"""Tenant-scoped sequential crawl recipes and asynchronous executions.
+"""Tenant-scoped bounded crawl recipes and asynchronous executions.
 
-This is intentionally a small, typed workflow runner: a workflow is an ordered
-list of permitted HTTP(S) crawl steps. It is not a general DAG/script engine.
+Workflows contain up to ten permitted HTTP(S) steps. Legacy definitions execute
+sequentially; explicit dependencies enable bounded DAG branching, still executed
+serially by one worker. This is not a general DAG/script engine.
 """
 from __future__ import annotations
 
@@ -30,9 +31,26 @@ TTL = 30 * 24 * 60 * 60
 
 
 class CrawlStep(BaseModel):
+    step_id: str | None = Field(default=None, min_length=1, max_length=40)
+    depends_on: list[str] | None = Field(default=None, max_length=9,
+                                         description="Step IDs that must complete first; omitted means the previous step")
     url: str = Field(min_length=1, max_length=2048)
     max_pages: int = Field(default=3, ge=1, le=25)
     obey_robots: bool = True
+
+    @field_validator("step_id")
+    @classmethod
+    def valid_step_id(cls, value: str | None) -> str | None:
+        if value is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,39}", value):
+            raise ValueError("step_id must start with a letter and contain only letters, digits, _ or -")
+        return value
+
+    @field_validator("depends_on")
+    @classmethod
+    def unique_dependencies(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("depends_on cannot contain duplicate step IDs")
+        return value
 
     @field_validator("url")
     @classmethod
@@ -90,6 +108,38 @@ def _decode(raw) -> dict:
     return json.loads(raw.decode() if isinstance(raw, bytes) else raw)
 
 
+def _prepare_steps(steps: list[CrawlStep]) -> tuple[list[dict], str]:
+    """Normalize IDs/default ordering and validate an acyclic dependency graph."""
+    ids = [step.step_id or f"step_{index + 1}" for index, step in enumerate(steps)]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(422, "step_id values must be unique")
+    known = set(ids)
+    prepared = []
+    has_explicit_graph = False
+    for index, (step, step_id) in enumerate(zip(steps, ids)):
+        explicit = "depends_on" in step.model_fields_set and step.depends_on is not None
+        has_explicit_graph |= explicit
+        dependencies = (step.depends_on if explicit else (ids[index - 1:index] if index else []))
+        if step_id in dependencies:
+            raise HTTPException(422, f"step {step_id} cannot depend on itself")
+        unknown = set(dependencies) - known
+        if unknown:
+            raise HTTPException(422, f"step {step_id} depends on unknown IDs: {', '.join(sorted(unknown))}")
+        prepared.append({"step_id": step_id, "depends_on": dependencies, **step.model_dump(
+            exclude={"step_id", "depends_on"})})
+
+    pending = {step["step_id"]: set(step["depends_on"]) for step in prepared}
+    resolved = set()
+    while pending:
+        ready = {step_id for step_id, dependencies in pending.items() if dependencies <= resolved}
+        if not ready:
+            raise HTTPException(422, "workflow step dependencies must form an acyclic graph")
+        resolved.update(ready)
+        for step_id in ready:
+            del pending[step_id]
+    return prepared, "dag" if has_explicit_graph else "sequential"
+
+
 def _workflow(request: Request, workflow_id: str, tenant: str) -> dict:
     if not re.fullmatch(r"workflow_[a-f0-9]{20}", workflow_id):
         raise HTTPException(404, "workflow not found")
@@ -139,15 +189,16 @@ def _active_workflow_runs(redis, workflow_id: str) -> list[str]:
     return active
 
 
-@router.post("", status_code=201, summary="Create a sequential crawl workflow")
+@router.post("", status_code=201, summary="Create a bounded crawl workflow")
 async def create_workflow(body: WorkflowCreate, request: Request, ctx: CtxDep) -> dict:
     tenant = str(ctx["tenant"])
     workflow_id = "workflow_" + uuid.uuid4().hex[:20]
     now = datetime.now(timezone.utc).isoformat()
     next_run = (time.time() + body.schedule_interval_minutes * 60
                 if body.schedule_interval_minutes else None)
+    steps, execution_mode = _prepare_steps(body.steps)
     record = {"workflow_id": workflow_id, "tenant": tenant, "name": body.name,
-              "steps": [step.model_dump() for step in body.steps],
+              "steps": steps, "execution_mode": execution_mode,
               "max_pages": body.max_pages,
               "schedule_interval_minutes": body.schedule_interval_minutes,
               "next_run_at": (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
@@ -217,8 +268,10 @@ async def update_workflow(workflow_id: str, body: WorkflowUpdate,
         if "name" in body.model_fields_set:
             record["name"] = body.name
         if "steps" in body.model_fields_set:
-            record["steps"] = [step.model_dump() for step in body.steps]
-            record["max_pages"] = sum(step.max_pages for step in body.steps)
+            steps, execution_mode = _prepare_steps(body.steps)
+            record["steps"] = steps
+            record["execution_mode"] = execution_mode
+            record["max_pages"] = sum(step["max_pages"] for step in steps)
         if "schedule_interval_minutes" in body.model_fields_set:
             interval = body.schedule_interval_minutes
             next_run = time.time() + interval * 60 if interval else None
@@ -294,10 +347,17 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         definition = _workflow(request, workflow_id, tenant)
         run_id = "wfrun_" + uuid.uuid4().hex[:20]
         now = datetime.now(timezone.utc).isoformat()
+        step_states = []
+        for index, step in enumerate(definition["steps"]):
+            step_id = step.get("step_id", f"step_{index + 1}")
+            dependencies = step.get("depends_on", [f"step_{index}"] if index else [])
+            step_states.append({"step_id": step_id, "depends_on": dependencies,
+                                "url": step["url"], "status": "queued",
+                                "pages_done": 0, "error": None})
         record = {"run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
                   "name": definition["name"], "status": "queued", "step_index": 0,
-                  "steps": [{"url": s["url"], "status": "queued", "pages_done": 0, "error": None}
-                            for s in definition["steps"]],
+                  "execution_mode": definition.get("execution_mode", "sequential"),
+                  "steps": step_states,
                   "created_at": now, "updated_at": now, "error": None}
         run_key = RUN_KEY.format(run_id=run_id)
         now_ts = time.time()
@@ -307,7 +367,8 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         pipe.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now_ts})
         pipe.execute()
         payload = {"run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
-                   "steps": definition["steps"]}
+                   "steps": definition["steps"],
+                   "execution_mode": definition.get("execution_mode", "sequential")}
         spec = JobSpec(kind="workflow", tenant=tenant, job_id=run_id,
                        priority=JobPriority.NORMAL,
                        payload={**payload, "estimated_pages": definition["max_pages"]})

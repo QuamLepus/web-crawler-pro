@@ -48,10 +48,12 @@ def _finish_cancelled(redis, run_id: str, key: str, record: dict) -> dict:
 
 @app.task(name="workers.workflow_tasks.run_workflow", bind=True, max_retries=0)
 def run_workflow(self, payload: dict) -> dict:
-    """Execute crawl steps in order, honoring cancellation between steps.
+    """Execute a legacy sequence or serially dispatched dependency DAG.
 
-    A crawl already running is not interrupted mid-request; a cancellation is
-    applied immediately after that crawl returns and before another step starts.
+    Legacy sequences are fail-fast. DAG failures skip dependent steps while
+    independent branches continue; the run still ends failed. A crawl already
+    running is not interrupted mid-request, and cancellation takes effect after
+    that crawl returns and before another step starts.
     """
     from workers.crawl_tasks import run_crawl
 
@@ -67,35 +69,80 @@ def run_workflow(self, payload: dict) -> dict:
     _save(redis, run_id, record)
     try:
         steps = payload.get("steps", [])
+        states = record.setdefault("steps", [])
         for index, definition in enumerate(steps):
+            step_id = definition.get("step_id", f"step_{index + 1}")
+            dependencies = definition.get("depends_on", [f"step_{index}"] if index else [])
+            states[index].setdefault("step_id", step_id)
+            states[index].setdefault("depends_on", dependencies)
+        mode = record.get("execution_mode", payload.get("execution_mode", "sequential"))
+        remaining = set(range(len(steps)))
+        failed_steps = []
+
+        while remaining:
             latest = _read(redis, key)
             if latest.get("status") == "cancelled" or latest.get("cancel_requested"):
                 return _finish_cancelled(redis, run_id, key, {**record, **latest})
-            record["step_index"] = index
-            record["steps"][index].update(status="running", started_at=datetime.now(timezone.utc).isoformat())
-            _save(redis, run_id, record)
-            result = run_crawl({
-                "url": definition["url"], "max_pages": int(definition.get("max_pages", 3)),
-                "obey_robots": bool(definition.get("obey_robots", True)),
-                "stealth": False, "tenant": payload["tenant"],
-                "job_id": f"{run_id}_{index + 1}",
-            }, redis_client=redis)
-            latest = _read(redis, key)
-            record["cancel_requested"] = bool(latest.get("cancel_requested"))
-            failed = bool(result.get("failures")) and not result.get("collected")
-            record["steps"][index].update(
-                status="failed" if failed else "completed",
-                pages_done=int(result.get("pages_done", 0)),
-                items_collected=int(result.get("items", 0)),
-                data_sha256=result.get("data_sha256"),
-                error="; ".join(result.get("failures", []))[:500] or None,
-                completed_at=datetime.now(timezone.utc).isoformat(),
-            )
-            if failed:
-                raise RuntimeError(record["steps"][index]["error"] or "crawl step failed")
-            _save(redis, run_id, record)
-            if record["cancel_requested"]:
-                return _finish_cancelled(redis, run_id, key, record)
+            status_by_id = {step.get("step_id", f"step_{index + 1}"): step.get("status")
+                            for index, step in enumerate(states)}
+            advanced = False
+            for index in sorted(remaining):
+                definition = steps[index]
+                step_state = states[index]
+                step_id = step_state["step_id"]
+                dependencies = definition.get("depends_on", step_state.get("depends_on", []))
+                dependency_statuses = [status_by_id.get(dependency, "queued")
+                                       for dependency in dependencies]
+                if any(status in {"failed", "skipped", "cancelled"}
+                       for status in dependency_statuses):
+                    step_state.update(status="skipped", error="a prerequisite step did not complete",
+                                      completed_at=datetime.now(timezone.utc).isoformat())
+                    remaining.remove(index)
+                    _save(redis, run_id, record)
+                    advanced = True
+                    break
+                if not all(status == "completed" for status in dependency_statuses):
+                    continue
+
+                record["step_index"] = index
+                step_state.update(status="running", error=None,
+                                  started_at=datetime.now(timezone.utc).isoformat())
+                _save(redis, run_id, record)
+                result = run_crawl({
+                    "url": definition["url"],
+                    "max_pages": int(definition.get("max_pages", 3)),
+                    "obey_robots": bool(definition.get("obey_robots", True)),
+                    "stealth": False, "tenant": payload["tenant"],
+                    "job_id": f"{run_id}_{index + 1}",
+                }, redis_client=redis)
+                latest = _read(redis, key)
+                record["cancel_requested"] = bool(latest.get("cancel_requested"))
+                failed = bool(result.get("failures")) and not result.get("collected")
+                error = "; ".join(result.get("failures", []))[:500] or None
+                step_state.update(
+                    status="failed" if failed else "completed",
+                    pages_done=int(result.get("pages_done", 0)),
+                    items_collected=int(result.get("items", 0)),
+                    data_sha256=result.get("data_sha256"), error=error,
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                )
+                remaining.remove(index)
+                advanced = True
+                if failed:
+                    failed_steps.append(step_id)
+                    if mode != "dag":
+                        raise RuntimeError(error or "crawl step failed")
+                _save(redis, run_id, record)
+                if record["cancel_requested"]:
+                    return _finish_cancelled(redis, run_id, key, record)
+                break
+            if not advanced:
+                raise RuntimeError("workflow graph has no runnable step; definition may be invalid")
+
+        if failed_steps:
+            error = "workflow steps failed: " + ", ".join(failed_steps)
+            record.update(step_index=len(steps), completed_at=datetime.now(timezone.utc).isoformat())
+            raise RuntimeError(error[:500])
         record.update(status="completed", step_index=len(steps), error=None,
                       completed_at=datetime.now(timezone.utc).isoformat())
         _save(redis, run_id, record)
@@ -151,11 +198,18 @@ def schedule_tick(self, batch: int = 50) -> dict:
             tenant = str(definition["tenant"])
             run_id = "wfrun_" + uuid.uuid4().hex[:20]
             now_iso = datetime.now(timezone.utc).isoformat()
+            run_steps = []
+            for index, step in enumerate(definition["steps"]):
+                step_id = step.get("step_id", f"step_{index + 1}")
+                dependencies = step.get("depends_on", [f"step_{index}"] if index else [])
+                run_steps.append({"step_id": step_id, "depends_on": dependencies,
+                                  "url": step["url"], "status": "queued",
+                                  "pages_done": 0, "error": None})
             record = {
                 "run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
                 "name": definition["name"], "status": "queued", "step_index": 0,
-                "steps": [{"url": step["url"], "status": "queued", "pages_done": 0,
-                           "error": None} for step in definition["steps"]],
+                "execution_mode": definition.get("execution_mode", "sequential"),
+                "steps": run_steps,
                 "created_at": now_iso, "updated_at": now_iso, "error": None,
                 "scheduled": True,
             }
@@ -170,6 +224,7 @@ def schedule_tick(self, batch: int = 50) -> dict:
                     priority=JobPriority.NORMAL,
                     payload={"run_id": run_id, "workflow_id": workflow_id,
                              "tenant": tenant, "steps": definition["steps"],
+                             "execution_mode": definition.get("execution_mode", "sequential"),
                              "estimated_pages": int(definition.get("max_pages", 1))},
                 ))
                 queued += 1

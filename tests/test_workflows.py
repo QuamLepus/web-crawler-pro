@@ -2,6 +2,7 @@
 import json
 
 import fakeredis
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_api_app
@@ -35,6 +36,9 @@ def test_workflow_create_list_run_and_tenant_isolation():
     definition = created.json()
     assert definition["name"] == "News refresh"
     assert definition["max_pages"] == 3
+    assert definition["execution_mode"] == "sequential"
+    assert [(step["step_id"], step["depends_on"]) for step in definition["steps"]] == [
+        ("step_1", []), ("step_2", ["step_1"])]
     assert client.get("/api/v1/workflows", headers=one).json()["total"] == 1
     assert client.get(f"/api/v1/workflows/{definition['workflow_id']}", headers=two).status_code == 404
     run = client.post(f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=one)
@@ -97,6 +101,113 @@ def test_workflow_validates_url_and_limits():
         "name": "bad", "steps": [{"url": "file:///etc/passwd"}]}).status_code == 422
     assert client.post("/api/v1/workflows", headers=headers, json={
         "name": "too many", "steps": [{"url": f"https://e{i}.example"} for i in range(11)]}).status_code == 422
+
+
+def test_workflow_dag_definition_validates_and_preserves_dependencies():
+    client = _client()
+    headers = _key(client, "workflow-dag@example.test")
+    payload = {"name": "Branched recipe", "steps": [
+        {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+        {"step_id": "news", "depends_on": ["seed"], "url": "https://news.example"},
+        {"step_id": "research", "depends_on": ["seed"], "url": "https://research.example"},
+        {"step_id": "report", "depends_on": ["news", "research"],
+         "url": "https://report.example"},
+    ]}
+    created = client.post("/api/v1/workflows", headers=headers, json=payload)
+    assert created.status_code == 201, created.text
+    definition = created.json()
+    assert definition["execution_mode"] == "dag"
+    assert [step["depends_on"] for step in definition["steps"]] == [
+        [], ["seed"], ["seed"], ["news", "research"]]
+    assert definition["steps"][3]["step_id"] == "report"
+    run = client.post(f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=headers)
+    assert run.status_code == 202, run.text
+    state = client.get(f"/api/v1/workflows/runs/{run.json()['run_id']}", headers=headers).json()
+    assert state["execution_mode"] == "dag"
+    assert [step["step_id"] for step in state["steps"]] == ["seed", "news", "research", "report"]
+    edited = client.put(f"/api/v1/workflows/{definition['workflow_id']}", headers=headers,
+                        json={"steps": [
+                            {"step_id": "fresh", "depends_on": [], "url": "https://fresh.example"},
+                            {"step_id": "summary", "depends_on": ["fresh"],
+                             "url": "https://summary.example"},
+                        ]})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["execution_mode"] == "dag"
+    assert client.get(f"/api/v1/workflows/runs/{run.json()['run_id']}", headers=headers).json()["steps"][0]["step_id"] == "seed"
+
+    for invalid_steps in [
+        [{"step_id": "same", "url": "https://one.example"},
+         {"step_id": "same", "url": "https://two.example"}],
+        [{"step_id": "one", "depends_on": ["missing"], "url": "https://one.example"}],
+        [{"step_id": "one", "depends_on": ["two"], "url": "https://one.example"},
+         {"step_id": "two", "depends_on": ["one"], "url": "https://two.example"}],
+    ]:
+        response = client.post("/api/v1/workflows", headers=headers,
+                               json={"name": "Invalid graph", "steps": invalid_steps})
+        assert response.status_code == 422, response.text
+
+
+def test_workflow_worker_runs_dag_branches_in_order_and_joins(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    run_id = "wfrun_eeeeeeeeeeeeeeeeeeee"
+    workflow_id = "workflow_eeeeeeeeeeeeeeeeeeee"
+    key = f"wcp:v1:workflow_run:{run_id}"
+    steps = [
+        {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+        {"step_id": "news", "depends_on": ["seed"], "url": "https://news.example"},
+        {"step_id": "research", "depends_on": ["seed"], "url": "https://research.example"},
+        {"step_id": "report", "depends_on": ["news", "research"], "url": "https://report.example"},
+    ]
+    redis.set(key, json.dumps({"run_id": run_id, "workflow_id": workflow_id,
+        "tenant": "tenant", "status": "queued", "execution_mode": "dag",
+        "step_index": 0, "steps": [{"step_id": step["step_id"],
+        "depends_on": step["depends_on"], "url": step["url"], "status": "queued"}
+        for step in steps]}))
+    monkeypatch.setattr(workflow_tasks, "_redis", lambda: redis)
+    seen = []
+
+    def fake_crawl(payload, redis_client=None):
+        seen.append(payload["url"])
+        return {"failures": [], "pages_done": 1, "items": 1, "collected": [{}]}
+
+    monkeypatch.setattr("workers.crawl_tasks.run_crawl", fake_crawl)
+    result = workflow_tasks.run_workflow.run({"run_id": run_id, "tenant": "tenant",
+        "execution_mode": "dag", "steps": steps})
+    saved = json.loads(redis.get(key))
+    assert result["status"] == "completed"
+    assert seen == [step["url"] for step in steps]
+    assert [step["status"] for step in saved["steps"]] == ["completed"] * 4
+
+
+def test_workflow_dag_skips_dependants_after_failure_but_runs_independent_branch(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    run_id = "wfrun_ffffffffffffffffffff"
+    key = f"wcp:v1:workflow_run:{run_id}"
+    steps = [
+        {"step_id": "bad", "depends_on": [], "url": "https://bad.example"},
+        {"step_id": "blocked", "depends_on": ["bad"], "url": "https://blocked.example"},
+        {"step_id": "independent", "depends_on": [], "url": "https://independent.example"},
+    ]
+    redis.set(key, json.dumps({"run_id": run_id, "workflow_id": "workflow_ffffffffffffffffffff",
+        "tenant": "tenant", "status": "queued", "execution_mode": "dag", "step_index": 0,
+        "steps": [{**step, "status": "queued"} for step in steps]}))
+    monkeypatch.setattr(workflow_tasks, "_redis", lambda: redis)
+    seen = []
+
+    def fake_crawl(payload, redis_client=None):
+        seen.append(payload["url"])
+        return ({"failures": ["crawl failed"], "pages_done": 0, "items": 0, "collected": []}
+                if payload["url"] == "https://bad.example" else
+                {"failures": [], "pages_done": 1, "items": 1, "collected": [{}]})
+
+    monkeypatch.setattr("workers.crawl_tasks.run_crawl", fake_crawl)
+    with pytest.raises(RuntimeError, match="workflow steps failed: bad"):
+        workflow_tasks.run_workflow.run({"run_id": run_id, "tenant": "tenant",
+            "execution_mode": "dag", "steps": steps})
+    saved = json.loads(redis.get(key))
+    assert saved["status"] == "failed"
+    assert seen == ["https://bad.example", "https://independent.example"]
+    assert [step["status"] for step in saved["steps"]] == ["failed", "skipped", "completed"]
 
 
 def test_workflow_worker_runs_steps_sequentially_and_saves_progress(monkeypatch):
@@ -213,9 +324,15 @@ def test_scheduler_tick_queues_due_workflow_once_and_advances_due_time(monkeypat
     redis = fakeredis.FakeStrictRedis(decode_responses=True)
     workflow_id = "workflow_dddddddddddddddddddd"
     now = __import__("time").time()
+    scheduled_steps = [
+        {"step_id": "seed", "depends_on": [], "url": "https://due.example",
+         "max_pages": 1, "obey_robots": True},
+        {"step_id": "followup", "depends_on": ["seed"],
+         "url": "https://followup.example", "max_pages": 1, "obey_robots": True},
+    ]
     redis.set(f"wcp:v1:workflow:{workflow_id}", json.dumps({
         "workflow_id": workflow_id, "tenant": "tenant", "name": "Scheduled",
-        "steps": [{"url": "https://due.example", "max_pages": 2, "obey_robots": True}],
+        "steps": scheduled_steps, "execution_mode": "dag",
         "max_pages": 2, "schedule_interval_minutes": 60,
     }))
     redis.zadd("wcp:v1:workflow_schedules", {workflow_id: now - 1})
@@ -235,11 +352,15 @@ def test_scheduler_tick_queues_due_workflow_once_and_advances_due_time(monkeypat
     assert len(submitted) == 1
     assert submitted[0].kind == "workflow"
     assert submitted[0].payload["steps"][0]["url"] == "https://due.example"
+    assert submitted[0].payload["execution_mode"] == "dag"
+    assert submitted[0].payload["steps"][1]["depends_on"] == ["seed"]
     queued = redis.zrevrange("wcp:v1:workflow_runs:tenant", 0, 0)
     assert queued
     run_id = queued[0]
     run = json.loads(redis.get(f"wcp:v1:workflow_run:{run_id}"))
     assert run["scheduled"] is True and run["status"] == "queued"
+    assert run["execution_mode"] == "dag"
+    assert run["steps"][1]["depends_on"] == ["seed"]
     assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) > now
     assert redis.zscore(f"wcp:v1:workflow_active_runs:{workflow_id}", run_id) is not None
     # The short lock prevents duplicate dispatch if two ticks overlap.

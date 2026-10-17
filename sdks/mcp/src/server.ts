@@ -14,6 +14,15 @@ function failure(error: unknown) {
     isError: true };
 }
 
+const workflowStepSchema = z.object({
+  step_id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).optional(),
+  depends_on: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/)).max(9)
+    .refine((ids) => new Set(ids).size === ids.length, "depends_on IDs must be unique").optional(),
+  url: z.string().url(),
+  max_pages: z.number().int().min(1).max(25).optional(),
+  obey_robots: z.boolean().optional(),
+});
+
 export function buildServer(client: WebIntelligenceClient) {
   const server = new McpServer({ name: "web-intelligence-os", version: "0.1.0" });
 
@@ -64,13 +73,14 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_workflow_create", "Create a sequential robots-aware crawl workflow (up to 10 steps; not a general DAG).", {
+  server.tool("wio_workflow_create", "Create a bounded workflow with sequential defaults or explicit DAG dependencies (up to 10 steps; execution is serial).", {
     name: z.string().min(1).max(100),
-    steps: z.array(z.object({ url: z.string().url(), max_pages: z.number().int().min(1).max(25).optional() })).min(1).max(10),
+    steps: z.array(workflowStepSchema).min(1).max(10),
     schedule_interval_minutes: z.number().int().min(60).max(10080).optional(),
   }, async ({ name, steps, schedule_interval_minutes }) => {
     try { return result(await client.createWorkflow(name, steps.map((step) => ({
-      url: step.url, maxPages: step.max_pages, obeyRobots: true,
+      url: step.url, maxPages: step.max_pages, obeyRobots: step.obey_robots ?? true,
+      stepId: step.step_id, dependsOn: step.depends_on,
     })), schedule_interval_minutes)); }
     catch (error) { return failure(error); }
   });
@@ -98,17 +108,17 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_workflow_update", "Update a workflow name, ordered steps, or recurring schedule. Omitted fields are unchanged; a null schedule disables recurrence.", {
+  server.tool("wio_workflow_update", "Update workflow metadata, ordered steps, or schedule. Omitted fields are unchanged; null disables recurrence. Step dependencies enable bounded serial DAG execution.", {
     workflow_id: z.string().regex(/^workflow_[a-f0-9]{20}$/),
     name: z.string().min(1).max(100).optional(),
-    steps: z.array(z.object({ url: z.string().url(), max_pages: z.number().int().min(1).max(25).optional(),
-      obey_robots: z.boolean().optional() })).min(1).max(10).optional(),
+    steps: z.array(workflowStepSchema).min(1).max(10).optional(),
     schedule_interval_minutes: z.number().int().min(60).max(10080).nullable().optional(),
   }, async ({ workflow_id, name, steps, schedule_interval_minutes }) => {
     try { return result(await client.updateWorkflow(workflow_id, {
       ...(name === undefined ? {} : { name }),
       ...(steps === undefined ? {} : { steps: steps.map((step) => ({
-        url: step.url, maxPages: step.max_pages, obeyRobots: step.obey_robots,
+        url: step.url, maxPages: step.max_pages, obeyRobots: step.obey_robots ?? true,
+        stepId: step.step_id, dependsOn: step.depends_on,
       })) }),
       ...(schedule_interval_minutes === undefined ? {} :
         { scheduleIntervalMinutes: schedule_interval_minutes }),

@@ -70,6 +70,30 @@ def test_workflow_resource_create_update_and_delete_contracts():
     assert calls[3]["raw_path"] == "/api/v1/workflows/workflow%2Fa"
 
 
+def test_workflow_step_serializes_explicit_dependencies():
+    import json
+
+    from sdks.python.webintelligence import WorkflowStep
+
+    captured = {}
+
+    def handler(request):
+        captured["steps"] = json.loads(request.read())["steps"]
+        return httpx.Response(201, json={"workflow_id": "workflow_dag"})
+
+    with Client("secret", base_url="https://api.example", transport=httpx.MockTransport(handler)) as client:
+        client.workflows.create("DAG", [
+            WorkflowStep("https://root.example", step_id="root", depends_on=[]),
+            WorkflowStep("https://child.example", step_id="child", depends_on=["root"]),
+        ])
+    assert captured["steps"] == [
+        {"url": "https://root.example", "max_pages": 3, "obey_robots": True,
+         "step_id": "root", "depends_on": []},
+        {"url": "https://child.example", "max_pages": 3, "obey_robots": True,
+         "step_id": "child", "depends_on": ["root"]},
+    ]
+
+
 def test_workflow_resource_lists_runs_schedules_and_cancels():
     calls = []
 

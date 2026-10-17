@@ -871,10 +871,11 @@ not independently fact-checked. Data Studio supports full-corpus, allow-listed
 aggregates (with filters, charts, pagination, and CSV export) as well as bounded
 search analysis, saved queries, and 90-day immutable snapshots of up to 100 hits;
 it does not expose arbitrary SQL or export raw full-corpus documents.
-The tenant-scoped workflow builder runs ordered robots-aware crawl steps,
-supports cooperative cancellation between steps, and can schedule recurring runs
-when Celery Beat is active; it is not a general DAG or script engine. Early
-TypeScript SDK and stdio MCP packages expose selected workflow and snapshot
+The tenant-scoped workflow builder supports legacy ordered recipes plus bounded
+step-dependency DAGs (up to 10 steps), cooperative cancellation, and recurring
+runs when Celery Beat is active. DAG steps run serially; failures skip dependent
+steps while independent branches continue. It is not a parallel DAG or script
+engine. Early TypeScript SDK and stdio MCP packages expose workflow and snapshot
 operations, but are not yet published as stable releases.
 Tenant administrators can configure early OIDC SSO with PKCE, encrypted
 client secrets, verified-domain provisioning controls, and an SSO-only audit

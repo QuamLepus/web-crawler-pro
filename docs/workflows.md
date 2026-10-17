@@ -1,9 +1,17 @@
-# Sequential crawl workflows
+# Crawl workflows
 
-Workflows are tenant-scoped, ordered crawl recipes. They are not a general
-purpose workflow engine: definitions accept one to ten HTTP(S) crawl steps,
-with at most 25 pages per step. Step definitions are snapshotted into each run,
-so editing a recipe does not alter a run already queued or in progress.
+Workflows are tenant-scoped crawl recipes. Definitions accept one to ten
+HTTP(S) crawl steps, with at most 25 pages per step. Legacy workflows remain
+sequential and fail-fast. A workflow can opt into a bounded dependency DAG by
+assigning each step a unique `step_id` and an explicit `depends_on` list. An
+empty list makes a root step; dependencies must refer to known steps and form
+an acyclic graph. Omitted `depends_on` retains the legacy previous-step default.
+
+DAG steps are dispatched serially by one worker, not in parallel. A step runs
+only after all dependencies complete. If a DAG step fails, its descendants are
+marked skipped, independent branches continue, and the overall run ends failed.
+Cancellation remains cooperative. Step definitions are snapshotted into each
+run, so editing a recipe does not alter a run already queued or in progress.
 
 All endpoints below require an authenticated tenant API key with crawl access.
 
@@ -30,6 +38,5 @@ processes. Scheduled runs additionally require Celery Beat and workflow workers.
 
 Cancellation is cooperative: a crawl step already executing is allowed to
 finish before the workflow stops. Deletion does not delete historical run data,
-and is rejected rather than silently cancelling queued or running work. This
-increment adds editing and deletion, but not DAG branching, arbitrary code, or
-mid-request crawl interruption.
+and is rejected rather than silently cancelling queued or running work. Workflows still do not support parallel task execution, arbitrary code,
+conditional predicates, or mid-request crawl interruption.
