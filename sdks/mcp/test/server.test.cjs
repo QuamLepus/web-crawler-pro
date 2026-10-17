@@ -99,11 +99,13 @@ test('MCP workflow tool submits bounded sequential steps through the SDK', async
   try {
     const response = await client.callTool({ name: 'wio_workflow_create', arguments: {
       name: 'Morning sources', steps: [{ url: 'https://example.org', max_pages: 2 }],
+      schedule_interval_minutes: 60,
     } });
     assert.equal(response.isError, undefined);
     assert.equal(request.url, 'http://localhost:8000/api/v1/workflows');
     assert.equal(request.key, 'workflow-tool-key');
     assert.deepEqual(request.body.steps, [{ url: 'https://example.org', max_pages: 2, obey_robots: true }]);
+    assert.equal(request.body.schedule_interval_minutes, 60);
   } finally {
     await client.close();
     await server.close();

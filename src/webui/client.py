@@ -159,6 +159,10 @@ class Api:
     def workflow_run(self, workflow_id: str) -> Any:
         return self.post(f"/api/v1/workflows/{workflow_id}/runs")
 
+    def workflow_schedule(self, workflow_id: str, interval_minutes: int | None) -> Any:
+        return self.patch(f"/api/v1/workflows/{workflow_id}/schedule",
+                          {"interval_minutes": interval_minutes})
+
     def workflow_runs(self) -> Any:
         return self.get("/api/v1/workflows/runs")
 

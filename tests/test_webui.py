@@ -683,6 +683,7 @@ def test_workflow_builder_page_is_authenticated_and_shows_boundaries(signed_in):
     assert response.status_code == 200
     assert "Create crawl workflow" in response.text
     assert "maximum 10 URLs" in response.text
+    assert "Recurring schedule" in response.text
     assert "/app/workflows" in signed_in.get("/app").text
 
 
@@ -870,3 +871,18 @@ def test_workflow_console_exposes_run_cancellation(signed_in, monkeypatch):
                               follow_redirects=False)
     assert response.status_code == 303
     assert calls == ["wfrun_aaaaaaaaaaaaaaaaaaaa"]
+
+
+def test_workflow_console_updates_schedule(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+    calls = []
+
+    async def update(self, workflow_id, interval_minutes):
+        calls.append((workflow_id, interval_minutes))
+        return Result(True, data={"schedule_interval_minutes": interval_minutes})
+
+    monkeypatch.setattr(Api, "workflow_schedule", update)
+    response = signed_in.post("/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/schedule",
+                              data={"interval_minutes": "1440"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert calls == [("workflow_aaaaaaaaaaaaaaaaaaaa", 1440)]

@@ -51,7 +51,7 @@ test('workflow create, status, and cancellation use the tenant API contracts', a
       calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
       return new Response(JSON.stringify({ status: 'queued' }), { status: 202 });
     } });
-  await client.createWorkflow('Morning refresh', [{ url: 'https://example.org', maxPages: 4 }]);
+  await client.createWorkflow('Morning refresh', [{ url: 'https://example.org', maxPages: 4 }], 60);
   await client.runWorkflow('workflow_a/b');
   await client.getWorkflowRun('wfrun_abc');
   await client.cancelWorkflowRun('wfrun_abc');
@@ -61,9 +61,8 @@ test('workflow create, status, and cancellation use the tenant API contracts', a
     'https://api.example/api/v1/workflows/runs/wfrun_abc',
     'https://api.example/api/v1/workflows/runs/wfrun_abc/cancel',
   ]);
-  assert.deepEqual(calls[0].body, { name: 'Morning refresh', steps: [{
-    url: 'https://example.org', max_pages: 4, obey_robots: true,
-  }] });
+  assert.deepEqual(calls[0].body, { name: 'Morning refresh', schedule_interval_minutes: 60,
+    steps: [{ url: 'https://example.org', max_pages: 4, obey_robots: true }] });
 });
 
 test('Studio snapshots use bounded row payloads and handle 204 deletion', async () => {

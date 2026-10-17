@@ -43,6 +43,10 @@ app.conf.update(
             "task": "workers.crawl_tasks.watch_tick",
             "schedule": 60.0,
         },
+        "wcp-workflow-schedule-poll": {
+            "task": "workers.workflow_tasks.schedule_tick",
+            "schedule": 60.0,
+        },
         # "nightly-full-crawl": {
         #     "task": "workers.crawl_tasks.seed_frontier",
         #     "schedule": 86400.0,

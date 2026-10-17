@@ -141,3 +141,66 @@ def test_workflow_worker_honors_cancellation_between_steps(monkeypatch):
     assert saved["status"] == "cancelled"
     assert saved["steps"][0]["status"] == "completed"
     assert saved["steps"][1]["status"] == "cancelled"
+
+
+def test_workflow_schedule_can_be_updated_disabled_and_is_tenant_scoped():
+    client = _client()
+    owner = _key(client, "workflow-schedule-owner@example.test")
+    other = _key(client, "workflow-schedule-other@example.test")
+    created = client.post("/api/v1/workflows", headers=owner, json={
+        "name": "Scheduled crawl", "steps": [{"url": "https://schedule.example"}],
+        "schedule_interval_minutes": 60})
+    assert created.status_code == 201, created.text
+    workflow = created.json()
+    workflow_id = workflow["workflow_id"]
+    assert workflow["schedule_interval_minutes"] == 60
+    redis = client.app.state.services.redis
+    assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) is not None
+    denied = client.patch(f"/api/v1/workflows/{workflow_id}/schedule", headers=other,
+                          json={"interval_minutes": 120})
+    assert denied.status_code == 404
+    updated = client.patch(f"/api/v1/workflows/{workflow_id}/schedule", headers=owner,
+                           json={"interval_minutes": 180})
+    assert updated.status_code == 200
+    assert updated.json()["schedule_interval_minutes"] == 180
+    disabled = client.patch(f"/api/v1/workflows/{workflow_id}/schedule", headers=owner,
+                            json={"interval_minutes": None})
+    assert disabled.status_code == 200
+    assert disabled.json()["schedule_interval_minutes"] is None
+    assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) is None
+
+
+def test_scheduler_tick_queues_due_workflow_once_and_advances_due_time(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    workflow_id = "workflow_dddddddddddddddddddd"
+    now = __import__("time").time()
+    redis.set(f"wcp:v1:workflow:{workflow_id}", json.dumps({
+        "workflow_id": workflow_id, "tenant": "tenant", "name": "Scheduled",
+        "steps": [{"url": "https://due.example", "max_pages": 2, "obey_robots": True}],
+        "max_pages": 2, "schedule_interval_minutes": 60,
+    }))
+    redis.zadd("wcp:v1:workflow_schedules", {workflow_id: now - 1})
+    monkeypatch.setattr(workflow_tasks, "_redis", lambda: redis)
+    submitted = []
+
+    class FakeScheduler:
+        def __init__(self, redis_client, celery_app=None):
+            assert redis_client is redis
+
+        def submit(self, spec):
+            submitted.append(spec)
+
+    monkeypatch.setattr("src.compute.scheduler.SchedulerService", FakeScheduler)
+    result = workflow_tasks.schedule_tick.run()
+    assert result == {"queued": 1, "due": 1}
+    assert len(submitted) == 1
+    assert submitted[0].kind == "workflow"
+    assert submitted[0].payload["steps"][0]["url"] == "https://due.example"
+    queued = redis.zrevrange("wcp:v1:workflow_runs:tenant", 0, 0)
+    assert queued
+    run_id = queued[0]
+    run = json.loads(redis.get(f"wcp:v1:workflow_run:{run_id}"))
+    assert run["scheduled"] is True and run["status"] == "queued"
+    assert redis.zscore("wcp:v1:workflow_schedules", workflow_id) > now
+    # The short lock prevents duplicate dispatch if two ticks overlap.
+    assert workflow_tasks.schedule_tick.run() == {"queued": 0, "locked": True}

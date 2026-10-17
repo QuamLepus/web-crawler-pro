@@ -867,10 +867,11 @@ alias matching, and relationships. Scheduled URL monitoring and extractive
 multi-stage research jobs are available with Celery workers/Beat; reports are
 not independently fact-checked. Data Studio supports bounded index analysis,
 saved queries, result charts, and 90-day immutable snapshots of up to 100 hits.
-The tenant-scoped workflow builder runs ordered robots-aware crawl steps and
-supports cooperative cancellation between steps; it is not a general DAG or
-script engine. Early TypeScript SDK and stdio MCP packages expose selected
-workflow and snapshot operations, but are not yet published as stable releases.
+The tenant-scoped workflow builder runs ordered robots-aware crawl steps,
+supports cooperative cancellation between steps, and can schedule recurring runs
+when Celery Beat is active; it is not a general DAG or script engine. Early
+TypeScript SDK and stdio MCP packages expose selected workflow and snapshot
+operations, but are not yet published as stable releases.
 These foundations do not constitute a complete research agent, BI suite, or
 enterprise SSO/connectors/compliance offering. Performance figures remain
 synthetic baselines and targets until validated under production conditions.
