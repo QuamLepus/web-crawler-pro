@@ -1,4 +1,14 @@
 {% extends "base.html" %}
+{% block head %}<style>
+.workflow-dag-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:rgba(99,102,241,.035)}
+.workflow-dag{display:block;max-width:none}
+.workflow-dag-edge{fill:none;stroke:var(--text-3);stroke-width:2;opacity:.72}
+.workflow-dag-arrow{fill:var(--text-3)}
+.workflow-dag-node{fill:var(--surface);stroke:var(--brand);stroke-width:1.5}
+.workflow-dag-step{fill:var(--text);font:600 13px system-ui,sans-serif}
+.workflow-dag-url{fill:var(--text-2);font:12px system-ui,sans-serif}
+.workflow-dag-meta{fill:var(--text-3);font:11px system-ui,sans-serif}
+</style>{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
@@ -66,6 +76,33 @@
         </li>
         {% endfor %}
       </ol>
+      {% if workflow.dag_preview %}
+      <details class="mt-2">
+        <summary>Visual dependency graph (read-only)</summary>
+        <div class="workflow-dag-scroll mt-2">
+          <svg class="workflow-dag" data-viz="workflow-dag" width="{{ workflow.dag_preview.width }}" height="{{ workflow.dag_preview.height }}" viewBox="0 0 {{ workflow.dag_preview.width }} {{ workflow.dag_preview.height }}" role="img" aria-label="Dependency DAG for {{ workflow.name }} with {{ workflow.steps|length }} crawl steps">
+            <title>Workflow dependencies: {{ workflow.name }}</title>
+            <defs>
+              <marker id="workflow-arrow-{{ workflow.workflow_id }}" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L9,4.5 L0,9 z" class="workflow-dag-arrow"></path>
+              </marker>
+            </defs>
+            {% for edge in workflow.dag_preview.edges %}
+            <path class="workflow-dag-edge" d="M {{ edge.x1 }} {{ edge.y1 }} C {{ edge.x1 + 45 }} {{ edge.y1 }}, {{ edge.x2 - 45 }} {{ edge.y2 }}, {{ edge.x2 }} {{ edge.y2 }}" marker-end="url(#workflow-arrow-{{ workflow.workflow_id }})"></path>
+            {% endfor %}
+            {% for node in workflow.dag_preview.nodes %}
+            <g role="group" aria-label="{{ node.step_id }}: {{ node.url }}{% if node.depends_on %}; depends on {{ node.depends_on|join(', ') }}{% else %}; root step{% endif %}">
+              <rect class="workflow-dag-node" x="{{ node.x }}" y="{{ node.y }}" width="210" height="82" rx="12"><title>{{ node.step_id }} — {{ node.url }}</title></rect>
+              <text class="workflow-dag-step" x="{{ node.x + 12 }}" y="{{ node.y + 21 }}">{{ node.step_id }}</text>
+              <text class="workflow-dag-url" x="{{ node.x + 12 }}" y="{{ node.y + 43 }}">{{ node.url|truncate(27, true, '…') }}</text>
+              <text class="workflow-dag-meta" x="{{ node.x + 12 }}" y="{{ node.y + 65 }}">{{ node.max_pages }} pages · robots {{ 'on' if node.obey_robots else 'off' }}</text>
+            </g>
+            {% endfor %}
+          </svg>
+        </div>
+        <p class="muted small mt-2">Read-only layout; dependencies and full URLs remain available in the step list and JSON editor.</p>
+      </details>
+      {% endif %}
       <details class="mt-2">
         <summary>Edit workflow definition</summary>
         <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="stack">

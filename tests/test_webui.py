@@ -969,8 +969,12 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
             "created_at": "today", "steps": [
                 {"step_id": "seed", "depends_on": [], "url": "https://seed.example",
                  "max_pages": 1, "obey_robots": True},
-                {"step_id": "branch", "depends_on": ["seed"],
-                 "url": "https://branch.example", "max_pages": 2, "obey_robots": True},
+                {"step_id": "news", "depends_on": ["seed"],
+                 "url": "https://news.example", "max_pages": 1, "obey_robots": True},
+                {"step_id": "research", "depends_on": ["seed"],
+                 "url": "https://research.example", "max_pages": 1, "obey_robots": True},
+                {"step_id": "summary", "depends_on": ["news", "research"],
+                 "url": "https://summary.example", "max_pages": 1, "obey_robots": True},
             ],
         }]})
 
@@ -984,6 +988,10 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert "dependency DAG" in page.text
     assert "depends on seed" in page.text
     assert '"depends_on": [' in page.text
+    assert 'data-viz="workflow-dag"' in page.text
+    assert page.text.count('<path class="workflow-dag-edge"') == 4
+    assert page.text.count('class="workflow-dag-node"') == 4
+    assert "Visual dependency graph (read-only)" in page.text
     assert '"seed"' in page.text
 
 
