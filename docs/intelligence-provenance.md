@@ -38,6 +38,21 @@ signing is disabled unless `WCP_PROVENANCE_SIGNING_KEY` is configured; use a
 long random secret from a secret manager. Records are caller-supplied and this
 ledger does not prove that a crawl happened or independently verify a source.
 
+## Scheduled web watches
+
+Authenticated `POST /api/v1/watch` creates a tenant watch, and `POST
+/api/v1/watch/{watch_id}/run` queues an immediate, one-page crawl with
+`obey_robots=true`. Celery Beat polls due watches every minute and dispatches
+the same crawl path. Snapshots are hashed and change events are available from
+`GET /api/v1/watch/{watch_id}/changes`; optional webhook subscribers can choose
+`web.changed`. A first snapshot establishes a baseline. Price-like strings are
+reported as text matches only—not verified prices—and ordinary content changes
+are not semantically classified. Scheduled execution requires Redis, Celery
+workers, and Beat. Watch API validation blocks credentials, obvious localhost,
+private literal IPs, and `.local` names; this is not a complete defense against
+DNS rebinding or unsafe redirects, so deployment network egress policy remains
+necessary.
+
 ## Entity graph and Python SDK
 
 The authenticated `/api/v1/graph/entities`, `/api/v1/graph/relations`, and
@@ -47,7 +62,7 @@ and aliases; ambiguous aliases produce a conflict instead of silently merging.
 This is a graph foundation, not an extraction pipeline or fuzzy resolver.
 
 The installable SDK under `sdks/python/` currently supports `ask`, crawl job
-creation, and job retrieval:
+creation/status, and basic watch creation/run/change retrieval:
 
 ```python
 from webintelligence import Client

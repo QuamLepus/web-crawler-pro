@@ -149,6 +149,22 @@ class Api:
     def cancel_job(self, job_id: str) -> Any:
         return self.post(f"/api/v1/jobs/{job_id}/cancel")
 
+    # -- monitoring -------------------------------------------------------- #
+    def watches(self) -> Any:
+        return self.get("/api/v1/watch")
+
+    def watch_create(self, url: str, interval_minutes: int = 60) -> Any:
+        return self.post("/api/v1/watch", {"url": url, "interval_minutes": interval_minutes})
+
+    def watch_run(self, watch_id: str) -> Any:
+        return self.post(f"/api/v1/watch/{watch_id}/run")
+
+    def watch_changes(self, watch_id: str) -> Any:
+        return self.get(f"/api/v1/watch/{watch_id}/changes")
+
+    def watch_delete(self, watch_id: str) -> Any:
+        return self.delete(f"/api/v1/watch/{watch_id}")
+
     # -- discovery --------------------------------------------------------- #
     def discovery_preview(self, topic: str, count: int = 10, **kw) -> Any:
         return self.post(

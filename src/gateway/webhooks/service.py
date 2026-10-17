@@ -30,7 +30,7 @@ EVENT_TYPES = (
     "quota.warning", "marketplace.purchase", "bounty.fulfilled",
     # public v1 aliases (src/api/schemas.WebhookEvent)
     "crawl.completed", "crawl.failed", "data.ready",
-    "export.ready", "dataset.sold",
+    "export.ready", "dataset.sold", "web.changed",
 )
 
 MAX_ATTEMPTS = 5

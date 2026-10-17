@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Overview</a><span>/</span><span>Web monitoring</span></div>
+  <h1>Web monitoring</h1>
+  <p class="dim">Schedule polite, robots-aware single-page crawls and keep a history of content changes. Price mentions are text matches, not verified product prices.</p>
+</div>
+<div class="card card-pad mb-3">
+  <h2 class="mb-2">Create a watch</h2>
+  <form method="post" action="/app/watch" class="grid g-3">
+    <label class="stack-sm">Public page URL
+      <input class="input" type="url" name="url" placeholder="https://example.com/pricing" required maxlength="4096">
+    </label>
+    <label class="stack-sm">Check interval
+      <select class="select" name="interval_minutes">
+        <option value="60">Every hour</option><option value="360">Every 6 hours</option>
+        <option value="1440">Daily</option><option value="10080">Weekly</option>
+      </select>
+    </label>
+    <div class="row" style="align-items:end"><button class="btn btn-primary">Add watch</button></div>
+  </form>
+  <p class="tiny muted mt-2">Minimum interval: 15 minutes. Scheduled execution requires the project's Celery worker and Beat services to be running.</p>
+</div>
+{% if error %}<div class="alert danger mb-3">{{ error }}</div>{% endif %}
+<div class="grid g-main">
+  <section class="card">
+    <div class="card-head"><h2>Watched pages</h2><span class="badge">{{ watches|length }}</span></div>
+    {% if watches %}<div class="table-wrap"><table class="data"><thead><tr><th>Page</th><th>Interval</th><th>Last check</th><th>State</th><th></th></tr></thead><tbody>
+      {% for watch in watches %}<tr>
+        <td><a href="/app/watch?watch_id={{ watch.watch_id }}">{{ watch.url }}</a></td>
+        <td>{{ watch.interval_minutes }} min</td>
+        <td>{{ watch.last_checked_at or 'Not checked yet' }}</td>
+        <td><span class="badge {{ 'ok' if watch.active else 'muted' }}">{{ 'Active' if watch.active else 'Stopped' }}</span></td>
+        <td><div class="row"><form method="post" action="/app/watch/{{ watch.watch_id }}/run"><button class="btn btn-sm">Run now</button></form><form method="post" action="/app/watch/{{ watch.watch_id }}/delete"><button class="btn btn-sm">Stop</button></form></div></td>
+      </tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty"><h3>No watches yet</h3><p>Add a page above to start tracking changes.</p></div>{% endif %}
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Change history</h2></div>
+    {% if selected_watch %}
+      {% if events %}<div class="stack-sm card-pad">{% for event in events|reverse %}<article class="card card-pad"><div class="between"><b>{{ event.event_type }}</b><span class="tiny muted">{{ event.changed_at }}</span></div><p class="small mt-1">{{ event.summary }}</p>{% if event.title_changed %}<span class="badge">Title changed</span>{% endif %}{% if event.price_mentions_before or event.price_mentions_after %}<p class="small mt-1">Price-like text: {{ event.price_mentions_before|join(', ') }} → {{ event.price_mentions_after|join(', ') }}</p>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty"><h3>No changes recorded</h3><p>Run a first crawl and wait for a later snapshot to compare.</p></div>{% endif %}
+    {% else %}<div class="empty"><h3>Select a watch</h3><p>Choose a page to inspect its history.</p></div>{% endif %}
+  </section>
+</div>
+{% endblock %}

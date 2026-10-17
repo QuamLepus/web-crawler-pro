@@ -292,6 +292,15 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
 
         pages_done += 1
         item = _extract_item(url, html, status)
+        watch_id = payload.get("watch_id")
+        if watch_id:
+            try:
+                from src.intelligence.watch import observe
+                change = observe(r, tenant=tenant, watch_id=str(watch_id), item=item)
+                if change:
+                    _emit(tenant, "web.changed", change, redis_client=r)
+            except Exception as exc:  # monitoring must not fail the crawl
+                logger.warning("watch observation failed (%s): %s", watch_id, exc)
         try:
             kept = _store_item(item)
         except Exception as exc:  # noqa: BLE001 - pipeline errors are non-fatal
@@ -430,3 +439,68 @@ def dedupe_stage(self, payload: dict) -> dict:
                 {"state": "succeeded", "items_collected": kept})
     return {"job_id": payload.get("job_id", ""), "kept": kept,
             "dropped": dropped}
+
+
+@app.task(name="workers.crawl_tasks.watch_tick")
+def watch_tick(limit: int = 50) -> int:
+    """Dispatch due monitored URLs at most once per interval."""
+    import hashlib
+    import json
+    import time
+    from src.intelligence.watch import DUE, WATCH
+
+    r = _job_redis()
+    now = time.time()
+    ids = r.zrangebyscore(DUE, "-inf", now, start=0, num=max(1, min(limit, 200)))
+    queued = 0
+    dispatched_hosts: set[str] = set()
+    for raw_id in ids:
+        watch_id = raw_id.decode() if isinstance(raw_id, bytes) else str(raw_id)
+        if not r.zrem(DUE, watch_id):
+            continue
+        raw = r.get(WATCH.format(watch_id=watch_id))
+        if not raw:
+            continue
+        record = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        if not record.get("active"):
+            continue
+        tenant = record["tenant"]
+        interval = max(15, int(record.get("interval_minutes", 60)))
+        host = urlparse(record["url"]).netloc.lower()
+        if host in dispatched_hosts:
+            r.zadd(DUE, {watch_id: now + 60})
+            continue
+        dispatched_hosts.add(host)
+        lock_key = f"wcp:watch:hostlock:{hashlib.sha256(host.encode()).hexdigest()}"
+        if not r.set(lock_key, watch_id, nx=True, ex=60):
+            r.zadd(DUE, {watch_id: now + 60})
+            continue
+        r.zadd(DUE, {watch_id: now + interval * 60})
+        try:
+            watch_crawl.delay(tenant, watch_id)
+            queued += 1
+        except Exception as exc:
+            r.delete(lock_key)
+            r.zadd(DUE, {watch_id: now + min(interval * 60, 300)})
+            logger.warning("could not queue watch %s: %s", watch_id, exc)
+    return queued
+
+
+@app.task(name="workers.crawl_tasks.watch_crawl", bind=True, max_retries=2,
+          default_retry_delay=60)
+def watch_crawl(self, tenant: str, watch_id: str) -> dict:
+    """Fetch one watched URL and persist its snapshot/change event."""
+    import json
+    from src.intelligence.watch import WATCH
+
+    r = _job_redis()
+    raw = r.get(WATCH.format(watch_id=watch_id))
+    if not raw:
+        return {"watch_id": watch_id, "skipped": "missing"}
+    record = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    if record.get("tenant") != tenant or not record.get("active"):
+        return {"watch_id": watch_id, "skipped": "inactive_or_wrong_tenant"}
+    return run_crawl({"url": record["url"], "max_pages": 1,
+                      "obey_robots": True, "stealth": False,
+                      "tenant": tenant, "job_id": "", "watch_id": watch_id},
+                     redis_client=r)
