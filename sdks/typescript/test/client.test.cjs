@@ -65,6 +65,22 @@ test('workflow create, status, and cancellation use the tenant API contracts', a
     steps: [{ url: 'https://example.org', max_pages: 4, obey_robots: true }] });
 });
 
+test('workflow list and read methods forward pagination and encoded IDs', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'workflow-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  } });
+  await client.listWorkflows(2, 15);
+  await client.getWorkflow('workflow/a');
+  await client.listWorkflowRuns(3, 8);
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=15', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/workflows/workflow%2Fa', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/workflows/runs?page=3&page_size=8', method: 'GET' },
+  ]);
+});
+
 test('workflow update and deletion use encoded tenant endpoints and snake-case fields', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'workflow-key', fetch: async (url, init) => {

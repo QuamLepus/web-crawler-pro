@@ -57,7 +57,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
-    'wio_workflow_run', 'wio_workflow_status', 'wio_workflow_update',
+    'wio_workflow_get', 'wio_workflow_list', 'wio_workflow_run',
+    'wio_workflow_runs', 'wio_workflow_status', 'wio_workflow_update',
   ]);
   const result = await client.callTool({ name: 'wio_ask', arguments: { question: 'What is cited?' } });
   assert.equal(result.isError, undefined);
@@ -144,6 +145,41 @@ test('MCP workflow update and delete tools preserve API semantics', async () => 
       schedule_interval_minutes: null });
     assert.equal(requests[1].method, 'DELETE');
     assert.equal(requests[1].url, requests[0].url);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP workflow list, get, and run-history tools forward pagination', async () => {
+  const requests = [];
+  const api = new WebIntelligenceClient({ apiKey: 'workflow-read-key', fetch: async (url, init) => {
+    requests.push({ url, method: init.method });
+    return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'workflow-read-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const listed = await client.callTool({ name: 'wio_workflow_list', arguments: {
+      page: 2, page_size: 10,
+    } });
+    const fetched = await client.callTool({ name: 'wio_workflow_get', arguments: {
+      workflow_id: 'workflow_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    const runs = await client.callTool({ name: 'wio_workflow_runs', arguments: {
+      page: 1, page_size: 5,
+    } });
+    assert.equal(listed.isError, undefined);
+    assert.equal(fetched.isError, undefined);
+    assert.equal(runs.isError, undefined);
+    assert.deepEqual(requests, [
+      { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=10', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
+    ]);
   } finally {
     await client.close();
     await server.close();
