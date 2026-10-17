@@ -9,7 +9,7 @@ full long-term product plan is already shipped.
 | Grounded `/ask` and citations | Implemented against existing tenant index | Extractive answer only; not an autonomous crawl or independently verified answer. |
 | Topic-to-report research | Async discovery + crawl jobs produce verbatim, timestamped, hashed excerpts with per-claim citations | Not LLM synthesis, independent source verification, or calibrated confidence; needs Celery workers/Beat and discovery providers. |
 | Provenance ledger and manifest | Implemented with tenant-keyed Redis storage; optional HMAC export | Caller supplies provenance; older data is not backfilled; HMAC is not a public-key signature. |
-| Knowledge graph | Redis entity/relationship endpoints and exact Unicode/case-normalized aliases | Not fuzzy/AI entity resolution; no graph visualization or automated extraction. |
+| Knowledge graph | Tenant-isolated Redis entity/relationship API, bounded graph listing, and console canvas explorer | Exact alias resolution only; no fuzzy/AI resolution or automated extraction. |
 | Python SDK | Early installable package for ask, crawl/status, and watch operations | No TypeScript SDK yet; limited endpoint coverage. |
 | Research console page | Implemented as a UI over `/ask` | It is not a multi-stage autonomous research agent. |
 | Web change monitoring | Scheduled URL watches, one-page crawl snapshots, content hashes, change history, basic text-based price mentions, and `web.changed` webhook event | Not semantic change classification; no DNS-rebinding defense, structured product matching, version replay UI, or customer-specific schedules beyond the minimum interval. Celery Beat and workers must run. |

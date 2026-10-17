@@ -62,7 +62,11 @@ def test_graph_resolves_aliases_relations_and_isolates_tenants():
     assert relation.status_code == 201
     assert len(client.get("/api/v1/graph/entities/" + company.json()["entity_id"],
                           headers=owner).json()["relations"]) == 1
+    graph = client.get("/api/v1/graph", headers=owner)
+    assert graph.status_code == 200
+    assert len(graph.json()["nodes"]) == 2 and len(graph.json()["edges"]) == 1
     other = _auth(client, "graph-b@example.test")
+    assert client.get("/api/v1/graph", headers=other).json()["nodes"] == []
     assert client.get("/api/v1/graph/entities/" + company.json()["entity_id"],
                       headers=other).status_code == 404
 

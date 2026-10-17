@@ -54,6 +54,7 @@ NAV: list[dict] = [
         {"href": "/app/research/agent", "icon": "◎", "label": "Research reports", "key": "research_agent"},
         {"href": "/app/discovery", "icon": "✦", "label": "Topic discovery", "key": "discovery"},
         {"href": "/app/watch", "icon": "◉", "label": "Web monitoring", "key": "watch"},
+        {"href": "/app/graph", "icon": "◇", "label": "Knowledge graph", "key": "graph"},
     ]},
     {"group": "Data Engine", "pages": [
         {"href": "/app/crawl", "icon": "🕷", "label": "Crawl jobs", "key": "crawl"},
@@ -596,6 +597,43 @@ async def research_page(request: Request, question: str = Query("", max_length=4
     return render(request, "research.html", page="research", me=me,
                    question=question, result=result,
                    title="AI Research — Web Intelligence OS")
+
+
+@router.get("/app/graph", response_class=HTMLResponse, name="graph")
+async def graph_page(request: Request):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    graph = await api.graph(limit=200)
+    data = graph.data if graph.ok and isinstance(graph.data, dict) else {"nodes": [], "edges": []}
+    return render(request, "graph.html", page="graph", me=me, graph=data,
+                  error=(graph.error if not graph.ok else ""),
+                  title="Knowledge graph — Web Intelligence OS")
+
+
+@router.post("/app/graph/entities", response_class=HTMLResponse)
+async def graph_create_entity(request: Request, name: str = Form("", max_length=256),
+                              entity_type: str = Form("Entity", max_length=80),
+                              aliases: str = Form("", max_length=2048)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.graph_entity(name=name.strip(), entity_type=entity_type.strip() or "Entity",
+                                    aliases=[a.strip() for a in aliases.split(",") if a.strip()])
+    return _redirect("/app/graph", "Entity added" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
+
+
+@router.post("/app/graph/relations", response_class=HTMLResponse)
+async def graph_create_relation(request: Request, source_id: str = Form(""),
+                                target_id: str = Form(""), relation: str = Form("", max_length=80)):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.graph_relation(source_id=source_id, target_id=target_id,
+                                      relation=relation.strip())
+    return _redirect("/app/graph", "Relationship added" if result.ok else result.error,
+                     "ok" if result.ok else "danger")
 
 
 @router.get("/app/research/agent", response_class=HTMLResponse, name="research_agent")

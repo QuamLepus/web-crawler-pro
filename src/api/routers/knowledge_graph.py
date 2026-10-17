@@ -9,10 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import unicodedata
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.api.routers.jobs import CtxDep
@@ -46,6 +47,37 @@ class RelationInput(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
+@router.get("", summary="List a bounded tenant knowledge graph")
+async def list_graph(ctx: CtxDep, request: Request,
+                     limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+    tenant = str(ctx["tenant"])
+    redis = request.app.state.services.redis
+    entity_key, _ = _keys(tenant)
+    ids = redis.zrevrange(f"{entity_key}:ids", 0, limit - 1)
+    if not ids:  # compatibility for entities written before the ordered index
+        ids = list(redis.scan_iter(match=f"{entity_key}:ent_*"))[:limit]
+        ids = [raw.decode() if isinstance(raw, bytes) else raw for raw in ids]
+        ids = [value.rsplit(":", 1)[-1] for value in ids]
+    nodes = []
+    edges_by_key = {}
+    for raw_id in ids:
+        entity_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        raw = redis.get(f"{entity_key}:{entity_id}")
+        if not raw:
+            continue
+        record = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        nodes.append(record)
+        rel_key = f"wcp:graph:{tenant}:relations:{entity_id}"
+        for raw_relation in redis.smembers(rel_key):
+            relation = json.loads(raw_relation.decode() if isinstance(raw_relation, bytes) else raw_relation)
+            edges_by_key[(relation["source_id"], relation["target_id"], relation["relation"])] = relation
+    node_ids = {node["entity_id"] for node in nodes}
+    edges = [edge for edge in edges_by_key.values()
+             if edge["source_id"] in node_ids and edge["target_id"] in node_ids]
+    return {"nodes": nodes, "edges": edges, "limit": limit,
+            "truncated": redis.zcard(f"{entity_key}:ids") > limit}
+
+
 @router.post("/entities", summary="Create or resolve a graph entity")
 async def upsert_entity(body: EntityInput, ctx: CtxDep, request: Request) -> dict[str, Any]:
     tenant = str(ctx["tenant"])
@@ -71,6 +103,7 @@ async def upsert_entity(body: EntityInput, ctx: CtxDep, request: Request) -> dic
     try:
         pipe = redis.pipeline()
         pipe.set(record_key, json.dumps(record, separators=(",", ":"), ensure_ascii=False))
+        pipe.zadd(f"{entity_key}:ids", {entity_id: time.time()})
         for alias in normalized:
             existing = redis.hget(alias_key, alias)
             if existing and (existing.decode() if isinstance(existing, bytes) else existing) != entity_id:
