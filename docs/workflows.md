@@ -27,8 +27,24 @@ All endpoints below require an authenticated tenant API key with crawl access.
 | `PATCH /api/v1/workflows/{workflow_id}/schedule` | Set or disable the recurring interval without replacing other definition fields. |
 
 Filtered run-history requests scan the tenant's run index to compute an exact
-match count; unfiltered requests use Redis range pagination. Very high-volume
-history filters may benefit from dedicated indexes.
+match count; unfiltered requests use Redis range pagination. A reproducible
+in-memory baseline is available at `scripts/benchmark_workflow_run_filters.py`.
+It ran the authenticated API route through FastAPI's test client over fakeredis,
+with three repetitions per case:
+
+| Synthetic runs | Unfiltered page p50 | Sparse name search p50 | Status filter p50 | Four-day date filter p50 | Records read per filtered query |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 6.32 ms | 48.12 ms | 43.06 ms | 47.24 ms | 1,000 |
+| 10,000 | 8.12 ms | 345.40 ms | 398.08 ms | 351.75 ms | 10,000 |
+| 50,000 | 7.90 ms | 1,740.69 ms | 1,810.76 ms | 1,957.23 ms | 50,000 |
+
+This is a same-process synthetic baseline, not a production Redis or concurrent
+load test. It shows filtered latency and record reads growing linearly while
+unfiltered range pagination remains approximately flat. Decision: add
+filter-oriented tenant indexes before treating these filters as suitable for
+high-volume run histories; sparse name search in particular is already about
+1.7 seconds at 50,000 synthetic records. The in-memory measurements should not
+be used as a production latency forecast.
 
 The web console provides a simple URL-list form for sequential recipes, an
 advanced JSON editor for DAG step definitions, and a read-only visual dependency
