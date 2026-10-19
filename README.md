@@ -834,7 +834,7 @@ Next up:
 - [x] Spelling correction learned from the indexed corpus itself (SymSpell-style)
 - [x] Incremental Common Crawl updates: index only what changed since the last snapshot
 - [x] Deeper OpenTelemetry tracing across workers — W3C context propagation and task spans; see [`docs/observability.md`](docs/observability.md)
-- [ ] Exercise billing end-to-end against real Stripe
+- [ ] Complete real Stripe end-to-end validation — opt-in test-mode Checkout test is available; see [`docs/stripe-testing.md`](docs/stripe-testing.md)
 - [x] Split Python dependencies into service profiles and optional AI/browser groups; see [`docs/dependency-profiles.md`](docs/dependency-profiles.md)
 - [ ] Verify the published GHCR images by running the compose stack
 
