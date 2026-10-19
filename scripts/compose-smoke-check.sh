@@ -59,7 +59,11 @@ check_beat_started() {
 
 wait_for Redis check_redis
 wait_for PostgreSQL check_postgres
-wait_for MinIO check_minio
+if [[ "${WCP_SKIP_MINIO:-false}" != "true" ]]; then
+  wait_for MinIO check_minio
+else
+  printf 'Skipping MinIO: configure Quay.io registry credentials to exercise it.\\n'
+fi
 wait_for Elasticsearch check_elasticsearch
 wait_for Prometheus check_prometheus
 wait_for dashboard check_dashboard

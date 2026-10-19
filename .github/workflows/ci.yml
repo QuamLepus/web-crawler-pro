@@ -113,27 +113,39 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis
       - name: Pull PostgreSQL image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
-      - name: Pull MinIO image
+      - name: Authenticate to Quay for MinIO when credentials are configured
+        id: quay-auth
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
         run: |
-          if output=$(docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio 2>&1); then
-            printf '%s\n' "$output"
+          if [[ -n "$QUAY_USERNAME" && -n "$QUAY_PASSWORD" ]]; then
+            printf '%s' "$QUAY_PASSWORD" | docker login quay.io --username "$QUAY_USERNAME" --password-stdin
+            echo "minio_enabled=true" >> "$GITHUB_OUTPUT"
           else
-            printf '%s\n' "$output"
-            detail=$(printf '%s\n' "$output" | tail -n 3 | tr '\n' ' ' | cut -c1-400)
-            echo "::error title=MinIO pull failure::$detail"
-            exit 1
+            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MinIO smoke skipped: configure QUAY_USERNAME and QUAY_PASSWORD repository secrets."
           fi
+      - name: Pull MinIO image
+        if: steps.quay-auth.outputs.minio_enabled == 'true'
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
       - name: Pull Elasticsearch image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
       - name: Pull Prometheus image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull prometheus
       - name: Start core backing services
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
+        env:
+          MINIO_ENABLED: ${{ steps.quay-auth.outputs.minio_enabled }}
+        run: |
+          services=(redis postgres elasticsearch prometheus)
+          if [[ "$MINIO_ENABLED" == "true" ]]; then services+=(minio); fi
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d "${services[@]}"
       - name: Start the core application services
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d worker worker-stealth beat dashboard
       - name: Check core Compose services
         env:
           WCP_GHCR_OVERLAY: "1"
+          WCP_SKIP_MINIO: ${{ steps.quay-auth.outputs.minio_enabled != 'true' }}
         run: bash scripts/compose-smoke-check.sh
       - name: Dump Compose logs on failure
         if: failure()
@@ -217,27 +229,39 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis
       - name: Pull PostgreSQL image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
-      - name: Pull MinIO image
+      - name: Authenticate to Quay for MinIO when credentials are configured
+        id: quay-auth
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
         run: |
-          if output=$(docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio 2>&1); then
-            printf '%s\n' "$output"
+          if [[ -n "$QUAY_USERNAME" && -n "$QUAY_PASSWORD" ]]; then
+            printf '%s' "$QUAY_PASSWORD" | docker login quay.io --username "$QUAY_USERNAME" --password-stdin
+            echo "minio_enabled=true" >> "$GITHUB_OUTPUT"
           else
-            printf '%s\n' "$output"
-            detail=$(printf '%s\n' "$output" | tail -n 3 | tr '\n' ' ' | cut -c1-400)
-            echo "::error title=MinIO pull failure::$detail"
-            exit 1
+            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MinIO smoke skipped: configure QUAY_USERNAME and QUAY_PASSWORD repository secrets."
           fi
+      - name: Pull MinIO image
+        if: steps.quay-auth.outputs.minio_enabled == 'true'
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
       - name: Pull Elasticsearch image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
       - name: Pull Prometheus image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull prometheus
       - name: Start published core backing services
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
+        env:
+          MINIO_ENABLED: ${{ steps.quay-auth.outputs.minio_enabled }}
+        run: |
+          services=(redis postgres elasticsearch prometheus)
+          if [[ "$MINIO_ENABLED" == "true" ]]; then services+=(minio); fi
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d "${services[@]}"
       - name: Start the published core application services
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d worker worker-stealth beat dashboard
       - name: Check published core Compose services
         env:
           WCP_GHCR_OVERLAY: "1"
+          WCP_SKIP_MINIO: ${{ steps.quay-auth.outputs.minio_enabled != 'true' }}
         run: bash scripts/compose-smoke-check.sh
       - name: Dump Compose logs on failure
         if: failure()

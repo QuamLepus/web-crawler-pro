@@ -23,10 +23,11 @@ runner, report each Docker virtual size, and upload per-image reports with
 30-day retention. After a push to `main` publishes commit-SHA images, CI pulls
 all four through `docker-compose.ghcr.yml`, reports their virtual sizes, uploads
 a combined 90-day report, and smoke-tests the published core Compose stack
-(Redis, Postgres, MinIO, Elasticsearch, Prometheus, dashboard, workers, and
-Beat). The crawler image is pulled but its external-crawl command is not run.
-The smoke verifies service readiness, not application integration with every
-backend.
+(Redis, Postgres, Elasticsearch, Prometheus, dashboard, workers, and Beat),
+plus MinIO when `QUAY_USERNAME` and `QUAY_PASSWORD` are configured as GitHub
+Actions secrets. The crawler image is pulled but its external-crawl command is
+not run. The smoke verifies service readiness, not application integration
+with every backend.
 AI and browser libraries are imported lazily in the relevant features, which
 retain their built-in fallbacks when those optional packages are not installed.
 

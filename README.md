@@ -204,6 +204,7 @@ docker compose up --build -d
 #                worker, worker-stealth, celery beat, dashboard (:8080), prometheus
 # The crawler CLI is opt-in because starting it performs a sample external crawl:
 # docker compose --profile on-demand up --build crawler
+# Authenticate with `docker login quay.io` if your MinIO image pull requires it.
 
 # To run the published commit-SHA images instead of building locally, see:
 # docs/ghcr-compose.md (:9090)
