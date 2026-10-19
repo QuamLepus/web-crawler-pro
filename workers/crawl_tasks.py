@@ -2,7 +2,7 @@
 
 Run a worker node (scales horizontally, just start more of these):
 
-    celery -A src.celery_app worker -Q crawl.default,crawl.bulk -c 8
+    celery -A src.celery_app worker -Q crawl.high,crawl.default,crawl.bulk -c 8
 
 Tasks:
     seed_frontier(urls)        -> push seeds into the Redis URL Frontier

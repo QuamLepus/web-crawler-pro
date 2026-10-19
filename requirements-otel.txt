@@ -1,0 +1,3 @@
+# Optional OTLP/gRPC exporter for exporting API and Celery worker spans.
+# Install this alongside requirements.txt when an OTLP collector is configured.
+opentelemetry-exporter-otlp-proto-grpc>=1.24.0

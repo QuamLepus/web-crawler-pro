@@ -37,11 +37,11 @@ class JobPriority(IntEnum):
     @property
     def queue(self) -> str:
         return {
-            JobPriority.CRITICAL: "critical",
-            JobPriority.HIGH: "high",
-            JobPriority.NORMAL: "default",
-            JobPriority.LOW: "low",
-            JobPriority.BULK: "bulk",
+            JobPriority.CRITICAL: "crawl.high",
+            JobPriority.HIGH: "crawl.high",
+            JobPriority.NORMAL: "crawl.default",
+            JobPriority.LOW: "crawl.bulk",
+            JobPriority.BULK: "crawl.bulk",
         }[self]
 
 

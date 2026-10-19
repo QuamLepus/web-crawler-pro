@@ -4,8 +4,8 @@ metrics exposition, request/latency instrumentation and Sentry error capture.
 Design notes
 ------------
 * **OpenTelemetry** is fully optional: if ``opentelemetry`` packages are not
-  installed (or ``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset) we fall back to a
-  no-op tracer provider so the app still boots in minimal environments.
+  installed the app uses a no-op tracer shim. Without an OTLP endpoint it uses
+  a silent exporter; missing exporter integrations never print spans to stdout.
 * **Prometheus**: we prefer the first-party
   ``prometheus-fastapi-instrumentator`` when installed; otherwise we ship a
   small built-in middleware using ``prometheus_client`` directly (always
@@ -22,11 +22,11 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response, JSONResponse
+from starlette.responses import Response
 
 logger = logging.getLogger("wcp.api.observability")
 
@@ -39,43 +39,18 @@ _OTEL_AVAILABLE = False
 
 
 def setup_tracing(app: FastAPI) -> bool:
-    """Configure the global tracer provider + FastAPI instrumentation.
+    """Configure API tracing and instrument FastAPI when OTel is available.
 
-    Returns ``True`` when real OTel tracing was enabled, ``False`` when we
-    degraded gracefully to a no-op provider.
+    Returns ``True`` when an SDK provider is active, ``False`` when tracing
+    degrades gracefully to the API's no-op tracer shim.
     """
     global _OTEL_AVAILABLE
     try:
-        from opentelemetry import trace
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from src.observability.tracing import configure_tracer_provider
 
-        resource = Resource.create({"service.name": SERVICE_NAME})
-        endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-        if endpoint:
-            try:
-                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                    OTLPSpanExporter,
-                )
-
-                processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
-            except Exception:  # grpc extra missing -> console for debugging
-                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-
-                processor = BatchSpanProcessor(ConsoleSpanExporter())
-        else:
-            # In-memory/dev: keep spans but don't spam stdout.
-            from opentelemetry.sdk.trace.export import (
-                SimpleSpanProcessor,
-                ConsoleSpanExporter,
-            )
-
-            processor = SimpleSpanProcessor(_SilentExporter())
-
-        provider = TracerProvider(resource=resource, active_span_processor=processor)
-        trace.set_tracer_provider(provider)
-        _OTEL_AVAILABLE = True
+        _OTEL_AVAILABLE = configure_tracer_provider(SERVICE_NAME)
+        if not _OTEL_AVAILABLE:
+            return False
 
         # Auto-instrument FastAPI if the integration package is present.
         try:
@@ -84,31 +59,14 @@ def setup_tracing(app: FastAPI) -> bool:
             FastAPIInstrumentor.instrument_app(
                 app, excluded_urls="healthz,readyz,metrics"
             )
-        except Exception:  # instrumentation pkg absent — fine
+        except Exception:  # noqa: BLE001 - optional instrumentation must not block API startup
             logger.debug("FastAPI OTel instrumentation not available")
         logger.info("OpenTelemetry tracing enabled (service=%s)", SERVICE_NAME)
         return True
-    except Exception as exc:  # pragma: no cover - otel not installed
+    except Exception as exc:  # noqa: BLE001 - optional tracing must not block API startup
         logger.warning("OpenTelemetry unavailable (%s); using no-op tracing", exc)
-        try:
-            from opentelemetry import trace
-
-            trace.set_tracer_provider(trace.NoOpTracerProvider())
-        except Exception:
-            pass
+        _OTEL_AVAILABLE = False
         return False
-
-
-class _SilentExporter:
-    """Span exporter that drops spans (dev mode without an OTLP collector)."""
-
-    def export(self, spans):  # noqa: D401 - duck-typed SpanExporter
-        from opentelemetry.sdk.trace.export import SpanExportResult
-
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self) -> None:  # pragma: no cover
-        return None
 
 
 def get_tracer(name: str = "wcp.api"):
@@ -153,15 +111,15 @@ class _NoOpTracer:
 # --------------------------------------------------------------------------- #
 try:
     from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        REGISTRY,
         Counter,
         Histogram,
         generate_latest,
-        CONTENT_TYPE_LATEST,
-        REGISTRY,
     )
 
     PROMETHEUS_AVAILABLE = True
-except Exception:  # pragma: no cover
+except Exception:  # noqa: BLE001 - metrics are optional
     PROMETHEUS_AVAILABLE = False
     REGISTRY = None
 
@@ -235,7 +193,7 @@ def setup_observability(app: FastAPI, *,
         from src.observability.metrics import init_sentry
 
         init_sentry()
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  # noqa: BLE001 - Sentry must not block API startup
         logger.debug("sentry init skipped: %s", exc)
 
     @app.middleware("http")

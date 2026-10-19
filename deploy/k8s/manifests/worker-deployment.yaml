@@ -11,7 +11,7 @@ spec:
         - name: worker
           image: ghcr.io/OWNER/web-crawler-pro/worker:latest
           command: ["celery", "-A", "src.celery_app", "worker",
-                    "-Q", "crawl.default,crawl.bulk", "-c", "8",
+                    "-Q", "crawl.high,crawl.default,crawl.bulk", "-c", "8",
                     "--loglevel=info"]
           env:
             - name: REDIS_URL
