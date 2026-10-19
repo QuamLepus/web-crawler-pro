@@ -107,11 +107,12 @@ jobs:
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.ghcr.yml config --quiet
-      - name: Build and start the core Compose stack through the GHCR overlay
-        run: >-
-          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up
-          --build -d redis postgres minio elasticsearch worker worker-stealth
-          beat dashboard prometheus
+      - name: Build core application images through the GHCR overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml build worker worker-stealth dashboard
+      - name: Start core backing services
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
+      - name: Start the core application services
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d worker worker-stealth beat dashboard
       - name: Check core Compose services
         env:
           WCP_GHCR_OVERLAY: "1"
@@ -194,11 +195,10 @@ jobs:
           retention-days: 90
       - name: Configure Elasticsearch host setting
         run: sudo sysctl -w vm.max_map_count=262144
-      - name: Start the published core Compose stack
-        run: >-
-          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up
-          --no-build -d redis postgres minio elasticsearch worker worker-stealth
-          beat dashboard prometheus
+      - name: Start published core backing services
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
+      - name: Start the published core application services
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d worker worker-stealth beat dashboard
       - name: Check published core Compose services
         env:
           WCP_GHCR_OVERLAY: "1"
