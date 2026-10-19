@@ -81,7 +81,14 @@ jobs:
           cache-from: type=gha,scope=pr-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=pr-${{ matrix.target }}
       - name: Report built image virtual size
-        run: python scripts/report-image-sizes.py "wcp-${{ matrix.target }}:validation"
+        run: python scripts/report-image-sizes.py "wcp-${{ matrix.target }}:validation" | tee image-sizes.tsv
+      - name: Archive built image size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-size-${{ matrix.target }}
+          path: image-sizes.tsv
+          if-no-files-found: error
+          retention-days: 30
 
   compose-smoke:
     if: github.event_name == 'pull_request'
@@ -173,7 +180,14 @@ jobs:
             "$repo/worker:${GITHUB_SHA}" \
             "$repo/worker-stealth:${GITHUB_SHA}" \
             "$repo/crawler:${GITHUB_SHA}" \
-            "$repo/dashboard:${GITHUB_SHA}"
+            "$repo/dashboard:${GITHUB_SHA}" | tee image-sizes.tsv
+      - name: Archive published image size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-docker-image-sizes
+          path: image-sizes.tsv
+          if-no-files-found: error
+          retention-days: 90
       - name: Start dashboard, Redis, and published workers
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard worker worker-stealth
       - name: Wait for published dashboard health endpoint

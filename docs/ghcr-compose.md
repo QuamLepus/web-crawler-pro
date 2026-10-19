@@ -19,12 +19,14 @@ four just-published application images through the GHCR overlay, reports each
 image's Docker virtual size, and starts the published dashboard and both
 Celery worker images with Redis. The size is the uncompressed sum reported by
 Docker; it is not the compressed registry transfer size, and shared layers may
-be counted for each image. The smoke checks the dashboard `/healthz` endpoint
-and waits for both workers to log their Celery `ready.` message before teardown. Pull
-requests validate the overlay's resolved Compose config and build/smoke the
-dashboard with a validation-only tag through
-that same overlay. The published-image smoke is intentionally bounded to
-Redis + dashboard + both worker processes. The crawler image is pulled to
+be counted for each image. PR image-size reports are uploaded as per-image
+artifacts with 30-day retention; the published report is uploaded as one
+artifact with 90-day retention. The smoke checks the dashboard `/healthz`
+endpoint and waits for both workers to log their Celery `ready.` message before
+teardown. Pull requests validate the overlay's resolved Compose config and
+build/smoke the dashboard with a validation-only tag through that same overlay.
+The published-image smoke is intentionally bounded to Redis + dashboard + both
+worker processes. The crawler image is pulled to
 verify its published tag, but it is not started: its current container command
 runs a sample crawl against an external site. The smoke still does not verify
 crawl execution, service integrations, or the complete production Compose
