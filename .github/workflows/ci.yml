@@ -79,6 +79,30 @@ jobs:
           cache-from: type=gha,scope=pr-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=pr-${{ matrix.target }}
 
+  compose-smoke:
+    if: github.event_name == 'pull_request'
+    needs: [test, container-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Start dashboard and Redis from Compose
+        run: docker compose up --build -d redis dashboard
+      - name: Wait for dashboard health endpoint
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs dashboard
+          exit 1
+      - name: Stop Compose services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
   build-and-push:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
