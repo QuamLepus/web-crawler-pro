@@ -7,8 +7,12 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.routers.jobs import CtxDep
-from src.api.schemas import (CheckoutSessionOut, CheckoutSessionRequest,
-                             PlanTier, UsageSummary)
+from src.api.schemas import (
+    CheckoutSessionOut,
+    CheckoutSessionRequest,
+    PlanTier,
+    UsageSummary,
+)
 from src.gateway.billing.plans import PLANS, build_invoice
 from src.gateway.billing.quotas import QuotaStatus, current_period
 
@@ -67,6 +71,24 @@ async def checkout(body: CheckoutSessionRequest, ctx: CtxDep,
     sid = session.get("session_id") or session.get("id", "")
     url = session.get("url", "")
     return CheckoutSessionOut(session_id=sid, url=url, plan=body.plan)
+
+
+@router.post("/stripe/webhook", summary="Receive a Stripe subscription event")
+async def stripe_webhook(request: Request) -> dict:
+    """Verify and apply Stripe events; unauthenticated by design for Stripe."""
+    from src.gateway.billing.stripe_sync import WebhookSignatureError
+
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        return request.app.state.services.billing.handle_event(payload, signature)
+    except (WebhookSignatureError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "invalid Stripe webhook signature or payload") from exc
+    except Exception:
+        logger.exception("Stripe webhook processing failed")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            "Stripe webhook processing failed") from None
 
 
 @router.get("/usage", response_model=UsageSummary, summary="Current period usage")

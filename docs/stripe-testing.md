@@ -27,8 +27,7 @@ customers are deleted on cleanup when possible.
 
 The signed completion event is synthetic because the test process is private
 and does not accept Stripe webhook delivery. For a full delivery-path test,
-run the app in a dedicated test environment and forward a test-mode event to the gateway billing webhook route at
-`/billing/stripe/webhook`. The standalone public API app does not currently
-mount this inbound route, so configure the gateway listener and webhook
-endpoint before attempting the delivery test. Never use live-mode or customer
-data.
+run the app in a dedicated test environment and use Stripe CLI to forward a
+test-mode event to `/api/v1/billing/stripe/webhook` (or the legacy
+`/v1/billing/stripe/webhook` alias). Ensure `STRIPE_WEBHOOK_SECRET` is set to
+the CLI listener's signing secret. Never use live-mode or customer data.

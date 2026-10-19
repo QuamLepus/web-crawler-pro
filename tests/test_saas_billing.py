@@ -152,3 +152,50 @@ def test_dataset_publish_still_rejects_unhashed_jobs(client, api_key):
                           "price_usd_cents": 100,
                           "source_job_id": "job_never_ran"})
     assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# inbound Stripe webhook endpoint
+# --------------------------------------------------------------------------- #
+def test_signed_stripe_webhook_updates_tenant_plan(client, api_key, monkeypatch):
+    import json
+
+    from src.gateway.billing import stripe_sync
+
+    secret = "whsec_unit_test_only"
+    monkeypatch.setattr(stripe_sync, "STRIPE_WEBHOOK_SECRET", secret)
+    org = client.app.state.services.users.list_orgs()[0]
+    event = {
+        "id": "evt_checkout_completed_unit",
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_unit",
+            "metadata": {"tenant": org.id, "plan": "pro"},
+            "subscription": None,
+        }},
+    }
+    payload = json.dumps(event, separators=(",", ":")).encode()
+    signature = stripe_sync.sign_for_tests(payload, secret)
+
+    response = client.post(
+        "/api/v1/billing/stripe/webhook",
+        content=payload,
+        headers={"stripe-signature": signature},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["applied"] is True
+    assert client.app.state.services.users.get_org(org.id).plan == "pro"
+
+
+def test_stripe_webhook_rejects_invalid_signature(client, monkeypatch):
+    import time
+
+    from src.gateway.billing import stripe_sync
+
+    monkeypatch.setattr(stripe_sync, "STRIPE_WEBHOOK_SECRET", "whsec_unit_test_only")
+    response = client.post(
+        "/api/v1/billing/stripe/webhook",
+        content=b"{}",
+        headers={"stripe-signature": f"t={int(time.time())},v1=invalid"},
+    )
+    assert response.status_code == 400

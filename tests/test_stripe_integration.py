@@ -114,9 +114,8 @@ def test_checkout_and_signed_subscription_activation_in_stripe_test_mode(
         assert price["id"] == os.environ["STRIPE_PRICE_PRO"]
 
         # Stripe has created the real test-mode session; no payment is taken.
-        # Exercise the local, signature-verified webhook state transition with
-        # a compact signed event payload, as Stripe cannot post to this private
-        # CI process without a configured Stripe CLI/webhook endpoint.
+        # Exercise the API's signature-verified webhook route with a compact
+        # signed event payload. Stripe cannot post to this private CI process.
         event = {
             "id": f"evt_local_{suffix}",
             "type": "checkout.session.completed",
@@ -130,9 +129,14 @@ def test_checkout_and_signed_subscription_activation_in_stripe_test_mode(
         payload = json.dumps(event, separators=(",", ":")).encode()
         signing_secret = "whsec_local_integration_test"
         signature = stripe_sync_signature(payload, signing_secret)
-        handled = app.state.services.billing.handle_event(payload, signature)
-        assert handled["applied"] is True
-        assert handled["tenant"] == tenant
+        webhook = client.post(
+            "/api/v1/billing/stripe/webhook",
+            content=payload,
+            headers={"stripe-signature": signature},
+        )
+        assert webhook.status_code == 200, webhook.text
+        assert webhook.json()["applied"] is True
+        assert webhook.json()["tenant"] == tenant
 
         usage = client.get("/v1/billing/usage", headers=headers)
         assert usage.status_code == 200, usage.text
