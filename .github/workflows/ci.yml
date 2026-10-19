@@ -114,7 +114,15 @@ jobs:
       - name: Pull PostgreSQL image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
       - name: Pull MinIO image
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
+        run: |
+          if output=$(docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio 2>&1); then
+            printf '%s\n' "$output"
+          else
+            printf '%s\n' "$output"
+            detail=$(printf '%s\n' "$output" | tail -n 3 | tr '\n' ' ' | cut -c1-400)
+            echo "::error title=MinIO pull failure::$detail"
+            exit 1
+          fi
       - name: Pull Elasticsearch image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
       - name: Pull Prometheus image
@@ -210,7 +218,15 @@ jobs:
       - name: Pull PostgreSQL image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
       - name: Pull MinIO image
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
+        run: |
+          if output=$(docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio 2>&1); then
+            printf '%s\n' "$output"
+          else
+            printf '%s\n' "$output"
+            detail=$(printf '%s\n' "$output" | tail -n 3 | tr '\n' ' ' | cut -c1-400)
+            echo "::error title=MinIO pull failure::$detail"
+            exit 1
+          fi
       - name: Pull Elasticsearch image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
       - name: Pull Prometheus image
