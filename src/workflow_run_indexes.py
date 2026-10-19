@@ -49,8 +49,20 @@ def _term_key(tenant: str, term: str) -> str:
     return TENANT_RUN_TERM.format(tenant=tenant, term=term)
 
 
+def _created_score(record: dict, fallback: float) -> float:
+    """Use the persisted creation instant as the primary/index score."""
+    try:
+        created_at = datetime.fromisoformat(str(record["created_at"]))
+    except (KeyError, TypeError, ValueError):
+        return fallback
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return created_at.timestamp()
+
+
 def queue_new_run_indexes(pipe, record: dict, score: float) -> None:
     """Queue primary, status, and token indexes alongside a new run record."""
+    score = _created_score(record, score)
     tenant = record["tenant"]
     run_id = record["run_id"]
     cutoff = score - RUN_TTL_SECONDS
@@ -150,37 +162,41 @@ def ensure_run_filter_indexes(redis, tenant: str) -> bool:
         status_keys = [_status_key(tenant, status) for status in RUN_STATUSES]
         redis.delete(*status_keys)
         touched_index_keys = set(status_keys)
-        members = redis.zrevrange(tenant_runs_key, 0, -1, withscores=True)
-        for offset in range(0, len(members), 1000):
-            batch = members[offset:offset + 1000]
-            reads = redis.pipeline()
-            normalized_batch = []
-            for raw_id, score in batch:
-                run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
-                normalized_batch.append((run_id, score))
-                reads.get(f"wcp:v1:workflow_run:{run_id}")
-            records = reads.execute()
-            writes = redis.pipeline()
-            for (run_id, score), raw in zip(normalized_batch, records):
-                if not raw:
-                    writes.zrem(tenant_runs_key, run_id)
-                    continue
-                record = json.loads(raw)
-                if record.get("tenant") != tenant:
-                    continue
-                status = record.get("status")
-                if status in RUN_STATUSES:
-                    key = _status_key(tenant, status)
-                    writes.zadd(key, {run_id: score})
-                workflow_key = TENANT_RUN_WORKFLOW.format(
-                    tenant=tenant, workflow_id=record["workflow_id"])
-                writes.zadd(workflow_key, {run_id: score})
-                touched_index_keys.add(workflow_key)
-                for term in run_search_tokens(record):
-                    key = _term_key(tenant, term)
-                    writes.zadd(key, {run_id: score})
-                    touched_index_keys.add(key)
-            writes.execute()
+        cursor = 0
+        while True:
+            cursor, members = redis.zscan(tenant_runs_key, cursor=cursor, count=1000)
+            batch = list(members.items()) if isinstance(members, dict) else list(members)
+            if batch:
+                reads = redis.pipeline()
+                normalized_batch = []
+                for raw_id, score in batch:
+                    run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                    normalized_batch.append((run_id, score))
+                    reads.get(f"wcp:v1:workflow_run:{run_id}")
+                records = reads.execute()
+                writes = redis.pipeline()
+                for (run_id, score), raw in zip(normalized_batch, records):
+                    if not raw:
+                        writes.zrem(tenant_runs_key, run_id)
+                        continue
+                    record = json.loads(raw)
+                    if record.get("tenant") != tenant:
+                        continue
+                    status = record.get("status")
+                    if status in RUN_STATUSES:
+                        key = _status_key(tenant, status)
+                        writes.zadd(key, {run_id: score})
+                    workflow_key = TENANT_RUN_WORKFLOW.format(
+                        tenant=tenant, workflow_id=record["workflow_id"])
+                    writes.zadd(workflow_key, {run_id: score})
+                    touched_index_keys.add(workflow_key)
+                    for term in run_search_tokens(record):
+                        key = _term_key(tenant, term)
+                        writes.zadd(key, {run_id: score})
+                        touched_index_keys.add(key)
+                writes.execute()
+            if cursor == 0:
+                break
         expiry = redis.pipeline()
         for index_key in touched_index_keys:
             expiry.expire(index_key, RUN_TTL_SECONDS)

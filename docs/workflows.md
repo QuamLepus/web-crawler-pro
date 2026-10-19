@@ -36,8 +36,9 @@ records. Tenant IDs are part of every secondary-index key.
 
 Status/name/workflow indexes are maintained when runs are created or change
 status. Existing tenants are lazily backfilled on the first request that needs
-one of those indexes; while the backfill lock is held, requests fall back to a
-linear tenant scan. This is a one-time per-tenant cost after deployment. Date-
+one of those indexes; the backfill cursor-scans records in bounded batches.
+While the backfill lock is held, requests fall back to a linear tenant scan.
+This is a one-time per-tenant cost after deployment. Date-
 only and exact run-ID requests do not trigger backfill. Retention pruning and
 index TTLs remain aligned with the run-history retention period.
 
@@ -48,15 +49,15 @@ backfill measurement:
 
 | Synthetic runs | Unfiltered page p50 | Name-token search p50 | Status filter p50 | Four-day date filter p50 | Name-search records read |
 |---:|---:|---:|---:|---:|---:|
-| 1,000 | 6.51 ms | 6.50 ms | 9.15 ms | 6.87 ms | 1 |
-| 10,000 | 6.37 ms | 17.90 ms | 15.51 ms | 6.27 ms | 10 |
-| 50,000 | 7.40 ms | 80.84 ms | 85.00 ms | 7.80 ms | 20 |
+| 1,000 | 12.19 ms | 11.68 ms | 9.51 ms | 7.94 ms | 1 |
+| 10,000 | 8.26 ms | 14.41 ms | 16.12 ms | 7.94 ms | 10 |
+| 50,000 | 8.87 ms | 56.69 ms | 57.84 ms | 9.28 ms | 20 |
 
 The name query matched 1, 10, and 50 runs respectively; the status query matched
 200, 2,000, and 10,000, and the four-day date query matched 136, 1,336, and
 6,668. Warm filtered queries returned only page-sized records (up to 20); a
 selective name query returned only its matching rows. At 50,000 records the
-first query requiring indexes took 11.08 seconds and read the tenant's 50,000
+first query requiring indexes took 10.27 seconds and read the tenant's 50,000
 records to build them (plus the returned page). This one-time cold cost is
 important when planning upgrades and should be measured on production Redis.
 

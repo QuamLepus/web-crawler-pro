@@ -76,6 +76,13 @@ class CountingRedis:
                     self.run_ids_returned += len(values)
                 return values
             return counted_range_by_score
+        if name == "zscan":
+            def counted_zscan(key, *args, **kwargs):
+                cursor, values = method(key, *args, **kwargs)
+                if key.startswith("wcp:v1:workflow_run"):
+                    self.run_ids_returned += len(values)
+                return cursor, values
+            return counted_zscan
         if name == "zinterstore":
             def counted_intersection(destination, keys, *args, **kwargs):
                 sizes = [self.redis.zcard(key) for key in keys]

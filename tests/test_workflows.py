@@ -187,6 +187,24 @@ def test_run_history_prunes_expired_ids_from_primary_and_status_indexes():
     assert redis.zscore(f"wcp:v1:workflow_runs:{tenant}:status:completed", run_id) is None
 
 
+def test_new_run_index_score_uses_record_creation_time():
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    tenant = "tenant-created-score"
+    run_id = "wfrun_aaaaaaaaaaaaaaaaaaaa"
+    from src.workflow_run_indexes import TENANT_RUNS, queue_new_run_indexes
+    created_at = datetime(2026, 5, 2, 23, 59, 59, tzinfo=UTC)
+    score = datetime(2026, 5, 3, 0, 0, 1, tzinfo=UTC).timestamp()
+    record = {"run_id": run_id, "tenant": tenant,
+              "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa",
+              "name": "Midnight boundary", "status": "queued",
+              "created_at": created_at.isoformat()}
+    pipe = redis.pipeline()
+    queue_new_run_indexes(pipe, record, score)
+    pipe.execute()
+
+    assert redis.zscore(TENANT_RUNS.format(tenant=tenant), run_id) == created_at.timestamp()
+
+
 def test_filter_index_backfill_supports_byte_response_redis():
     redis = fakeredis.FakeStrictRedis(decode_responses=False)
     tenant = "tenant-byte-responses"
