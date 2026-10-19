@@ -12,7 +12,7 @@ import os
 import statistics
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import fakeredis
@@ -21,29 +21,74 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("JWT_SECRET", "benchmark-only-not-a-deployment-secret")
 
-from src.api.main import create_api_app  # noqa: E402
+from src.api.main import create_api_app
+from src.workflow_run_indexes import (
+    RUN_INDEX_READY,
+    RUN_TTL_SECONDS,
+    queue_new_run_indexes,
+)
+
+
+class CountingPipeline:
+    def __init__(self, owner, pipeline):
+        self.owner = owner
+        self.pipeline = pipeline
+
+    def get(self, key, *args, **kwargs):
+        if key.startswith("wcp:v1:workflow_run:"):
+            self.owner.run_records_read += 1
+        self.pipeline.get(key, *args, **kwargs)
+        return self
+
+    def __getattr__(self, name):
+        return getattr(self.pipeline, name)
 
 
 class CountingRedis:
-    """Transparent Redis proxy counting run-index IDs and run-record reads."""
+    """Transparent Redis proxy counting indexed IDs and run-record reads."""
 
     def __init__(self, redis):
         self.redis = redis
         self.reset()
 
     def reset(self):
-        self.index_ids_examined = 0
+        self.run_ids_returned = 0
         self.run_records_read = 0
+        self.zinterstore_driver_members = 0
 
     def __getattr__(self, name):
         method = getattr(self.redis, name)
+        if name == "pipeline":
+            def counted_pipeline(*args, **kwargs):
+                return CountingPipeline(self, method(*args, **kwargs))
+            return counted_pipeline
         if name == "zrevrange":
             def counted_zrevrange(key, *args, **kwargs):
                 values = method(key, *args, **kwargs)
-                if key.startswith("wcp:v1:workflow_runs:"):
-                    self.index_ids_examined += len(values)
+                if key.startswith("wcp:v1:workflow_run"):
+                    self.run_ids_returned += len(values)
                 return values
             return counted_zrevrange
+        if name == "zrevrangebyscore":
+            def counted_range_by_score(key, *args, **kwargs):
+                values = method(key, *args, **kwargs)
+                if key.startswith("wcp:v1:workflow_run"):
+                    self.run_ids_returned += len(values)
+                return values
+            return counted_range_by_score
+        if name == "zscan":
+            def counted_zscan(key, *args, **kwargs):
+                cursor, values = method(key, *args, **kwargs)
+                if key.startswith("wcp:v1:workflow_run"):
+                    self.run_ids_returned += len(values)
+                return cursor, values
+            return counted_zscan
+        if name == "zinterstore":
+            def counted_intersection(destination, keys, *args, **kwargs):
+                sizes = [self.redis.zcard(key) for key in keys]
+                self.zinterstore_driver_members += min(sizes, default=0)
+                return method(destination, keys, *args, **kwargs)
+            return counted_intersection
         if name == "get":
             def counted_get(key, *args, **kwargs):
                 if key.startswith("wcp:v1:workflow_run:"):
@@ -66,31 +111,38 @@ def tenant_api_key(client: TestClient) -> str:
     return response.json()["key"]
 
 
-def seed_runs(redis, tenant: str, workflow_id: str, start: int, stop: int) -> None:
-    now = datetime.now(timezone.utc)
-    score_now = time.time()
+def seed_runs(redis, tenant: str, start: int, stop: int) -> None:
+    now = datetime.now(UTC)
     statuses = ("completed", "completed", "failed", "queued", "cancelled")
-    for index in range(start, stop):
-        run_id = f"wfrun_{index:020x}"
-        record = {
-            "run_id": run_id,
-            "workflow_id": workflow_id,
-            "tenant": tenant,
-            "name": f"Workflow run {index:06d}",
-            "status": statuses[index % len(statuses)],
-            "created_at": (now - timedelta(days=index % 30)).isoformat(),
-            "execution_mode": "dag",
-            "steps": [],
-        }
-        redis.set(f"wcp:v1:workflow_run:{run_id}", json.dumps(record), ex=30 * 86400)
-        redis.zadd(f"wcp:v1:workflow_runs:{tenant}", {run_id: score_now - index})
+    batch_size = 250
+    for offset in range(start, stop, batch_size):
+        pipe = redis.pipeline()
+        for index in range(offset, min(offset + batch_size, stop)):
+            workflow_number = index % 1000
+            run_id = f"wfrun_{index:020x}"
+            created_at = now - timedelta(days=index % 30, seconds=index // 30)
+            record = {
+                "run_id": run_id,
+                "workflow_id": f"workflow_{workflow_number:020x}",
+                "tenant": tenant,
+                "name": f"Workflow {workflow_number:06d}",
+                "status": statuses[index % len(statuses)],
+                "created_at": created_at.isoformat(),
+                "execution_mode": "dag",
+                "steps": [],
+            }
+            pipe.set(f"wcp:v1:workflow_run:{run_id}", json.dumps(record), ex=RUN_TTL_SECONDS)
+            queue_new_run_indexes(pipe, record, created_at.timestamp())
+        pipe.execute()
+    redis.set(RUN_INDEX_READY.format(tenant=tenant), "1", ex=RUN_TTL_SECONDS)
 
 
 def measure(client: TestClient, headers: dict[str, str], params: dict,
-            repeats: int) -> tuple[float, int, int, int]:
+            repeats: int) -> tuple[float, int, int, int, int]:
     timings = []
     total = 0
-    index_count = 0
+    ids_returned = 0
+    driver_members = 0
     record_reads = 0
     redis = client.app.state.services.redis
     for _ in range(repeats):
@@ -100,9 +152,10 @@ def measure(client: TestClient, headers: dict[str, str], params: dict,
         timings.append((time.perf_counter() - started) * 1000)
         response.raise_for_status()
         total = response.json()["total"]
-        index_count = redis.index_ids_examined
+        ids_returned = redis.run_ids_returned
+        driver_members = redis.zinterstore_driver_members
         record_reads = redis.run_records_read
-    return statistics.median(timings), total, index_count, record_reads
+    return statistics.median(timings), total, ids_returned, record_reads, driver_members
 
 
 def main() -> None:
@@ -123,28 +176,39 @@ def main() -> None:
         })
         definition.raise_for_status()
         tenant = definition.json()["tenant"]
-        workflow_id = definition.json()["workflow_id"]
         counter = CountingRedis(raw_redis)
         app.state.services.redis = counter
 
         start = 0
         filters = [
             ("unfiltered page", {}),
-            ("sparse name search", {"q": "Workflow run 000042"}),
+            ("name token search", {"q": "Workflow 000042"}),
             ("status filter", {"status": "failed"}),
             ("last-four-days date range", {
-                "date_from": (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat(),
-                "date_to": datetime.now(timezone.utc).date().isoformat(),
+                "date_from": (datetime.now(UTC).date() - timedelta(days=3)).isoformat(),
+                "date_to": datetime.now(UTC).date().isoformat(),
             }),
         ]
-        print("dataset,filter,median_ms,total_matches,index_ids_examined,run_records_read")
+        print("dataset,filter,median_ms,total_matches,run_ids_returned,run_records_read,smallest_intersection_input_size")
         for size in sorted(set(args.sizes)):
-            seed_runs(raw_redis, tenant, workflow_id, start, size)
+            seed_runs(raw_redis, tenant, start, size)
             start = size
             for label, filter_params in filters:
-                elapsed, total, indexes, reads = measure(
+                elapsed, total, ids_returned, reads, driver_members = measure(
                     client, headers, {**filter_params, "page_size": 20}, args.repeats)
-                print(f"{size},{label},{elapsed:.2f},{total},{indexes},{reads}")
+                print(f"{size},{label},{elapsed:.2f},{total},{ids_returned},{reads},{driver_members}")
+
+            patterns = [
+                f"wcp:v1:workflow_runs:{tenant}:status:*",
+                f"wcp:v1:workflow_runs:{tenant}:workflow:*",
+                f"wcp:v1:workflow_runs:{tenant}:term:*",
+            ]
+            index_keys = [key for pattern in patterns for key in raw_redis.keys(pattern)]
+            index_keys.append(RUN_INDEX_READY.format(tenant=tenant))
+            raw_redis.delete(*index_keys)
+            elapsed, total, ids_returned, reads, driver_members = measure(
+                client, headers, {"q": "Workflow 000042", "page_size": 20}, 1)
+            print(f"{size},first-query backfill,{elapsed:.2f},{total},{ids_returned},{reads},{driver_members}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,12 @@ from datetime import datetime, timezone
 from src.celery_app import app
 from src.config import get_config
 from src.utils.logger import setup_logger
+from src.workflow_run_indexes import (
+    RUN_TTL_SECONDS,
+    queue_new_run_indexes,
+    refresh_ready_marker_ttl,
+    refresh_run_status_index,
+)
 
 logger = setup_logger(__name__)
 RUN_KEY = "wcp:v1:workflow_run:{run_id}"
@@ -21,10 +27,12 @@ def _redis():
 def _save(redis, run_id: str, record: dict) -> None:
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
     pipe = redis.pipeline()
-    pipe.set(RUN_KEY.format(run_id=run_id), json.dumps(record, separators=(",", ":")), ex=30 * 86400)
+    pipe.set(RUN_KEY.format(run_id=run_id), json.dumps(record, separators=(",", ":")),
+             ex=RUN_TTL_SECONDS)
     if record.get("status") not in {"queued", "running"} and record.get("workflow_id"):
         pipe.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=record["workflow_id"]), run_id)
     pipe.execute()
+    refresh_run_status_index(redis, record)
 
 
 def _read(redis, key: str) -> dict:
@@ -164,7 +172,6 @@ def run_workflow(self, payload: dict) -> dict:
 
 SCHEDULED_WORKFLOWS = "wcp:v1:workflow_schedules"
 WORKFLOW_KEY = "wcp:v1:workflow:{workflow_id}"
-TENANT_RUNS = "wcp:v1:workflow_runs:{tenant}"
 SCHEDULE_LOCK = "wcp:v1:workflow_schedule_tick_lock"
 
 
@@ -217,9 +224,12 @@ def schedule_tick(self, batch: int = 50) -> dict:
                 "scheduled": True,
             }
             key = RUN_KEY.format(run_id=run_id)
-            redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
-            redis.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: now})
-            redis.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now})
+            pipe = redis.pipeline()
+            pipe.set(key, json.dumps(record, separators=(",", ":")), ex=RUN_TTL_SECONDS)
+            queue_new_run_indexes(pipe, record, now)
+            refresh_ready_marker_ttl(redis, pipe, tenant)
+            pipe.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now})
+            pipe.execute()
             try:
                 scheduler = SchedulerService(redis, celery_app=app)
                 scheduler.submit(JobSpec(
@@ -238,8 +248,9 @@ def schedule_tick(self, batch: int = 50) -> dict:
                 for step in record["steps"]:
                     if step["status"] == "queued":
                         step.update(status="failed", error=dispatch_error, completed_at=failed_at)
-                redis.set(key, json.dumps(record, separators=(",", ":")), ex=30 * 86400)
+                redis.set(key, json.dumps(record, separators=(",", ":")), ex=RUN_TTL_SECONDS)
                 redis.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), run_id)
+                refresh_run_status_index(redis, record)
             next_run = now + int(interval) * 60
             definition["next_run_at"] = datetime.fromtimestamp(next_run, timezone.utc).isoformat()
             redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),

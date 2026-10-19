@@ -10,7 +10,7 @@ import json
 import re
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,12 +18,22 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.api.routers.jobs import CtxDep
 from src.compute.scheduler import JobPriority, JobSpec
+from src.workflow_run_indexes import (
+    TENANT_RUNS,
+    ensure_run_filter_indexes,
+    filtered_run_page,
+    linear_filtered_run_page,
+    prune_expired_run_indexes,
+    query_search_tokens,
+    queue_new_run_indexes,
+    refresh_ready_marker_ttl,
+    refresh_run_status_index,
+)
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 WORKFLOW_KEY = "wcp:v1:workflow:{workflow_id}"
 RUN_KEY = "wcp:v1:workflow_run:{run_id}"
 TENANT_WORKFLOWS = "wcp:v1:workflows:{tenant}"
-TENANT_RUNS = "wcp:v1:workflow_runs:{tenant}"
 SCHEDULED_WORKFLOWS = "wcp:v1:workflow_schedules"
 WORKFLOW_LOCK = "wcp:v1:workflow_lock:{workflow_id}"
 ACTIVE_WORKFLOW_RUNS = "wcp:v1:workflow_active_runs:{workflow_id}"
@@ -194,7 +204,7 @@ def _active_workflow_runs(redis, workflow_id: str) -> list[str]:
 async def create_workflow(body: WorkflowCreate, request: Request, ctx: CtxDep) -> dict:
     tenant = str(ctx["tenant"])
     workflow_id = "workflow_" + uuid.uuid4().hex[:20]
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     next_run = (time.time() + body.schedule_interval_minutes * 60
                 if body.schedule_interval_minutes else None)
     steps, execution_mode = _prepare_steps(body.steps)
@@ -202,7 +212,7 @@ async def create_workflow(body: WorkflowCreate, request: Request, ctx: CtxDep) -
               "steps": steps, "execution_mode": execution_mode,
               "max_pages": body.max_pages,
               "schedule_interval_minutes": body.schedule_interval_minutes,
-              "next_run_at": (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+              "next_run_at": (datetime.fromtimestamp(next_run, UTC).isoformat()
                               if next_run else None),
               "created_at": now}
     redis = request.app.state.services.redis
@@ -246,9 +256,33 @@ async def list_workflow_runs(request: Request, ctx: CtxDep,
     tenant = str(ctx["tenant"])
     redis = request.app.state.services.redis
     key = TENANT_RUNS.format(tenant=tenant)
+    prune_expired_run_indexes(redis, tenant)
     offset = (page - 1) * page_size
-    needle = q.strip().casefold()
-    filtering = bool(needle or status or date_from or date_to)
+    normalized_q = q.strip().casefold()
+    run_id_filter = (normalized_q if re.fullmatch(r"wfrun_[a-f0-9]{20}", normalized_q)
+                     else None)
+    workflow_id_filter = (
+        normalized_q if re.fullmatch(r"workflow_[a-f0-9]{20}", normalized_q) else None)
+    tokens = query_search_tokens(normalized_q) if not workflow_id_filter else []
+    if run_id_filter:
+        raw = redis.get(RUN_KEY.format(run_id=run_id_filter))
+        record = _decode(raw) if raw else None
+        matches = bool(record and record.get("tenant") == tenant
+                       and (not status or record.get("status") == status))
+        if matches and (date_from or date_to):
+            try:
+                created = datetime.fromisoformat(str(record.get("created_at", ""))).date()
+            except ValueError:
+                matches = False
+            else:
+                matches = ((not date_from or created >= date_from)
+                           and (not date_to or created <= date_to))
+        items = [record] if matches and page == 1 else []
+        return {"items": items[:page_size], "total": int(matches),
+                "page": page, "page_size": page_size}
+    filtering = bool(normalized_q or status or date_from or date_to)
+    if normalized_q and not tokens and not workflow_id_filter:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
     if not filtering:
         ids = redis.zrevrange(key, offset, offset + page_size - 1)
         items = []
@@ -262,35 +296,24 @@ async def list_workflow_runs(request: Request, ctx: CtxDep,
                 items.append(record)
         total = int(redis.zcard(key) or 0)
     else:
-        matches = []
-        for raw_id in redis.zrevrange(key, 0, -1):
-            run_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
-            raw = redis.get(RUN_KEY.format(run_id=run_id))
-            if not raw:
-                continue
-            record = _decode(raw)
-            if record.get("tenant") != tenant:
-                continue
-            if status and record.get("status") != status:
-                continue
-            if needle:
-                searchable = " ".join(str(record.get(field, ""))
-                                      for field in ("name", "run_id", "workflow_id"))
-                if needle not in searchable.casefold():
-                    continue
-            if date_from or date_to:
-                try:
-                    created = datetime.fromisoformat(
-                        str(record.get("created_at", ""))).date()
-                except ValueError:
-                    continue
-                if date_from and created < date_from:
-                    continue
-                if date_to and created > date_to:
-                    continue
-            matches.append(record)
-        total = len(matches)
-        items = matches[offset:offset + page_size]
+        indexed_filter_needed = bool(tokens or status or workflow_id_filter)
+        if not indexed_filter_needed or ensure_run_filter_indexes(redis, tenant):
+            ids, total = filtered_run_page(redis, tenant, page=page, page_size=page_size,
+                                           tokens=tokens, status=status,
+                                           date_from=date_from, date_to=date_to,
+                                           workflow_id=workflow_id_filter)
+            items = []
+            for run_id in ids:
+                raw = redis.get(RUN_KEY.format(run_id=run_id))
+                if raw:
+                    record = _decode(raw)
+                    if record.get("tenant") == tenant:
+                        items.append(record)
+        else:
+            items, total = linear_filtered_run_page(
+                redis, tenant, page=page, page_size=page_size, tokens=tokens,
+                status=status, date_from=date_from, date_to=date_to,
+                workflow_id=workflow_id_filter)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
@@ -319,13 +342,13 @@ async def update_workflow(workflow_id: str, body: WorkflowUpdate,
             interval = body.schedule_interval_minutes
             next_run = time.time() + interval * 60 if interval else None
             record["schedule_interval_minutes"] = interval
-            record["next_run_at"] = (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+            record["next_run_at"] = (datetime.fromtimestamp(next_run, UTC).isoformat()
                                      if next_run else None)
             if next_run is None:
                 redis.zrem(SCHEDULED_WORKFLOWS, workflow_id)
             else:
                 redis.zadd(SCHEDULED_WORKFLOWS, {workflow_id: next_run})
-        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        record["updated_at"] = datetime.now(UTC).isoformat()
         redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),
                   json.dumps(record, separators=(",", ":")), ex=TTL)
         return record
@@ -367,7 +390,7 @@ async def update_workflow_schedule(workflow_id: str, body: WorkflowScheduleUpdat
         interval = body.interval_minutes
         next_run = time.time() + interval * 60 if interval else None
         record["schedule_interval_minutes"] = interval
-        record["next_run_at"] = (datetime.fromtimestamp(next_run, timezone.utc).isoformat()
+        record["next_run_at"] = (datetime.fromtimestamp(next_run, UTC).isoformat()
                                  if next_run else None)
         redis.set(WORKFLOW_KEY.format(workflow_id=workflow_id),
                   json.dumps(record, separators=(",", ":")), ex=TTL)
@@ -389,7 +412,7 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
     try:
         definition = _workflow(request, workflow_id, tenant)
         run_id = "wfrun_" + uuid.uuid4().hex[:20]
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         step_states = []
         for index, step in enumerate(definition["steps"]):
             step_id = step.get("step_id", f"step_{index + 1}")
@@ -405,10 +428,9 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         run_key = RUN_KEY.format(run_id=run_id)
         now_ts = time.time()
         pipe = redis.pipeline()
-        tenant_runs_key = TENANT_RUNS.format(tenant=tenant)
         pipe.set(run_key, json.dumps(record), ex=TTL)
-        pipe.zremrangebyscore(tenant_runs_key, "-inf", now_ts - TTL)
-        pipe.zadd(tenant_runs_key, {run_id: now_ts})
+        queue_new_run_indexes(pipe, record, now_ts)
+        refresh_ready_marker_ttl(redis, pipe, tenant)
         pipe.zadd(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), {run_id: now_ts})
         pipe.execute()
         payload = {"run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
@@ -420,7 +442,7 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
         try:
             request.app.state.services.scheduler.submit(spec)
         except Exception as exc:
-            failed_at = datetime.now(timezone.utc).isoformat()
+            failed_at = datetime.now(UTC).isoformat()
             record.update(status="failed", error="workflow backend unavailable",
                           updated_at=failed_at)
             for step in record["steps"]:
@@ -431,6 +453,7 @@ async def start_workflow(workflow_id: str, request: Request, ctx: CtxDep) -> dic
             pipe.set(run_key, json.dumps(record), ex=TTL)
             pipe.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=workflow_id), run_id)
             pipe.execute()
+            refresh_run_status_index(redis, record)
             from src.compute.scheduler import QuotaExceeded
             if isinstance(exc, QuotaExceeded):
                 raise HTTPException(402, str(exc)) from exc
@@ -456,7 +479,7 @@ async def cancel_workflow_run(run_id: str, request: Request, ctx: CtxDep) -> dic
         raise HTTPException(404, "workflow run not found")
     if record.get("status") not in {"queued", "running"}:
         raise HTTPException(409, f"workflow run is already {record.get('status')}")
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     if record["status"] == "queued":
         record.update(status="cancelled", cancelled_at=now,
                       cancel_requested=False)
@@ -473,6 +496,7 @@ async def cancel_workflow_run(run_id: str, request: Request, ctx: CtxDep) -> dic
     redis.set(key, json.dumps(record, separators=(",", ":")), ex=TTL)
     if record["status"] == "cancelled":
         redis.zrem(ACTIVE_WORKFLOW_RUNS.format(workflow_id=record["workflow_id"]), run_id)
+        refresh_run_status_index(redis, record)
     return {"run_id": run_id, "status": record["status"],
             "cancel_requested": record.get("cancel_requested", False),
             "message": message}
