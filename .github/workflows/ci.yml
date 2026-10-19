@@ -75,9 +75,13 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target }}
+          tags: wcp-${{ matrix.target }}:validation
+          load: true
           push: false
           cache-from: type=gha,scope=pr-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=pr-${{ matrix.target }}
+      - name: Report built image virtual size
+        run: python scripts/report-image-sizes.py "wcp-${{ matrix.target }}:validation"
 
   compose-smoke:
     if: github.event_name == 'pull_request'

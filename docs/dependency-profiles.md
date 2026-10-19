@@ -18,9 +18,11 @@ large or environment-specific. Each service profile includes
 runtime and development dependency set. New services and container targets
 should use the narrowest profile they need. The standard Docker targets install
 API or worker profiles; `worker-stealth` adds the browser profile. Pull requests
-build all four Docker targets without publishing images. After a push to
-`main` publishes commit-SHA images, CI smoke-tests the published dashboard with
-Redis using `docker-compose.ghcr.yml`; the full GHCR stack is not yet exercised.
+build all four Docker targets without publishing images, load them into the
+runner, and report each Docker virtual size. After a push to `main` publishes
+commit-SHA images, CI pulls all four through `docker-compose.ghcr.yml`, reports
+their virtual sizes, and smoke-tests the published dashboard and both Celery
+workers with Redis. The full GHCR stack is not yet exercised.
 AI and browser libraries are imported lazily in the relevant features, which
 retain their built-in fallbacks when those optional packages are not installed.
 
