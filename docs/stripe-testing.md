@@ -25,9 +25,18 @@ then applies a locally signed `checkout.session.completed` event and verifies
 the tenant's plan changed. Test checkout sessions are expired and test
 customers are deleted on cleanup when possible.
 
-The signed completion event is synthetic because the test process is private
-and does not accept Stripe webhook delivery. For a full delivery-path test,
-run the app in a dedicated test environment and use Stripe CLI to forward a
-test-mode event to `/api/v1/billing/stripe/webhook` (or the legacy
-`/v1/billing/stripe/webhook` alias). Ensure `STRIPE_WEBHOOK_SECRET` is set to
-the CLI listener's signing secret. Never use live-mode or customer data.
+The completion event in the pytest integration test is synthetic and signed
+locally; it is not sent by Stripe. A separate `stripe-test-mode` CI job runs
+only on pushes to `main` when the repository Actions secrets
+`STRIPE_TEST_SECRET_KEY` (`sk_test_...`) and `STRIPE_TEST_PRICE_ID` (an active
+recurring test Price) are configured. It runs the real Checkout API test, then
+starts the API and Stripe CLI listener and triggers a CLI fixture event to
+`/api/v1/billing/stripe/webhook`. The CLI supplies the ephemeral signing secret
+and forwards the event over HTTP, so this verifies the actual listener,
+signature validation, endpoint, and plan update. The CLI-triggered fixture event
+is synthetic: it is not the completion event for the Checkout Session created
+in the first test, and the Checkout Session is not paid. The job skips when
+both secrets are absent and fails if only one is configured.
+
+Never add live credentials. Use a dedicated test account and avoid customer or
+production data. CI jobs for pull requests do not receive these secrets.

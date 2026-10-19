@@ -37,6 +37,73 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
 
+  stripe-test-mode:
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Stripe test-mode secrets
+        id: stripe-secrets
+        env:
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          STRIPE_TEST_PRICE_ID: ${{ secrets.STRIPE_TEST_PRICE_ID }}
+        run: |
+          if [[ -z "$STRIPE_TEST_SECRET_KEY" && -z "$STRIPE_TEST_PRICE_ID" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Stripe integration skipped; configure STRIPE_TEST_SECRET_KEY and STRIPE_TEST_PRICE_ID Actions secrets."
+          elif [[ -z "$STRIPE_TEST_SECRET_KEY" || -z "$STRIPE_TEST_PRICE_ID" ]]; then
+            echo "::error::Both Stripe test-mode secrets must be configured."
+            exit 1
+          elif [[ "$STRIPE_TEST_SECRET_KEY" != sk_test_* ]]; then
+            echo "::error::Refusing a non-test Stripe secret key."
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        run: pip install -r requirements-dev.txt
+      - uses: actions/setup-go@v5
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        with:
+          go-version: "1.24.x"
+      - name: Install pinned Stripe CLI
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        env:
+          GOBIN: ${{ runner.temp }}/stripe-cli-bin
+        run: |
+          mkdir -p "$GOBIN"
+          go install github.com/stripe/stripe-cli/cmd/stripe@v1.54.0
+          echo "$GOBIN" >> "$GITHUB_PATH"
+          "$GOBIN/stripe" version
+      - name: Create and verify a real test-mode Checkout Session
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        env:
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          STRIPE_TEST_PRICE_ID: ${{ secrets.STRIPE_TEST_PRICE_ID }}
+        run: pytest -q -m stripe_integration tests/test_stripe_integration.py
+      - name: Deliver a Stripe CLI-signed test event over HTTP
+        if: steps.stripe-secrets.outputs.enabled == 'true'
+        env:
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          STRIPE_TEST_PRICE_ID: ${{ secrets.STRIPE_TEST_PRICE_ID }}
+          REDIS_URL: redis://localhost:6379/0
+        run: python scripts/stripe-cli-delivery-smoke.py
+
   sdk-test:
     runs-on: ubuntu-latest
     steps:
