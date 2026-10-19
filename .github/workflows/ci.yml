@@ -170,8 +170,8 @@ jobs:
             "$repo/worker-stealth:${GITHUB_SHA}" \
             "$repo/crawler:${GITHUB_SHA}" \
             "$repo/dashboard:${GITHUB_SHA}"
-      - name: Start dashboard and Redis using the published image
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard
+      - name: Start dashboard, Redis, and published workers
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard worker worker-stealth
       - name: Wait for published dashboard health endpoint
         run: |
           for attempt in $(seq 1 30); do
@@ -182,6 +182,23 @@ jobs:
           done
           docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs dashboard
           exit 1
+      - name: Wait for published Celery workers to become ready
+        run: |
+          compose=(docker compose -f docker-compose.yml -f docker-compose.ghcr.yml)
+          for service in worker worker-stealth; do
+            ready=false
+            for attempt in $(seq 1 45); do
+              if "${compose[@]}" logs --no-color "$service" | grep -qE 'ready\.'; then
+                ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ready" != true ]; then
+              "${compose[@]}" logs --no-color "$service"
+              exit 1
+            fi
+          done
       - name: Stop Compose services
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml down --volumes --remove-orphans
