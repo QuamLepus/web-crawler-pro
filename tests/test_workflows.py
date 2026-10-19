@@ -1,5 +1,6 @@
 """Tenant isolation, validation and worker behavior for crawl workflows."""
 import json
+from datetime import UTC, datetime, timedelta
 
 import fakeredis
 import pytest
@@ -48,6 +49,8 @@ def test_workflow_create_list_run_and_tenant_isolation():
     assert state.status_code == 200
     assert state.json()["status"] == "queued"
     assert client.get("/api/v1/workflows/runs", headers=one).json()["total"] == 1
+    assert client.get("/api/v1/workflows/runs", headers=one,
+                      params={"status": "queued"}).json()["total"] == 1
     assert client.get(f"/api/v1/workflows/runs/{run_id}", headers=two).status_code == 404
     cancelled = client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one)
     assert cancelled.status_code == 200
@@ -55,6 +58,10 @@ def test_workflow_create_list_run_and_tenant_isolation():
     cancelled_state = client.get(f"/api/v1/workflows/runs/{run_id}", headers=one).json()
     assert cancelled_state["status"] == "cancelled"
     assert [step["status"] for step in cancelled_state["steps"]] == ["cancelled", "cancelled"]
+    assert client.get("/api/v1/workflows/runs", headers=one,
+                      params={"status": "cancelled"}).json()["items"][0]["run_id"] == run_id
+    assert client.get("/api/v1/workflows/runs", headers=one,
+                      params={"status": "queued"}).json()["total"] == 0
     assert client.post(f"/api/v1/workflows/runs/{run_id}/cancel", headers=one).status_code == 409
 
 
@@ -65,25 +72,30 @@ def test_workflow_run_history_search_status_and_date_filters():
         "name": "Alpha refresh", "steps": [{"url": "https://example.org"}],
     }).json()
     redis = client.app.state.services.redis
+    today = datetime.now(UTC).date()
+    fixtures = [
+        ("completed", f"{today - timedelta(days=2)}T12:00:00+00:00"),
+        ("failed", f"{today - timedelta(days=1)}T12:00:00+00:00"),
+        ("queued", f"{today}T12:00:00+00:00"),
+    ]
     run_ids = []
-    for index, (status, created_at) in enumerate([
-        ("completed", "2026-05-01T12:00:00+00:00"),
-        ("failed", "2026-05-02T12:00:00+00:00"),
-        ("queued", "2026-05-03T12:00:00+00:00"),
-    ]):
+    for _status, _created_at in fixtures:
         queued = client.post(
             f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=headers)
         assert queued.status_code == 202
-        run_id = queued.json()["run_id"]
-        run_ids.append(run_id)
+        run_ids.append(queued.json()["run_id"])
+    for run_id, (status, created_at) in zip(run_ids, fixtures):
         key = f"wcp:v1:workflow_run:{run_id}"
         record = json.loads(redis.get(key))
         record.update(status=status, created_at=created_at)
         redis.set(key, json.dumps(record), ex=3600)
+        redis.zadd(f"wcp:v1:workflow_runs:{definition['tenant']}", {
+            run_id: datetime.fromisoformat(created_at).timestamp()})
 
     filtered = client.get("/api/v1/workflows/runs", headers=headers, params={
+
         "q": "alpha refresh", "status": "failed",
-        "date_from": "2026-05-02", "date_to": "2026-05-03", "page_size": 5,
+        "date_from": fixtures[1][1][:10], "date_to": fixtures[2][1][:10], "page_size": 5,
     })
     assert filtered.status_code == 200, filtered.text
     assert filtered.json()["total"] == 1
@@ -93,13 +105,16 @@ def test_workflow_run_history_search_status_and_date_filters():
                        params={"q": run_ids[2]})
     assert by_id.json()["total"] == 1
     assert by_id.json()["items"][0]["run_id"] == run_ids[2]
+    by_workflow = client.get("/api/v1/workflows/runs", headers=headers,
+                             params={"q": definition["workflow_id"]})
+    assert by_workflow.json()["total"] == len(run_ids)
     other_tenant = _key(client, "workflow-history-other@example.test")
     hidden = client.get("/api/v1/workflows/runs", headers=other_tenant,
                         params={"q": run_ids[2]})
     assert hidden.json()["total"] == 0
 
     second_page = client.get("/api/v1/workflows/runs", headers=headers,
-                             params={"date_from": "2026-05-01", "page": 2,
+                             params={"date_from": fixtures[0][1][:10], "page": 2,
                                      "page_size": 1})
     assert second_page.json()["total"] == 3
     assert [run["run_id"] for run in second_page.json()["items"]] == [run_ids[1]]
@@ -108,6 +123,120 @@ def test_workflow_run_history_search_status_and_date_filters():
                       params={"status": "unknown"}).status_code == 422
     assert client.get("/api/v1/workflows/runs", headers=headers,
                       params={"date_from": "2026-05-04", "date_to": "2026-05-01"}).status_code == 422
+
+
+def test_history_filter_falls_back_while_backfill_lock_is_held():
+    client = _client()
+    headers = _key(client, "workflow-backfill-lock@example.test")
+    definition = client.post("/api/v1/workflows", headers=headers, json={
+        "name": "Backfill lock", "steps": [{"url": "https://example.org"}],
+    }).json()
+    queued = client.post(
+        f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=headers).json()
+    redis = client.app.state.services.redis
+    lock_key = f"wcp:v1:workflow_runs:{definition['tenant']}:indexes-lock"
+    redis.set(lock_key, "another-backfill-owner", ex=60)
+
+    response = client.get("/api/v1/workflows/runs", headers=headers,
+                          params={"status": "queued"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["run_id"] == queued["run_id"]
+    assert not redis.exists(f"wcp:v1:workflow_runs:{definition['tenant']}:indexes-ready")
+
+
+def test_date_only_filter_does_not_trigger_secondary_index_backfill():
+    client = _client()
+    headers = _key(client, "workflow-date-only@example.test")
+    definition = client.post("/api/v1/workflows", headers=headers, json={
+        "name": "Date-only check", "steps": [{"url": "https://example.org"}],
+    }).json()
+    queued = client.post(
+        f"/api/v1/workflows/{definition['workflow_id']}/runs", headers=headers).json()
+    redis = client.app.state.services.redis
+    ready_key = f"wcp:v1:workflow_runs:{definition['tenant']}:indexes-ready"
+    assert not redis.exists(ready_key)
+    record = json.loads(redis.get(f"wcp:v1:workflow_run:{queued['run_id']}"))
+
+    response = client.get("/api/v1/workflows/runs", headers=headers,
+                          params={"date_from": record["created_at"][:10]})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert not redis.exists(ready_key)
+
+
+def test_run_history_prunes_expired_ids_from_primary_and_status_indexes():
+    client = _client()
+    headers = _key(client, "workflow-retention@example.test")
+    tenant = client.app.state.services.api_keys.lookup(headers["X-API-Key"]).tenant
+    redis = client.app.state.services.redis
+    run_id = "wfrun_aaaaaaaaaaaaaaaaaaaa"
+    score = datetime.now(UTC).timestamp() - 31 * 86400
+    record = {"run_id": run_id, "tenant": tenant, "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa",
+              "status": "completed", "name": "Expired run",
+              "created_at": datetime.fromtimestamp(score, UTC).isoformat()}
+    redis.set(f"wcp:v1:workflow_run:{run_id}", json.dumps(record), ex=3600)
+    redis.zadd(f"wcp:v1:workflow_runs:{tenant}", {run_id: score})
+    redis.zadd(f"wcp:v1:workflow_runs:{tenant}:status:completed", {run_id: score})
+
+    response = client.get("/api/v1/workflows/runs", headers=headers,
+                          params={"status": "completed"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+    assert redis.zscore(f"wcp:v1:workflow_runs:{tenant}", run_id) is None
+    assert redis.zscore(f"wcp:v1:workflow_runs:{tenant}:status:completed", run_id) is None
+
+
+def test_filter_index_backfill_supports_byte_response_redis():
+    redis = fakeredis.FakeStrictRedis(decode_responses=False)
+    tenant = "tenant-byte-responses"
+    run_id = "wfrun_aaaaaaaaaaaaaaaaaaaa"
+    workflow_id = "workflow_aaaaaaaaaaaaaaaaaaaa"
+    from src.workflow_run_indexes import (
+        RUN_INDEX_LOCK,
+        RUN_INDEX_READY,
+        TENANT_RUNS,
+        ensure_run_filter_indexes,
+        filtered_run_page,
+        query_search_tokens,
+        run_search_tokens,
+    )
+    record = {"run_id": run_id, "workflow_id": workflow_id, "tenant": tenant,
+              "name": "Byte response check", "status": "queued",
+              "created_at": "2026-05-02T12:00:00+00:00"}
+    assert run_search_tokens({"name": "বাংলা সংবাদ"}) == {"বাংলা", "সংবাদ"}
+    redis.set(f"wcp:v1:workflow_run:{run_id}", json.dumps(record))
+    redis.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: 100.0})
+
+    assert ensure_run_filter_indexes(redis, tenant)
+    assert redis.get(RUN_INDEX_READY.format(tenant=tenant)) == b"1"
+    assert redis.get(RUN_INDEX_LOCK.format(tenant=tenant)) is None
+    ids, total = filtered_run_page(
+        redis, tenant, page=1, page_size=20, tokens=query_search_tokens("BYTE CHECK"),
+        status="queued", date_from=None, date_to=None)
+    assert total == 1
+    assert ids == [run_id]
+
+
+def test_worker_status_persistence_updates_tenant_status_index():
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    tenant = "tenant-index-test"
+    run_id = "wfrun_aaaaaaaaaaaaaaaaaaaa"
+    from src.workflow_run_indexes import (
+        RUN_INDEX_READY,
+        TENANT_RUN_STATUS,
+        TENANT_RUNS,
+    )
+    redis.zadd(TENANT_RUNS.format(tenant=tenant), {run_id: 100.0})
+    redis.zadd(TENANT_RUN_STATUS.format(tenant=tenant, status="queued"), {run_id: 100.0})
+    redis.set(RUN_INDEX_READY.format(tenant=tenant), "1", ex=3600)
+    record = {"run_id": run_id, "tenant": tenant, "workflow_id": "workflow_aaaaaaaaaaaaaaaaaaaa",
+              "name": "Status index check", "status": "running", "steps": []}
+
+    workflow_tasks._save(redis, run_id, record)
+
+    assert redis.zscore(TENANT_RUN_STATUS.format(tenant=tenant, status="queued"), run_id) is None
+    assert redis.zscore(TENANT_RUN_STATUS.format(tenant=tenant, status="running"), run_id) == 100.0
 
 
 def test_workflow_edit_delete_preserves_tenant_and_run_safety():

@@ -22,29 +22,50 @@ All endpoints below require an authenticated tenant API key with crawl access.
 | `PUT /api/v1/workflows/{workflow_id}` | Update one or more of `name`, `steps`, or `schedule_interval_minutes`. A `null` schedule disables recurrence; an omitted field is unchanged. |
 | `DELETE /api/v1/workflows/{workflow_id}` | Delete the definition and schedule. Returns `409` while any run is queued or running. Historical run records remain available under the tenant's run history. |
 | `POST /api/v1/workflows/{workflow_id}/runs` | Queue a run using the current definition snapshot. |
-| `GET /api/v1/workflows/runs` | List paginated runs; optional `q` searches workflow name/run ID/workflow ID, `status` filters state, and `date_from`/`date_to` bound creation dates (inclusive). |
+| `GET /api/v1/workflows/runs` | List paginated runs; optional `q` matches all case-insensitive name tokens, or an exact run/workflow ID; `status` filters state, and `date_from`/`date_to` bound creation dates (inclusive). |
 | `GET /api/v1/workflows/runs/{run_id}` | Read a run owned by the authenticated tenant. |
 | `PATCH /api/v1/workflows/{workflow_id}/schedule` | Set or disable the recurring interval without replacing other definition fields. |
 
-Filtered run-history requests scan the tenant's run index to compute an exact
-match count; unfiltered requests use Redis range pagination. A reproducible
-in-memory baseline is available at `scripts/benchmark_workflow_run_filters.py`.
-It ran the authenticated API route through FastAPI's test client over fakeredis,
-with three repetitions per case:
+Run history is retained for 30 days. Unfiltered requests and date-only filters
+use the tenant's creation-time sorted set; date bounds are inclusive. Status
+filters use per-tenant, per-status sorted sets. Name search tokenizes the saved
+workflow name and query case-insensitively and requires every query token to
+match; exact run IDs and workflow IDs remain supported. Combined indexed filters
+intersect the relevant sorted sets, then fetch only the requested page of run
+records. Tenant IDs are part of every secondary-index key.
 
-| Synthetic runs | Unfiltered page p50 | Sparse name search p50 | Status filter p50 | Four-day date filter p50 | Records read per filtered query |
+Status/name/workflow indexes are maintained when runs are created or change
+status. Existing tenants are lazily backfilled on the first request that needs
+one of those indexes; while the backfill lock is held, requests fall back to a
+linear tenant scan. This is a one-time per-tenant cost after deployment. Date-
+only and exact run-ID requests do not trigger backfill. Retention pruning and
+index TTLs remain aligned with the run-history retention period.
+
+The reproducible benchmark is at `scripts/benchmark_workflow_run_filters.py`.
+It exercises the authenticated API route through FastAPI's test client over
+fakeredis, with three repetitions per warm case and a separate first-query
+backfill measurement:
+
+| Synthetic runs | Unfiltered page p50 | Name-token search p50 | Status filter p50 | Four-day date filter p50 | Name-search records read |
 |---:|---:|---:|---:|---:|---:|
-| 1,000 | 6.32 ms | 48.12 ms | 43.06 ms | 47.24 ms | 1,000 |
-| 10,000 | 8.12 ms | 345.40 ms | 398.08 ms | 351.75 ms | 10,000 |
-| 50,000 | 7.90 ms | 1,740.69 ms | 1,810.76 ms | 1,957.23 ms | 50,000 |
+| 1,000 | 6.51 ms | 6.50 ms | 9.15 ms | 6.87 ms | 1 |
+| 10,000 | 6.37 ms | 17.90 ms | 15.51 ms | 6.27 ms | 10 |
+| 50,000 | 7.40 ms | 80.84 ms | 85.00 ms | 7.80 ms | 20 |
 
-This is a same-process synthetic baseline, not a production Redis or concurrent
-load test. It shows filtered latency and record reads growing linearly while
-unfiltered range pagination remains approximately flat. Decision: add
-filter-oriented tenant indexes before treating these filters as suitable for
-high-volume run histories; sparse name search in particular is already about
-1.7 seconds at 50,000 synthetic records. The in-memory measurements should not
-be used as a production latency forecast.
+The name query matched 1, 10, and 50 runs respectively; the status query matched
+200, 2,000, and 10,000, and the four-day date query matched 136, 1,336, and
+6,668. Warm filtered queries returned only page-sized records (up to 20); a
+selective name query returned only its matching rows. At 50,000 records the
+first query requiring indexes took 11.08 seconds and read the tenant's 50,000
+records to build them (plus the returned page). This one-time cold cost is
+important when planning upgrades and should be measured on production Redis.
+
+These are same-process synthetic fakeredis/TestClient results—not production
+Redis latency, memory use, or concurrent-load forecasts. For historical
+comparison, the pre-index scan baseline (three repetitions) had sparse-name /
+status / four-day-date p50 latencies of 48 / 43 / 47 ms at 1,000 runs, 345 / 398
+/ 352 ms at 10,000, and 1,741 / 1,811 / 1,957 ms at 50,000; every filtered
+query read all retained runs.
 
 The web console provides a simple URL-list form for sequential recipes, an
 advanced JSON editor for DAG step definitions, and a read-only visual dependency
