@@ -17,7 +17,8 @@ Celery Beat, and the dashboard; it may need substantial memory and disk.
 On pushes to `main`, CI waits for all four image-publish jobs, then pulls the
 just-published dashboard image and runs it with Redis through the GHCR overlay.
 The test checks the dashboard `/healthz` endpoint and tears down those services.
-Pull requests validate the overlay's resolved Compose config and separately
-smoke-test the locally built dashboard. The automated published-image smoke is
-intentionally bounded to dashboard + Redis; it does not verify crawl execution,
-all service integrations, or the complete production Compose stack.
+Pull requests validate the overlay's resolved Compose config and build/smoke
+the dashboard with a validation-only tag through that same overlay. The
+published-image smoke is intentionally bounded to dashboard + Redis; it does
+not verify crawl execution, all service integrations, or the complete
+production Compose stack.

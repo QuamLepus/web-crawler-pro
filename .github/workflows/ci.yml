@@ -83,6 +83,8 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [test, container-build]
     runs-on: ubuntu-latest
+    env:
+      WCP_IMAGE_TAG: validation-only
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose configuration
@@ -91,8 +93,8 @@ jobs:
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.ghcr.yml config --quiet
-      - name: Start dashboard and Redis from Compose
-        run: docker compose up --build -d redis dashboard
+      - name: Build and start dashboard and Redis through the GHCR Compose overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --build -d redis dashboard
       - name: Wait for dashboard health endpoint
         run: |
           for attempt in $(seq 1 30); do
@@ -101,11 +103,11 @@ jobs:
             fi
             sleep 2
           done
-          docker compose logs dashboard
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs dashboard
           exit 1
       - name: Stop Compose services
         if: always()
-        run: docker compose down --volumes --remove-orphans
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml down --volumes --remove-orphans
 
   build-and-push:
     needs: test
