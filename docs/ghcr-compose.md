@@ -15,10 +15,13 @@ The full stack includes Redis, Postgres, MinIO, Elasticsearch, worker pools,
 Celery Beat, and the dashboard; it may need substantial memory and disk.
 
 On pushes to `main`, CI waits for all four image-publish jobs, then pulls all
-four just-published application images through the GHCR overlay and runs the
-dashboard with Redis. The test checks the dashboard `/healthz` endpoint and
-tears down those services. Pull requests validate the overlay's resolved
-Compose config and build/smoke the dashboard with a validation-only tag through
+four just-published application images through the GHCR overlay, reports each
+image's Docker virtual size, and runs the dashboard with Redis. The size is the
+uncompressed sum reported by Docker; it is not the compressed registry
+transfer size, and shared layers may be counted for each image. The smoke
+checks the dashboard `/healthz` endpoint and tears down those services. Pull
+requests validate the overlay's resolved Compose config and build/smoke the
+dashboard with a validation-only tag through
 that same overlay. The published-image smoke is intentionally bounded to
 dashboard + Redis; pulling the worker, stealth-worker, and crawler images
 verifies their published tags are available, but does not verify crawl

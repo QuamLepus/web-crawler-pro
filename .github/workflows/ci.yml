@@ -162,6 +162,14 @@ jobs:
         run: echo "WCP_IMAGE_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
       - name: Pull all published application images
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull worker worker-stealth crawler dashboard
+      - name: Report published image virtual sizes
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          python scripts/report-image-sizes.py \
+            "$repo/worker:${GITHUB_SHA}" \
+            "$repo/worker-stealth:${GITHUB_SHA}" \
+            "$repo/crawler:${GITHUB_SHA}" \
+            "$repo/dashboard:${GITHUB_SHA}"
       - name: Start dashboard and Redis using the published image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard
       - name: Wait for published dashboard health endpoint
