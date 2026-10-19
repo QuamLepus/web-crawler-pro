@@ -200,8 +200,10 @@ python main.py                            # quick crawl of https://example.com
 
 ```bash
 docker compose up --build -d
-# Services: redis, postgres, minio (:9001 console), elasticsearch (:9200),
-#           worker, worker-stealth, celery beat, dashboard (:8080), prometheus
+# Core services: redis, postgres, minio (:9001 console), elasticsearch (:9200),
+#                worker, worker-stealth, celery beat, dashboard (:8080), prometheus
+# The crawler CLI is opt-in because starting it performs a sample external crawl:
+# docker compose --profile on-demand up --build crawler
 
 # To run the published commit-SHA images instead of building locally, see:
 # docs/ghcr-compose.md (:9090)

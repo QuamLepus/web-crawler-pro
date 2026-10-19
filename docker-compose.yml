@@ -72,8 +72,10 @@ services:
   crawler:
     build: { context: ., target: crawler }
     environment: *app-env
-    ports: ["8000:8000"]
     depends_on: [redis]
+    # The single-node CLI runs a sample external crawl on startup. Keep it
+    # opt-in so a normal `compose up` does not issue an unrequested request.
+    profiles: [on-demand]
 
   dashboard:
     build: { context: ., target: dashboard }
