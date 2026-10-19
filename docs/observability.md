@@ -8,11 +8,11 @@ under the same trace when Celery propagates the headers.
 
 ## Enable OTLP export
 
-The default `requirements.txt` installs the API and SDK tracing interfaces but
-keeps the OTLP/gRPC exporter optional. Install it when using an OTLP collector:
+The API and worker service profiles install the OpenTelemetry API and SDK but
+keep the OTLP/gRPC exporter optional. Install the exporter when using an OTLP collector:
 
 ```bash
-pip install -r requirements.txt -r requirements-otel.txt
+pip install -r requirements-api.txt -r requirements-worker.txt -r requirements-otel.txt
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 export OTEL_SERVICE_NAME=webcrawlerpro-api
 export OTEL_WORKER_SERVICE_NAME=webcrawlerpro-worker

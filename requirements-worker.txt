@@ -1,0 +1,7 @@
+# Data pipeline dependencies for Celery workers; install with: pip install -r requirements-worker.txt
+-r requirements-core.txt
+
+pandas>=2.1.0
+polars>=0.20.0
+pyarrow>=15.0.0
+datasketch>=1.6.0

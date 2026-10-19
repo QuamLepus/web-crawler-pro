@@ -23,8 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest fakeredis[lua] ruff
+          pip install -r requirements-dev.txt
       - name: Build the optional native tokeniser
         # Plain C, no Python headers needed. If the runner ever loses its
         # compiler the step exits 0 and the tests fall back to the Python path.
