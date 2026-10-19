@@ -201,7 +201,10 @@ python main.py                            # quick crawl of https://example.com
 ```bash
 docker compose up --build -d
 # Services: redis, postgres, minio (:9001 console), elasticsearch (:9200),
-#           worker, worker-stealth, celery beat, dashboard (:8080), prometheus (:9090)
+#           worker, worker-stealth, celery beat, dashboard (:8080), prometheus
+
+# To run the published commit-SHA images instead of building locally, see:
+# docs/ghcr-compose.md (:9090)
 
 # Seed the frontier and start crawling:
 celery -A src.celery_app call workers.seed_frontier --json='["https://example.com"]'
@@ -836,7 +839,7 @@ Next up:
 - [x] Deeper OpenTelemetry tracing across workers — W3C context propagation and task spans; see [`docs/observability.md`](docs/observability.md)
 - [ ] Complete real Stripe end-to-end validation — opt-in test-mode Checkout test is available; see [`docs/stripe-testing.md`](docs/stripe-testing.md)
 - [x] Split Python dependencies into service profiles and optional AI/browser groups; see [`docs/dependency-profiles.md`](docs/dependency-profiles.md)
-- [ ] Verify the published GHCR images by running the compose stack
+- [ ] Verify the full published GHCR Compose stack — CI smoke-tests the published dashboard + Redis; see [`docs/ghcr-compose.md`](docs/ghcr-compose.md)
 
 ---
 

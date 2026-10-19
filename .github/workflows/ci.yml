@@ -86,7 +86,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose configuration
-        run: docker compose config --quiet
+        env:
+          WCP_IMAGE_TAG: validation-only
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml config --quiet
       - name: Start dashboard and Redis from Compose
         run: docker compose up --build -d redis dashboard
       - name: Wait for dashboard health endpoint
@@ -137,3 +141,37 @@ jobs:
           tags: ghcr.io/${{ steps.image.outputs.repo }}/${{ matrix.target }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  published-compose-smoke:
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Select the published commit-SHA images
+        run: echo "WCP_IMAGE_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Pull published dashboard image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull dashboard
+      - name: Start dashboard and Redis using the published image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard
+      - name: Wait for published dashboard health endpoint
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs dashboard
+          exit 1
+      - name: Stop Compose services
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml down --volumes --remove-orphans
