@@ -69,6 +69,12 @@ services:
     environment: *app-env
     depends_on: [redis]
 
+  crawler:
+    build: { context: ., target: crawler }
+    environment: *app-env
+    ports: ["8000:8000"]
+    depends_on: [redis]
+
   dashboard:
     build: { context: ., target: dashboard }
     environment: *app-env

@@ -160,8 +160,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Select the published commit-SHA images
         run: echo "WCP_IMAGE_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
-      - name: Pull published dashboard image
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull dashboard
+      - name: Pull all published application images
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull worker worker-stealth crawler dashboard
       - name: Start dashboard and Redis using the published image
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d redis dashboard
       - name: Wait for published dashboard health endpoint

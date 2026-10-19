@@ -14,11 +14,12 @@ the local-build workflow. `--no-build` ensures Compose runs the pulled images.
 The full stack includes Redis, Postgres, MinIO, Elasticsearch, worker pools,
 Celery Beat, and the dashboard; it may need substantial memory and disk.
 
-On pushes to `main`, CI waits for all four image-publish jobs, then pulls the
-just-published dashboard image and runs it with Redis through the GHCR overlay.
-The test checks the dashboard `/healthz` endpoint and tears down those services.
-Pull requests validate the overlay's resolved Compose config and build/smoke
-the dashboard with a validation-only tag through that same overlay. The
-published-image smoke is intentionally bounded to dashboard + Redis; it does
-not verify crawl execution, all service integrations, or the complete
-production Compose stack.
+On pushes to `main`, CI waits for all four image-publish jobs, then pulls all
+four just-published application images through the GHCR overlay and runs the
+dashboard with Redis. The test checks the dashboard `/healthz` endpoint and
+tears down those services. Pull requests validate the overlay's resolved
+Compose config and build/smoke the dashboard with a validation-only tag through
+that same overlay. The published-image smoke is intentionally bounded to
+dashboard + Redis; pulling the worker, stealth-worker, and crawler images
+verifies their published tags are available, but does not verify crawl
+execution, service integrations, or the complete production Compose stack.
