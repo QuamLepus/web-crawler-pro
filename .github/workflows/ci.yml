@@ -109,8 +109,16 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ghcr.yml config --quiet
       - name: Build core application images through the GHCR overlay
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml build worker worker-stealth dashboard
-      - name: Pull core backing-service images
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis postgres minio elasticsearch prometheus
+      - name: Pull Redis image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis
+      - name: Pull PostgreSQL image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
+      - name: Pull MinIO image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
+      - name: Pull Elasticsearch image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
+      - name: Pull Prometheus image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull prometheus
       - name: Start core backing services
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
       - name: Start the core application services
@@ -197,8 +205,16 @@ jobs:
           retention-days: 90
       - name: Configure Elasticsearch host setting
         run: sudo sysctl -w vm.max_map_count=262144
-      - name: Pull core backing-service images
-        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis postgres minio elasticsearch prometheus
+      - name: Pull Redis image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull redis
+      - name: Pull PostgreSQL image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull postgres
+      - name: Pull MinIO image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull minio
+      - name: Pull Elasticsearch image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull elasticsearch
+      - name: Pull Prometheus image
+        run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull prometheus
       - name: Start published core backing services
         run: docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d redis postgres minio elasticsearch prometheus
       - name: Start the published core application services
