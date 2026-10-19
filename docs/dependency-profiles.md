@@ -17,9 +17,11 @@ large or environment-specific. Each service profile includes
 `requirements.txt` remains a compatibility entry point for the complete
 runtime and development dependency set. New services and container targets
 should use the narrowest profile they need. The standard Docker targets install
-API or worker profiles; `worker-stealth` adds the browser profile. AI and browser
-libraries are imported lazily in the relevant features, which retain their
-built-in fallbacks when those optional packages are not installed.
+API or worker profiles; `worker-stealth` adds the browser profile. Pull requests
+build all four Docker targets without publishing images, while merges to `main`
+retain the existing publish workflow. AI and browser libraries are imported
+lazily in the relevant features, which retain their built-in fallbacks when
+those optional packages are not installed.
 
 Install multiple profiles together when a deployment needs multiple feature
 sets, for example:
