@@ -9,6 +9,8 @@ import os
 from celery import Celery
 from kombu import Exchange, Queue
 
+from src.observability.celery_tracing import register_celery_tracing
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 app = Celery(
@@ -54,3 +56,10 @@ app.conf.update(
         # },
     },
 )
+
+# Register context propagation at import time. The actual worker provider is
+# configured lazily in each child process, after prefork, by Celery signals.
+register_celery_tracing()
+
+# Public name used by API service wiring; keep ``app`` for the Celery CLI.
+celery_app = app

@@ -65,8 +65,9 @@ class ApiServices:
     ``billing``, ``plan_for()``, plus a lazily-created ``marketplace``.
     """
 
-    def __init__(self, redis_client: Any = None) -> None:
+    def __init__(self, redis_client: Any = None, *, use_default_celery: bool = True) -> None:
         self._redis_override = redis_client
+        self._use_default_celery = use_default_celery
         self._built = False
 
     # lazy build so importing this module never needs network services ------ #
@@ -91,10 +92,12 @@ class ApiServices:
         self.webhooks = WebhookService(r)
         self.billing = BillingService(self.users, r)
         self.marketplace = None  # routers instantiate on demand
-        try:
-            from src.celery_app import celery_app
-        except Exception:
-            celery_app = None
+        celery_app = None
+        if self._use_default_celery:
+            try:
+                from src.celery_app import celery_app
+            except Exception:
+                celery_app = None
         self.scheduler = SchedulerService(r, celery_app=celery_app)
         self._get_plan = get_plan
         self._built = True
@@ -228,15 +231,28 @@ class AuthContextMiddleware:
 # --------------------------------------------------------------------------- #
 def create_api_app(redis_client=None, *, enable_graphql: bool = True,
                    enable_rate_limit: bool = True,
-                   enable_webui: bool = True) -> FastAPI:
+                   enable_webui: bool = True,
+                   enable_celery: bool | None = None) -> FastAPI:
     """Build the fully-wired public API application.
 
     ``enable_webui`` bolts the server-rendered console onto the same
     process, so ``http://host:8000/`` is a product rather than a JSON
     index. It is on by default but switches itself off (rather than
     failing) when Jinja2 is not installed, and can be disabled outright
-    with ``WCP_WEBUI=0`` for a pure-API deployment.
+    with ``WCP_WEBUI=0`` for a pure-API deployment. ``enable_celery`` defaults
+    on with real Redis and off when the resolved store is fakeredis, which keeps
+    tests and fallback mode from publishing to an unrelated broker. Set it
+    explicitly to opt in with an injected store.
     """
+    resolved_redis = redis_client if redis_client is not None else _default_redis()
+    if enable_celery is None:
+        try:
+            import fakeredis
+
+            fake_redis_types = (fakeredis.FakeRedis, fakeredis.FakeStrictRedis)
+            enable_celery = not isinstance(resolved_redis, fake_redis_types)
+        except ImportError:
+            enable_celery = True
     app = FastAPI(
         title="WebCrawlerPro Public API",
         version="2.1.0",
@@ -251,7 +267,8 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json",
     )
     app.state.services = ApiServices(
-        redis_client if redis_client is not None else _default_redis())
+        redis_client if redis_client is not None else _default_redis(),
+        use_default_celery=enable_celery)
     app.state.services._build()  # eager build at startup; fail loud early
 
     # ---- middleware (order: outermost added last) -------------------------- #

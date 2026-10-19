@@ -47,7 +47,7 @@ It ships in three usable layers, alongside topic discovery and indexed retrieval
 | Webhooks | Signed deliveries with per-subscription events and a delivery log |
 | Marketplace | Publish crawled datasets, sell them, post bounties, review purchases |
 | Dashboard | FastAPI + **WebSocket** live metrics, frontier depth, throughput |
-| Observability | **Prometheus** client metrics + **Sentry** error tracking & tracing |
+| Observability | **Prometheus** metrics, **Sentry** error reporting, and **OpenTelemetry** API-to-Celery trace propagation |
 | DevOps | Multi-stage Dockerfiles, docker-compose full stack, GitHub Actions CI/CD, **Kubernetes** manifests + HPA |
 
 ---
@@ -827,7 +827,7 @@ Next up:
 - [x] Semantic (vector) reranking on top of the own index; degrades to BM25 when no encoder is installed
 - [x] Spelling correction learned from the indexed corpus itself (SymSpell-style)
 - [x] Incremental Common Crawl updates: index only what changed since the last snapshot
-- [ ] Deeper OpenTelemetry tracing across workers
+- [x] Deeper OpenTelemetry tracing across workers — W3C context propagation and task spans; see [`docs/observability.md`](docs/observability.md)
 - [ ] Exercise billing end-to-end against real Stripe
 - [ ] Split `requirements.txt` into optional extras so images stay small
 - [ ] Verify the published GHCR images by running the compose stack
