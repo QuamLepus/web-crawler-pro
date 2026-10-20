@@ -121,7 +121,13 @@ flowchart TB
 ```
 web-crawler-pro/
 ├── main.py                          # single-node CLI entry point
-├── requirements.txt                 # full runtime + dev dependencies
+├── requirements.txt                 # backward-compatible full runtime + dev install
+├── requirements-api.txt             # API/dashboard service profile
+├── requirements-worker.txt          # Celery data-processing profile
+├── requirements-ai.txt              # optional AI, vector, and PII integrations
+├── requirements-browser.txt         # optional browser/stealth fetching profile
+├── requirements-dev.txt             # alias for the full developer/test install
+├── requirements-search-index.txt    # minimal own-search-index profile
 ├── .env.example                     # every tunable, documented
 ├── Dockerfile                       # multi-stage: worker | crawler | dashboard | worker-stealth
 ├── docker-compose.yml               # full stack: Redis, Postgres, MinIO, Elastic, workers, beat, dashboard, Prometheus
@@ -184,9 +190,9 @@ Requires **Python 3.11+** (CI runs 3.12).
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt      # full runtime + test/lint dependencies
 cp .env.example .env                      # edit as needed
-pytest                                    # 365 tests, fakeredis-backed, no services required
+pytest                                    # offline fakeredis-backed suite
 python main.py                            # quick crawl of https://example.com
 ```
 
@@ -194,8 +200,14 @@ python main.py                            # quick crawl of https://example.com
 
 ```bash
 docker compose up --build -d
-# Services: redis, postgres, minio (:9001 console), elasticsearch (:9200),
-#           worker, worker-stealth, celery beat, dashboard (:8080), prometheus (:9090)
+# Core services: redis, postgres, minio (:9001 console), elasticsearch (:9200),
+#                worker, worker-stealth, celery beat, dashboard (:8080), prometheus
+# The crawler CLI is opt-in because starting it performs a sample external crawl:
+# docker compose --profile on-demand up --build crawler
+# Authenticate with `docker login quay.io` if your MinIO image pull requires it.
+
+# To run the published commit-SHA images instead of building locally, see:
+# docs/ghcr-compose.md (:9090)
 
 # Seed the frontier and start crawling:
 celery -A src.celery_app call workers.seed_frontier --json='["https://example.com"]'
@@ -223,7 +235,7 @@ kubectl apply -f deploy/k8s/manifests/
 ### 4. Enable stealth / anti-bot features
 
 ```bash
-pip install playwright curl-cffi undetected-chromedriver
+pip install -r requirements-browser.txt
 playwright install chromium
 export PROXY_RESIDENTIAL="http://user:pass@res-gateway:8000"
 export CAPTCHA_API_KEY="<2captcha key>" CAPTCHA_PROVIDER=2captcha
@@ -234,7 +246,7 @@ The `worker-stealth` Docker target bundles everything (browsers + fonts included
 ### 5. Enable AI features
 
 ```bash
-pip install langchain langchain-openai chromadb
+pip install -r requirements-ai.txt
 export OPENAI_API_KEY=sk-...
 export EMBEDDING_PROVIDER=openai      # or sentence-transformers / hash (offline)
 ```
@@ -828,9 +840,9 @@ Next up:
 - [x] Spelling correction learned from the indexed corpus itself (SymSpell-style)
 - [x] Incremental Common Crawl updates: index only what changed since the last snapshot
 - [x] Deeper OpenTelemetry tracing across workers — W3C context propagation and task spans; see [`docs/observability.md`](docs/observability.md)
-- [ ] Exercise billing end-to-end against real Stripe
-- [ ] Split `requirements.txt` into optional extras so images stay small
-- [ ] Verify the published GHCR images by running the compose stack
+- [ ] Complete real Stripe end-to-end validation — opt-in test-mode Checkout test is available; see [`docs/stripe-testing.md`](docs/stripe-testing.md)
+- [x] Split Python dependencies into service profiles and optional AI/browser groups; see [`docs/dependency-profiles.md`](docs/dependency-profiles.md)
+- [ ] Verify the full published GHCR Compose stack — CI smoke-tests the published dashboard + Redis; see [`docs/ghcr-compose.md`](docs/ghcr-compose.md)
 
 ---
 

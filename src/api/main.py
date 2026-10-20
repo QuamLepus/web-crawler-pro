@@ -135,6 +135,10 @@ PUBLIC_PATHS = {"/healthz", "/livez", "/readyz", "/metrics", "/", "/docs",
 # /graphql does its own auth (anonymous -> 401, mutations refused) inside the
 # schema context so clients get GraphQL-shaped errors there.
 AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/auth/", "/graphql")
+STRIPE_WEBHOOK_PATHS = {
+    f"{API_PREFIX}/billing/stripe/webhook",
+    "/v1/billing/stripe/webhook",
+}
 
 # The console is a *client* of the API, not part of it. Its pages authenticate
 # with the session cookie inside their own handlers (and every ``/app/*``
@@ -206,6 +210,7 @@ class AuthContextMiddleware:
                         or path.startswith("/graphql?"))
         public = any(path == p or path.startswith(p + "/") for p in PUBLIC_PATHS) \
             or any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES) \
+            or path in STRIPE_WEBHOOK_PATHS \
             or any(path == p or path.startswith(p + "/") for p in WEBUI_PATHS)
         if ctx is None and (not public or gql_endpoint):
             from starlette.responses import JSONResponse

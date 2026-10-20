@@ -31,7 +31,7 @@ services:
     volumes: [pg-data:/var/lib/postgresql/data]
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -68,6 +68,14 @@ services:
     command: celery -A src.celery_app beat --loglevel=info
     environment: *app-env
     depends_on: [redis]
+
+  crawler:
+    build: { context: ., target: crawler }
+    environment: *app-env
+    depends_on: [redis]
+    # The single-node CLI runs a sample external crawl on startup. Keep it
+    # opt-in so a normal `compose up` does not issue an unrequested request.
+    profiles: [on-demand]
 
   dashboard:
     build: { context: ., target: dashboard }

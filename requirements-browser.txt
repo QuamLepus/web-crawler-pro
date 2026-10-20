@@ -1,0 +1,8 @@
+# Optional browser-backed and stealth fetch methods.
+# Playwright browser binaries are installed separately; see README.md.
+-r requirements-core.txt
+
+playwright>=1.44
+selenium>=4.15.2
+curl-cffi>=0.7
+undetected-chromedriver>=3.5

@@ -1,0 +1,2 @@
+# Alias for the complete backwards-compatible developer/test environment.
+-r requirements.txt
