@@ -326,12 +326,16 @@ def _update_job(r, job_id: str, fields: dict) -> None:
         logger.warning("could not update job %s: %s", job_id, exc)
 
 
-def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
+def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> dict:
     """Crawl one domain for a tenant job and keep its record up to date.
 
     Separated from the Celery wrapper so it can be driven with a fake Redis
     and a fake fetcher in tests.
     """
+    if sleeper is None:
+        from time import sleep
+        sleeper = sleep
+
     start_url = payload["url"]
     if not payload.get("watch_id"):
         start_url, _fragment = urldefrag(start_url)
@@ -357,6 +361,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     pages_done = 0
     robots_blocked = 0
     failures: list[str] = []
+    has_requested_page = False
 
     while queue and pages_done < max_pages:
         url = queue.pop(0)
@@ -366,6 +371,10 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
             _update_job(r, job_id, {"state": "running",
                                     "robots_blocked": robots_blocked})
             continue
+        delay = max(0.0, float(cfg.DELAY_BETWEEN_REQUESTS))
+        if has_requested_page and delay:
+            sleeper(delay)
+        has_requested_page = True
         try:
             html, status = fetcher(url)
         except Exception as exc:  # noqa: BLE001 - one bad page must not kill the job
