@@ -62,6 +62,12 @@ def fetch_page(self, url: str, depth: int = 0) -> dict:
     import requests
 
     frontier = get_frontier()
+    if not _robots_allows(url):
+        logger.info("frontier crawl skipped by robots.txt: %s", url)
+        frontier.ack(url)
+        return {"url": url, "links_discovered": 0,
+                "status": "skipped_robots"}
+
     headers = {"User-Agent": cfg.USER_AGENT}
     try:
         resp = requests.get(url, headers=headers, timeout=cfg.REQUEST_TIMEOUT)
