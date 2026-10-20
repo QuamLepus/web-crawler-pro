@@ -36,9 +36,11 @@ be counted for each image. PR image-size reports are uploaded as per-image
 artifacts with 30-day retention; the published report is uploaded as one
 artifact with 90-day retention. The smoke checks backing-service readiness,
 the dashboard `/healthz` endpoint, and both workers' Celery `ready.` message.
-MinIO is checked only when Quay credentials are available. Pull requests
-validate the overlay's resolved Compose config and
-build/smoke the core stack with validation-only tags through that same overlay.
+MinIO is checked only when Quay credentials are available. Pull requests and manually dispatched CI runs validate the overlay's resolved
+Compose config and build/smoke the core stack with validation-only tags through
+that same overlay. Use **Actions → CI/CD → Run workflow** on a trusted branch to
+repeat the full local-build Compose smoke after configuring Quay repository
+secrets; MinIO is exercised only when both secrets are available.
 The smoke verifies each core service's readiness, but does not execute a crawl
 or prove that application code integrates with Postgres, MinIO, Elasticsearch,
 or Prometheus. It pulls the crawler image to verify its published tag but does
