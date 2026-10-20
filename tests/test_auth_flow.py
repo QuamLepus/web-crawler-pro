@@ -195,3 +195,27 @@ def test_process_time_and_ratelimit_headers(client):
     api_key = make_key(client, tok["access_token"])
     r = client.get("/keys", headers={"X-API-Key": api_key})
     assert "X-RateLimit-Remaining" in r.headers
+
+
+def test_failed_crawl_job_cannot_be_cancelled(client):
+    token = signup(client)
+    api_key = make_key(client, token["access_token"])
+    created = client.post(
+        "/v1/jobs/crawl",
+        headers={"X-API-Key": api_key},
+        json={"url": "https://example.com", "max_pages": 1},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["job_id"]
+
+    redis_client = client.app.state.services.redis
+    job_key = f"wcp:v1:job:{job_id}"
+    redis_client.hset(job_key, "state", "failed")
+
+    response = client.post(
+        f"/v1/jobs/{job_id}/cancel", headers={"X-API-Key": api_key}
+    )
+
+    assert response.status_code == 409
+    stored_state = redis_client.hget(job_key, "state")
+    assert stored_state in (b"failed", "failed")
