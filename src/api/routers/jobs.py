@@ -209,7 +209,8 @@ async def cancel_job(job_id: str, request: Request, ctx: CtxDep,
               (v.decode() if isinstance(v, bytes) else v) for k, v in raw.items()}
     if record.get("tenant") != ctx["tenant"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
-    if record.get("state") in (JobState.completed.value, JobState.cancelled.value):
+    if record.get("state") in (JobState.completed.value, JobState.failed.value,
+                                 JobState.cancelled.value):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"job already {record.get('state')}")
     try:
