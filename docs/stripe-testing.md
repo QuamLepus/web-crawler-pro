@@ -36,7 +36,8 @@ and forwards the event over HTTP, so this verifies the actual listener,
 signature validation, endpoint, and plan update. The CLI-triggered fixture event
 is synthetic: it is not the completion event for the Checkout Session created
 in the first test, and the Checkout Session is not paid. The job skips when
-both secrets are absent and fails if only one is configured.
+both secrets are absent and fails if only one is configured. The CI notice and
+job summary identify missing secret names only; secret values are never printed.
 
 Never add live credentials. Use a dedicated test account and avoid customer or
 production data. CI jobs for pull requests do not receive these secrets.
