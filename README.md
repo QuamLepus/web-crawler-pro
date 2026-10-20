@@ -220,7 +220,7 @@ Prebuilt images are published to GHCR on every merge to `main`, tagged with the
 commit SHA:
 
 ```bash
-docker pull ghcr.io/quamlepus/web-crawler-pro/worker:<sha>
+docker pull ghcr.io/quamlepus/web-intelligence-os/worker:<sha>
 # also: crawler, dashboard, worker-stealth
 ```
 

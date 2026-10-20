@@ -13,7 +13,11 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up --no-build -d
 ```
 
 The overlay sets published GHCR image names while the base Compose file keeps
-the local-build workflow. `--no-build` ensures Compose runs the pulled images.
+the local-build workflow. Its default image namespace is
+`ghcr.io/quamlepus/web-intelligence-os`; set `WCP_GHCR_REPO` to override it.
+The main-branch CI workflow derives that variable from the lowercased
+`GITHUB_REPOSITORY`, matching the image-publish tags. `--no-build` ensures
+Compose runs the pulled images.
 The default core stack includes Redis, Postgres, MinIO, Elasticsearch,
 Prometheus, worker pools, Celery Beat, and the dashboard; it may need
 substantial memory and disk. The `crawler` service is opt-in via the `on-demand`

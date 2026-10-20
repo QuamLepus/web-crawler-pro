@@ -1,18 +1,20 @@
 # Overlay for published commit-SHA images. Example:
 #   WCP_IMAGE_TAG=<published SHA> docker compose -f docker-compose.yml \
 #     -f docker-compose.ghcr.yml up --no-build -d
+# WCP_GHCR_REPO may override the repository namespace; CI derives it from
+# GITHUB_REPOSITORY so the build and pull paths cannot drift apart.
 services:
   worker:
-    image: ghcr.io/quamlepus/web-crawler-pro/worker:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
+    image: ${WCP_GHCR_REPO:-ghcr.io/quamlepus/web-intelligence-os}/worker:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
 
   worker-stealth:
-    image: ghcr.io/quamlepus/web-crawler-pro/worker-stealth:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
+    image: ${WCP_GHCR_REPO:-ghcr.io/quamlepus/web-intelligence-os}/worker-stealth:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
 
   beat:
-    image: ghcr.io/quamlepus/web-crawler-pro/worker:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
+    image: ${WCP_GHCR_REPO:-ghcr.io/quamlepus/web-intelligence-os}/worker:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
 
   crawler:
-    image: ghcr.io/quamlepus/web-crawler-pro/crawler:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
+    image: ${WCP_GHCR_REPO:-ghcr.io/quamlepus/web-intelligence-os}/crawler:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
 
   dashboard:
-    image: ghcr.io/quamlepus/web-crawler-pro/dashboard:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
+    image: ${WCP_GHCR_REPO:-ghcr.io/quamlepus/web-intelligence-os}/dashboard:${WCP_IMAGE_TAG:?Set WCP_IMAGE_TAG to a published commit SHA}
