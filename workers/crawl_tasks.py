@@ -386,7 +386,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
         "collected": collected,
     }
 
-    state = "failed" if (not collected and failures) else "succeeded"
+    state = "failed" if (not collected and failures) else "completed"
     _update_job(r, job_id, {
         "state": state, "pages_done": pages_done,
         "robots_blocked": robots_blocked,
@@ -467,7 +467,7 @@ def tokenize_stage(self, payload: dict) -> dict:
                       prefix=payload.get("prefix", "shard"),
                       format=payload.get("format", "causal"))
     _update_job(_job_redis(), payload.get("job_id", ""),
-                {"state": "succeeded",
+                {"state": "completed",
                  "tokens_generated": int(stats.get("tokens", 0))})
     return {"job_id": payload.get("job_id", ""), **stats}
 
@@ -495,7 +495,7 @@ def dedupe_stage(self, payload: dict) -> dict:
             seen.add(doc_id)
             kept += 1
     _update_job(_job_redis(), payload.get("job_id", ""),
-                {"state": "succeeded", "items_collected": kept})
+                {"state": "completed", "items_collected": kept})
     return {"job_id": payload.get("job_id", ""), "kept": kept,
             "dropped": dropped}
 

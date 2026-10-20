@@ -93,7 +93,8 @@ def test_run_crawl_updates_job_record_and_digest(crawl_env):
     assert result["failures"] == []
 
     rec = r.hgetall(f"wcp:v1:job:{job_id}")
-    assert rec["state"] == "succeeded"
+    from src.api.schemas import JobState
+    assert JobState(rec["state"]) is JobState.completed
     assert rec["pages_done"] == "2"
     assert rec["items_collected"] == "2"
     # The marketplace refuses to publish a listing without this digest, and
