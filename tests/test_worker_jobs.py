@@ -139,3 +139,49 @@ def test_canonical_sha256_ignores_item_order():
     b = list(reversed(a))
     assert canonical_sha256(a) == canonical_sha256(b)
     assert canonical_sha256(a) != canonical_sha256(a[:1])
+
+
+def test_run_crawl_stops_after_current_page_when_cancelled(crawl_env, monkeypatch):
+    wt, redis = crawl_env
+    job_id = "job_cancel"
+    job_key = f"wcp:v1:job:{job_id}"
+    redis.hset(job_key, mapping={"state": "running"})
+    monkeypatch.setattr(wt, "_store_item", lambda item: item)
+    fetched: list[str] = []
+
+    def fetch(url: str):
+        fetched.append(url)
+        redis.hset(job_key, "state", "cancelled")
+        return "<a href='/next'>Next</a>", 200
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/start", "max_pages": 3,
+         "tenant": "", "job_id": job_id, "obey_robots": False},
+        redis_client=redis, fetcher=fetch)
+
+    assert fetched == ["https://example.com/start"]
+    assert result["state"] == "cancelled"
+    assert result["pages_done"] == 1
+    assert redis.hget(job_key, "state") == "cancelled"
+
+    wt._update_job(redis, job_id, {"state": "completed"})
+    assert redis.hget(job_key, "state") == "cancelled"
+
+
+def test_run_crawl_does_not_start_a_pre_cancelled_job(crawl_env):
+    wt, redis = crawl_env
+    job_id = "job_already_cancelled"
+    job_key = f"wcp:v1:job:{job_id}"
+    redis.hset(job_key, mapping={"state": "cancelled"})
+
+    def unexpected_fetch(_url: str):
+        raise AssertionError("pre-cancelled job must not fetch")
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/start", "max_pages": 1,
+         "tenant": "", "job_id": job_id, "obey_robots": False},
+        redis_client=redis, fetcher=unexpected_fetch)
+
+    assert result["state"] == "cancelled"
+    assert result["pages_done"] == 0
+    assert redis.hget(job_key, "state") == "cancelled"

@@ -138,6 +138,25 @@ def process_item(item: dict) -> None:
 
 JOB_KEY = "wcp:v1:job:{job_id}"
 CRAWL_OUTPUT_DIR = os.getenv("CRAWL_OUTPUT_DIR", "output/crawl")
+_UPDATE_JOB_STATE_SCRIPT = """
+local current = redis.call('HGET', KEYS[1], 'state')
+local next_state = nil
+for i = 1, #ARGV, 2 do
+  if ARGV[i] == 'state' then
+    next_state = ARGV[i + 1]
+    break
+  end
+end
+if current == 'cancelled' and next_state ~= 'cancelled' then
+  for i = 1, #ARGV, 2 do
+    if ARGV[i] == 'state' then
+      ARGV[i + 1] = 'cancelled'
+      break
+    end
+  end
+end
+return redis.call('HSET', KEYS[1], unpack(ARGV))
+"""
 
 
 def _job_redis():
@@ -335,11 +354,30 @@ def _update_job(r, job_id: str, fields: dict) -> None:
     if not job_id or r is None:
         return
     try:
-        r.hset(JOB_KEY.format(job_id=job_id),
-               mapping={**{k: str(v) for k, v in fields.items()},
-                        "updated_at": _utcnow_iso()})
+        key = JOB_KEY.format(job_id=job_id)
+        mapping = {**{k: str(v) for k, v in fields.items()},
+                   "updated_at": _utcnow_iso()}
+        if "state" in fields:
+            args = [value for pair in mapping.items() for value in pair]
+            r.eval(_UPDATE_JOB_STATE_SCRIPT, 1, key, *args)
+        else:
+            r.hset(key, mapping=mapping)
     except Exception as exc:  # noqa: BLE001 - progress is best-effort
         logger.warning("could not update job %s: %s", job_id, exc)
+
+
+def _job_is_cancelled(r, job_id: str) -> bool:
+    """Return whether the API has requested cooperative job cancellation."""
+    if not job_id or r is None:
+        return False
+    try:
+        state = r.hget(JOB_KEY.format(job_id=job_id), "state")
+        if isinstance(state, bytes):
+            state = state.decode("utf-8", errors="replace")
+        return state == "cancelled"
+    except Exception as exc:  # noqa: BLE001 - cancellation polling is best-effort
+        logger.debug("could not inspect cancellation for job %s: %s", job_id, exc)
+        return False
 
 
 def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> dict:
@@ -369,7 +407,9 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
     robots_check = (_watch_robots_allows if is_watch else
                     lambda url: _robots_allows(url, cache=robots_cache))
 
-    _update_job(r, job_id, {"state": "running"})
+    cancelled = _job_is_cancelled(r, job_id)
+    if not cancelled:
+        _update_job(r, job_id, {"state": "running"})
 
     queue = [start_url]
     seen = {start_url}
@@ -380,12 +420,14 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
     has_requested_page = False
 
     while queue and pages_done < max_pages:
+        if _job_is_cancelled(r, job_id):
+            cancelled = True
+            break
         url = queue.pop(0)
         if obey_robots and not robots_check(url):
             robots_blocked += 1
             logger.debug("robots.txt disallows %s", url)
-            _update_job(r, job_id, {"state": "running",
-                                    "robots_blocked": robots_blocked})
+            _update_job(r, job_id, {"robots_blocked": robots_blocked})
             continue
         delay = max(0.0, float(cfg.DELAY_BETWEEN_REQUESTS))
         if not is_watch:
@@ -427,12 +469,16 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
                 seen.add(link)
                 queue.append(link)
 
-        _update_job(r, job_id, {"state": "running", "pages_done": pages_done,
+        _update_job(r, job_id, {"pages_done": pages_done,
                                 "items_collected": len(collected)})
 
+    cancelled = cancelled or _job_is_cancelled(r, job_id)
+    state = ("cancelled" if cancelled else
+             ("failed" if (not collected and failures) else "completed"))
     digest = canonical_sha256(collected)
     result = {
-        "job_id": job_id, "url": start_url, "pages_done": pages_done,
+        "job_id": job_id, "url": start_url, "state": state,
+        "pages_done": pages_done,
         "robots_blocked": robots_blocked,
         "items": len(collected), "failures": failures[:10],
         "data_sha256": digest,
@@ -442,15 +488,15 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
         "collected": collected,
     }
 
-    state = "failed" if (not collected and failures) else "completed"
     _update_job(r, job_id, {
         "state": state, "pages_done": pages_done,
         "robots_blocked": robots_blocked,
         "items_collected": len(collected), "data_sha256": digest,
         "error": "; ".join(failures)[:500],
     })
-    _emit(tenant, "crawl.failed" if state == "failed" else "crawl.completed",
-          result, redis_client=r)
+    if state != "cancelled":
+        _emit(tenant, "crawl.failed" if state == "failed" else "crawl.completed",
+              result, redis_client=r)
     return result
 
 
