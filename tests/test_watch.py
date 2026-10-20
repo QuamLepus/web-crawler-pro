@@ -1,12 +1,16 @@
+import json
+import time
+
 import fakeredis
 from fastapi.testclient import TestClient
 
 from src.api.main import create_api_app
-from src.intelligence.watch import create_watch, observe, list_events
+from src.intelligence import watch as watch_store
+from src.intelligence.watch import create_watch, observe, list_events, list_snapshots
 
 
-def _auth(client):
-    signup = client.post("/auth/signup", json={"email": "watch@example.test",
+def _auth(client, email="watch@example.test"):
+    signup = client.post("/auth/signup", json={"email": email,
                          "password": "valid-password-123", "org_name": "Watch Org"})
     access = signup.json()["access_token"]
     key = client.post("/keys", headers={"Authorization": f"Bearer {access}"},
@@ -31,6 +35,34 @@ def test_watch_api_is_tenant_scoped_and_manual_run_queues_crawl():
     assert client.post(f"/api/v1/watch/{watch['watch_id']}/run", headers=headers).status_code == 404
 
 
+def test_watch_snapshots_are_bounded_and_tenant_scoped():
+    client = TestClient(create_api_app(fakeredis.FakeStrictRedis(decode_responses=True),
+                                       enable_graphql=False))
+    owner = _auth(client)
+    made = client.post("/api/v1/watch", headers=owner,
+                       json={"url": "https://example.org/archive"})
+    watch = made.json()
+    redis = client.app.state.services.redis
+    observe(redis, tenant=watch["tenant"], watch_id=watch["watch_id"],
+            item={"url": watch["url"], "title": "Baseline", "text": "x" * 6000})
+    observe(redis, tenant=watch["tenant"], watch_id=watch["watch_id"],
+            item={"url": watch["url"], "title": "Updated", "text": "current"})
+
+    response = client.get(f"/api/v1/watch/{watch['watch_id']}/snapshots", headers=owner)
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 2
+    assert items[0]["text"] == "current"
+    assert items[0]["baseline"] is False
+    assert len(items[1]["text"]) == 5000
+    assert items[1]["truncated"] is True
+    assert response.json()["retention_days"] == 90
+
+    other = _auth(client, email="other-watch@example.test")
+    assert client.get(f"/api/v1/watch/{watch['watch_id']}/snapshots",
+                      headers=other).status_code == 404
+
+
 def test_watch_rejects_non_http_and_credential_urls():
     client = TestClient(create_api_app(fakeredis.FakeStrictRedis(decode_responses=True),
                                        enable_graphql=False))
@@ -40,6 +72,36 @@ def test_watch_rejects_non_http_and_credential_urls():
                 "http://0.0.0.0/", "http://[::1]/", "http://service.local/"):
         assert client.post("/api/v1/watch", headers=headers,
                            json={"url": url}).status_code == 422
+
+
+def test_watch_snapshot_history_prunes_expired_versions():
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    watch_id = "watch_12121212121212121212"
+    key = watch_store.SNAPSHOTS.format(watch_id=watch_id)
+    expired = {"snapshot_id": "expired", "captured_at": time.time() -
+               watch_store.SNAPSHOT_RETENTION_SECONDS - 1, "text": "old"}
+    redis.rpush(key, json.dumps(expired))
+    create_watch(redis, tenant="tenant", watch_id=watch_id,
+                 url="https://example.org/history", interval_minutes=60)
+    observe(redis, tenant="tenant", watch_id=watch_id,
+            item={"url": "https://example.org/history", "title": "Current", "text": "now"})
+    snapshots = list_snapshots(redis, watch_id)
+    assert len(snapshots) == 1
+    assert snapshots[0]["text"] == "now"
+
+
+def test_watch_snapshot_history_is_capped_per_watch():
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    watch_id = "watch_ffffffffffffffffffff"
+    url = "https://example.org/history"
+    create_watch(redis, tenant="tenant", watch_id=watch_id, url=url, interval_minutes=60)
+    for version in range(25):
+        observe(redis, tenant="tenant", watch_id=watch_id,
+                item={"url": url, "title": "Page", "text": f"version {version}"})
+    snapshots = list_snapshots(redis, watch_id)
+    assert len(snapshots) == 20
+    assert snapshots[0]["text"] == "version 24"
+    assert snapshots[-1]["text"] == "version 5"
 
 
 def test_title_only_watch_change_does_not_create_text_excerpt():

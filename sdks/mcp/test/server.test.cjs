@@ -56,6 +56,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
+    'wio_watch_snapshots',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
     'wio_workflow_get', 'wio_workflow_list', 'wio_workflow_run',
     'wio_workflow_runs', 'wio_workflow_status', 'wio_workflow_update',
@@ -217,6 +218,32 @@ test('MCP Studio analytics tool forwards bounded full-corpus filters', async () 
     assert.equal(url.searchParams.get('group_by'), 'source');
     assert.equal(url.searchParams.get('metric'), 'avg_quality');
     assert.equal(url.searchParams.get('source'), 'wiki');
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP watch snapshots tool retrieves the bounded tenant history', async () => {
+  let requestUrl;
+  const api = new WebIntelligenceClient({ apiKey: 'watch-key', fetch: async (url) => {
+    requestUrl = url;
+    return new Response(JSON.stringify({ items: [{ snapshot_id: 's1', text: 'baseline' }], total: 1 }),
+                        { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'watch-snapshots-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_watch_snapshots', arguments: {
+      watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /baseline/);
+    assert.equal(requestUrl,
+      'http://localhost:8000/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots');
   } finally {
     await client.close();
     await server.close();

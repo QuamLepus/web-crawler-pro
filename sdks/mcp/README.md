@@ -5,7 +5,7 @@ clients. Requires Node.js 18+, a reachable Web Intelligence OS API, and an API
 key with appropriate permissions.
 
 Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
-`wio_crawl_create`, `wio_watch_create`, `wio_watch_changes`,
+`wio_crawl_create`, `wio_watch_create`, `wio_watch_changes`, `wio_watch_snapshots`,
 `wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,

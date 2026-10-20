@@ -21,6 +21,19 @@ test('ask sends auth and the documented request shape', async () => {
   });
 });
 
+test('watch snapshot retrieval uses the tenant snapshots endpoint', async () => {
+  let requestUrl;
+  const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',
+    fetch: async (url) => {
+      requestUrl = url;
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+    } });
+  const response = await client.getWatchSnapshots('watch_aaaaaaaaaaaaaaaaaaaa');
+  assert.deepEqual(response, { items: [], total: 0 });
+  assert.equal(requestUrl,
+    'https://api.example/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots');
+});
+
 test('research request uses stable snake-case API fields', async () => {
   let parsed;
   const client = new WebIntelligenceClient({ apiKey: 'key', fetch: async (_url, init) => {

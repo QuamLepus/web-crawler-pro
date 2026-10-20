@@ -16,7 +16,7 @@ It ships in three usable layers, alongside topic discovery and indexed retrieval
 | **Topic → cited research (early)** | Asynchronous discovery, robots-aware crawl, source excerpts, timestamps, hashes, and per-excerpt citations | `POST /api/v1/research` |
 | **Provenance ledger** | Tenant-isolated Redis passports and optional HMAC-signed manifest export | `POST /api/v1/provenance/records` |
 | **Knowledge graph (early)** | Tenant-isolated entity/relationship API, exact normalized aliases, and interactive canvas explorer | `POST /api/v1/graph/entities`, `/app/graph` |
-| **Web monitoring (early)** | Scheduled, robots-aware one-page crawls; history with bounded before/after text excerpts, `web.changed` webhooks, and watch-only public-DNS pinning with redirect checks | `POST /api/v1/watch` |
+| **Web monitoring (early)** | Scheduled, robots-aware one-page crawls; change excerpts plus up to 20 retained text snapshots per watch, `web.changed` webhooks, and watch-only public-DNS pinning | `POST /api/v1/watch` |
 | **Python SDK (early)** | HTTPX client for ask, research, crawl jobs, watch APIs, and workflow definitions/runs | `sdks/python/` |
 | **TypeScript SDK + MCP (early)** | Typed fetch client and stdio tools for ask, research, crawl, and watches | `sdks/typescript/`, `sdks/mcp/` |
 

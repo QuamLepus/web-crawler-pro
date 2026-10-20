@@ -225,6 +225,9 @@ class Api:
     def watch_changes(self, watch_id: str) -> Any:
         return self.get(f"/api/v1/watch/{watch_id}/changes")
 
+    def watch_snapshots(self, watch_id: str) -> Any:
+        return self.get(f"/api/v1/watch/{watch_id}/snapshots")
+
     def watch_delete(self, watch_id: str) -> Any:
         return self.delete(f"/api/v1/watch/{watch_id}")
 
