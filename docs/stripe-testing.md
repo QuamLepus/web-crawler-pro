@@ -27,7 +27,8 @@ customers are deleted on cleanup when possible.
 
 The completion event in the pytest integration test is synthetic and signed
 locally; it is not sent by Stripe. A separate `stripe-test-mode` CI job runs
-only on pushes to `main` when the repository Actions secrets
+on pushes to `main`, or from a manual CI dispatch on `main` with
+`run_stripe_test_mode` enabled, when the repository Actions secrets
 `STRIPE_TEST_SECRET_KEY` (`sk_test_...`) and `STRIPE_TEST_PRICE_ID` (an active
 recurring test Price) are configured. It runs the real Checkout API test, then
 starts the API and Stripe CLI listener and triggers a CLI fixture event to
