@@ -390,7 +390,8 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
         delay = max(0.0, float(cfg.DELAY_BETWEEN_REQUESTS))
         if not is_watch:
             delay = max(delay, _robots_crawl_delay(url, robots_cache))
-        if has_requested_page and delay:
+        policy_was_fetched = not is_watch and bool(robots_cache)
+        if (has_requested_page or policy_was_fetched) and delay:
             sleeper(delay)
         has_requested_page = True
         try:
