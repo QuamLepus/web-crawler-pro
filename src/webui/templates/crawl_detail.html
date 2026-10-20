@@ -99,6 +99,7 @@
           <dt class="muted">Job ID</dt><dd class="mono">{{ job_id }}</dd>
           <dt class="muted">Tenant</dt><dd class="mono">{{ j.get('tenant', '—') }}</dd>
           <dt class="muted">Pages</dt><dd>{{ pages_done|num }} / {{ max_pages|num }}</dd>
+          <dt class="muted">Blocked by robots</dt><dd>{{ j.get('robots_blocked', 0)|num }}</dd>
           <dt class="muted">Items</dt><dd>{{ j.get('items_collected', 0)|num }}</dd>
           <dt class="muted">Tokens</dt><dd>{{ j.get('tokens_generated', 0)|num }}</dd>
           <dt class="muted">Error</dt>
