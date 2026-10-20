@@ -50,3 +50,27 @@ The temporary SQLite file was 23,107,544 bytes; synthetic data build took
 synthetic rows; they exclude HTTP/UI overhead and concurrency and must not be
 extrapolated to production-scale corpora. The harness reports its environment
 and limitations as JSON and removes the temporary database after each run.
+
+### Sandbox retest (2026-10-21)
+
+The same harness was rerun in the current sandbox at both 50,000 documents
+(10 iterations) and 500,000 documents (5 iterations). It reported Python 3.11.2
+on Linux 6.1.158+ x86_64 / glibc 2.36. Results are p50 / p95 milliseconds:
+
+| Documents | Profile | Matched docs / groups | p50 / p95 |
+|---:|---|---:|---:|
+| 50,000 | Source document count | 50,000 / 3 | 26.642 / 27.137 ms |
+| 50,000 | Host mean authority | 50,000 / 500 | 38.219 / 40.982 ms |
+| 50,000 | Filtered host mean quality (source=wiki) | 16,667 / 500 | 23.990 / 25.716 ms |
+| 500,000 | Source document count | 500,000 / 3 | 364.122 / 375.051 ms |
+| 500,000 | Host mean authority | 500,000 / 500 | 436.078 / 443.870 ms |
+| 500,000 | Filtered host mean quality (source=wiki) | 166,667 / 500 | 288.163 / 293.333 ms |
+
+The 50k/500k temporary databases were 23,107,544 / 168,188,664 bytes and
+synthetic builds took 0.776 / 14.108 s. These remain warm-cache, single-process
+DocStore-only numbers, not API or production-capacity results. In particular,
+the 500k p95 uses only five measured iterations and is a rough summary, not a
+tail-latency estimate. The larger run shows sub-second aggregates at half a
+million synthetic rows in this sandbox, but is not enough evidence to promise
+production latency or justify an optimization without workload-specific
+measurements.
