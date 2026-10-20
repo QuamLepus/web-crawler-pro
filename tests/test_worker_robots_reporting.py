@@ -14,7 +14,8 @@ def crawl_env(monkeypatch, tmp_path):
 
 def test_run_crawl_reports_robots_blocked_pages(crawl_env, monkeypatch) -> None:
     worker, redis = crawl_env
-    monkeypatch.setattr(worker, "_robots_allows", lambda _url: False)
+    monkeypatch.setattr(worker, "_robots_allows",
+                        lambda _url, cache=None: False)
 
     def unexpected_fetch(_url: str):
         raise AssertionError("robots-blocked URL must not be fetched")

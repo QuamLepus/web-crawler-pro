@@ -27,6 +27,9 @@ logger = setup_logger(__name__)
 cfg = get_config()
 
 FRONTIER_NS = os.getenv("FRONTIER_NAMESPACE", "frontier")
+_ROBOTS_CACHE_MISS = object()
+_ROBOTS_ALLOW_ALL = object()
+_ROBOTS_DENY_ALL = object()
 
 
 def get_frontier() -> URLFrontier:
@@ -220,12 +223,13 @@ def _watch_robots_allows(url: str) -> bool:
         return False
 
 
-def _robots_allows(url: str) -> bool:
+def _robots_allows(url: str, cache: dict[str, object] | None = None) -> bool:
     """Check robots.txt; fail closed on server/network failures.
 
     An unavailable 4xx robots resource permits access under the Robots
-    Exclusion Protocol, but 5xx responses and network errors are treated as
-    unreachable and deny crawling until the policy can be retrieved.
+    Exclusion Protocol, but 5xx responses and network errors deny crawling.
+    A per-crawl cache can reuse the origin's policy while still checking each
+    requested path against the parsed rules.
     """
     from urllib.parse import urlparse
     from urllib.robotparser import RobotFileParser
@@ -234,21 +238,33 @@ def _robots_allows(url: str) -> bool:
 
     parts = urlparse(url)
     robots_url = f"{parts.scheme}://{parts.netloc}/robots.txt"
-    try:
-        resp = requests.get(robots_url, headers={"User-Agent": cfg.USER_AGENT},
-                            timeout=cfg.REQUEST_TIMEOUT)
-        if 400 <= resp.status_code < 500:
-            return True
-        if resp.status_code >= 500:
-            logger.info("robots.txt server failure for %s (HTTP %s); denying",
-                        url, resp.status_code)
-            return False
-        parser = RobotFileParser()
-        parser.parse(resp.text.splitlines())
-        return parser.can_fetch(cfg.USER_AGENT, url)
-    except requests.RequestException as exc:
-        logger.info("robots.txt unavailable for %s (%s); denying", url, exc)
+    policy = (cache.get(robots_url, _ROBOTS_CACHE_MISS)
+              if cache is not None else _ROBOTS_CACHE_MISS)
+    if policy is _ROBOTS_CACHE_MISS:
+        try:
+            resp = requests.get(robots_url, headers={"User-Agent": cfg.USER_AGENT},
+                                timeout=cfg.REQUEST_TIMEOUT)
+            if 400 <= resp.status_code < 500:
+                policy = _ROBOTS_ALLOW_ALL
+            elif resp.status_code >= 500:
+                logger.info("robots.txt server failure for %s (HTTP %s); denying",
+                            url, resp.status_code)
+                policy = _ROBOTS_DENY_ALL
+            else:
+                parser = RobotFileParser()
+                parser.parse(resp.text.splitlines())
+                policy = parser
+        except requests.RequestException as exc:
+            logger.info("robots.txt unavailable for %s (%s); denying", url, exc)
+            policy = _ROBOTS_DENY_ALL
+        if cache is not None:
+            cache[robots_url] = policy
+
+    if policy is _ROBOTS_ALLOW_ALL:
+        return True
+    if policy is _ROBOTS_DENY_ALL:
         return False
+    return policy.can_fetch(cfg.USER_AGENT, url)
 
 
 def _extract_item(url: str, html: str, status: int) -> dict:
@@ -326,10 +342,12 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
 
     r = redis_client if redis_client is not None else _job_redis()
     is_watch = bool(payload.get("watch_id"))
+    robots_cache: dict[str, object] = {}
     if fetcher is None:
         fetcher = (_watch_fetch if is_watch else
                    (_stealth_fetch if payload.get("stealth") else _plain_fetch))
-    robots_check = _watch_robots_allows if is_watch else _robots_allows
+    robots_check = (_watch_robots_allows if is_watch else
+                    lambda url: _robots_allows(url, cache=robots_cache))
 
     _update_job(r, job_id, {"state": "running"})
 
