@@ -25,11 +25,36 @@ def test_watch_tick_dispatches_due_watches_once_and_throttles_same_host(monkeypa
     assert all(score > time.time() for _, score in scores)
 
 
+def test_watch_crawl_uses_pinned_fetcher_by_default(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    fetched = []
+    monkeypatch.setattr(crawl_tasks, "_watch_fetch",
+                        lambda url: (fetched.append(url) or "<title>Page</title><p>ok</p>", 200))
+    monkeypatch.setattr(crawl_tasks, "_store_item", lambda item: item)
+    monkeypatch.setattr(crawl_tasks, "_emit", lambda *_args, **_kwargs: None)
+    result = crawl_tasks.run_crawl(
+        {"url": "https://example.org/pricing", "max_pages": 1,
+         "tenant": "tenant", "watch_id": "watch_dddddddddddddddddddd",
+         "obey_robots": False}, redis_client=redis)
+    assert fetched == ["https://example.org/pricing"]
+    assert result["pages_done"] == 1
+
+
+def test_watch_robots_check_fails_closed_when_fetch_is_unsafe(monkeypatch):
+    from src.utils.public_http import UnsafePublicURL
+
+    def blocked(_url):
+        raise UnsafePublicURL("blocked")
+
+    monkeypatch.setattr(crawl_tasks, "_watch_fetch", blocked)
+    assert crawl_tasks._watch_robots_allows("https://example.org/pricing") is False
+
+
 def test_crawl_worker_persists_watch_snapshot_and_emits_change(monkeypatch):
     redis = fakeredis.FakeStrictRedis(decode_responses=True)
     watch = create_watch(redis, tenant="tenant", watch_id="watch_cccccccccccccccccccc",
                          url="https://example.org/pricing", interval_minutes=60)
-    monkeypatch.setattr(crawl_tasks, "_robots_allows", lambda _url: True)
+    monkeypatch.setattr(crawl_tasks, "_watch_robots_allows", lambda _url: True)
     monkeypatch.setattr(crawl_tasks, "_store_item", lambda item: item)
     events = []
     monkeypatch.setattr(crawl_tasks, "_emit", lambda tenant, event, data, **kw:

@@ -65,10 +65,16 @@ the same crawl path. Snapshots are hashed and change events are available from
 `web.changed`. A first snapshot establishes a baseline. Price-like strings are
 reported as text matches only—not verified prices—and ordinary content changes
 are not semantically classified. Scheduled execution requires Redis, Celery
-workers, and Beat. Watch API validation blocks credentials, obvious localhost,
-private literal IPs, and `.local` names; this is not a complete defense against
-DNS rebinding or unsafe redirects, so deployment network egress policy remains
-necessary.
+workers, and Beat. Watch API validation blocks credentials, localhost, private/reserved literal IPs,
+and `.local` names. At execution, each watched page and robots request resolves
+its hostname, rejects the request if any DNS answer is non-public, and connects
+to a validated numeric address while preserving the hostname for HTTP Host and
+TLS SNI. Redirect targets undergo the same checks, HTTPS redirects cannot
+downgrade to HTTP, and responses are capped at 5 MiB. Unsafe or unreachable
+robots checks fail closed for watches. This direct pinned connection intentionally
+does not use ambient HTTP proxy settings; workers need direct egress to public
+hosts. These controls cover scheduled watches, not every general-purpose crawl
+path, so deployments should still enforce network egress policy.
 
 ## Entity graph and Python SDK
 
