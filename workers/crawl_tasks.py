@@ -317,6 +317,8 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     and a fake fetcher in tests.
     """
     start_url = payload["url"]
+    if not payload.get("watch_id"):
+        start_url, _fragment = urldefrag(start_url)
     max_pages = max(1, int(payload.get("max_pages", 1) or 1))
     tenant = payload.get("tenant", "")
     job_id = payload.get("job_id", "")
