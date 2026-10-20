@@ -267,6 +267,22 @@ def _robots_allows(url: str, cache: dict[str, object] | None = None) -> bool:
     return policy.can_fetch(cfg.USER_AGENT, url)
 
 
+def _robots_crawl_delay(url: str, cache: dict[str, object]) -> float:
+    """Return a parsed per-origin Crawl-delay directive, if available."""
+    from urllib.parse import urlparse
+
+    parts = urlparse(url)
+    robots_url = f"{parts.scheme}://{parts.netloc}/robots.txt"
+    policy = cache.get(robots_url)
+    crawl_delay = getattr(policy, "crawl_delay", None)
+    if not callable(crawl_delay):
+        return 0.0
+    try:
+        return max(0.0, float(crawl_delay(cfg.USER_AGENT) or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _extract_item(url: str, html: str, status: int) -> dict:
     """Pull the fields the quality pipeline expects out of a raw response."""
     from bs4 import BeautifulSoup
@@ -372,6 +388,8 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
                                     "robots_blocked": robots_blocked})
             continue
         delay = max(0.0, float(cfg.DELAY_BETWEEN_REQUESTS))
+        if not is_watch:
+            delay = max(delay, _robots_crawl_delay(url, robots_cache))
         if has_requested_page and delay:
             sleeper(delay)
         has_requested_page = True
