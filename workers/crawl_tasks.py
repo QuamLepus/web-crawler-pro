@@ -211,7 +211,12 @@ def _watch_robots_allows(url: str) -> bool:
 
 
 def _robots_allows(url: str) -> bool:
-    """Best-effort robots.txt check; fails open (allow) when unreachable."""
+    """Check robots.txt; fail closed on server/network failures.
+
+    An unavailable 4xx robots resource permits access under the Robots
+    Exclusion Protocol, but 5xx responses and network errors are treated as
+    unreachable and deny crawling until the policy can be retrieved.
+    """
     from urllib.parse import urlparse
     from urllib.robotparser import RobotFileParser
 
@@ -222,13 +227,18 @@ def _robots_allows(url: str) -> bool:
     try:
         resp = requests.get(robots_url, headers={"User-Agent": cfg.USER_AGENT},
                             timeout=cfg.REQUEST_TIMEOUT)
-        if resp.status_code < 400:
-            parser = RobotFileParser()
-            parser.parse(resp.text.splitlines())
-            return parser.can_fetch(cfg.USER_AGENT, url)
-    except Exception as exc:  # noqa: BLE001 - unreadable robots must not block
-        logger.debug("robots.txt unavailable for %s (%s); allowing", url, exc)
-    return True
+        if 400 <= resp.status_code < 500:
+            return True
+        if resp.status_code >= 500:
+            logger.info("robots.txt server failure for %s (HTTP %s); denying",
+                        url, resp.status_code)
+            return False
+        parser = RobotFileParser()
+        parser.parse(resp.text.splitlines())
+        return parser.can_fetch(cfg.USER_AGENT, url)
+    except requests.RequestException as exc:
+        logger.info("robots.txt unavailable for %s (%s); denying", url, exc)
+        return False
 
 
 def _extract_item(url: str, html: str, status: int) -> dict:
