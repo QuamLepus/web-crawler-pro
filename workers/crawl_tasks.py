@@ -333,7 +333,9 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
                 from src.intelligence.watch import observe
                 change = observe(r, tenant=tenant, watch_id=str(watch_id), item=item)
                 if change:
-                    _emit(tenant, "web.changed", change, redis_client=r)
+                    webhook_change = {key: value for key, value in change.items()
+                                      if key not in {"old_text_excerpt", "new_text_excerpt"}}
+                    _emit(tenant, "web.changed", webhook_change, redis_client=r)
             except Exception as exc:  # monitoring must not fail the crawl
                 logger.warning("watch observation failed (%s): %s", watch_id, exc)
         try:

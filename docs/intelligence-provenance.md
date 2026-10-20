@@ -64,7 +64,11 @@ the same crawl path. Snapshots are hashed and change events are available from
 `GET /api/v1/watch/{watch_id}/changes`; optional webhook subscribers can choose
 `web.changed`. A first snapshot establishes a baseline. Price-like strings are
 reported as text matches only—not verified prices—and ordinary content changes
-are not semantically classified. Scheduled execution requires Redis, Celery
+are not semantically classified. Change-history cards include at most 500
+characters around the first text difference per side; these bounded excerpts are
+visible only through the tenant-authenticated history API/UI and are omitted
+from `web.changed` webhook payloads. This is an excerpt, not full version replay.
+Scheduled execution requires Redis, Celery
 workers, and Beat. Watch API validation blocks credentials, localhost, private/reserved literal IPs,
 and `.local` names. At execution, each watched page and robots request resolves
 its hostname, rejects the request if any DNS answer is non-public, and connects

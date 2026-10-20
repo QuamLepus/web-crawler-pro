@@ -42,6 +42,21 @@ def test_watch_rejects_non_http_and_credential_urls():
                            json={"url": url}).status_code == 422
 
 
+def test_title_only_watch_change_does_not_create_text_excerpt():
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    watch_id = "watch_eeeeeeeeeeeeeeeeeeee"
+    create_watch(redis, tenant="tenant", watch_id=watch_id,
+                 url="https://example.org/about", interval_minutes=60)
+    observe(redis, tenant="tenant", watch_id=watch_id,
+            item={"url": "https://example.org/about", "title": "Old", "text": "Same body"})
+    event = observe(redis, tenant="tenant", watch_id=watch_id,
+                    item={"url": "https://example.org/about", "title": "New", "text": "Same body"})
+    assert event["title_changed"] is True
+    assert event["text_changed"] is False
+    assert event["old_text_excerpt"] == ""
+    assert event["new_text_excerpt"] == ""
+
+
 def test_watch_console_renders_scheduler_dependencies():
     client = TestClient(create_api_app(fakeredis.FakeStrictRedis(decode_responses=True),
                                        enable_graphql=False), follow_redirects=False)
@@ -65,5 +80,10 @@ def test_observation_tracks_snapshot_history_and_price_mentions():
     assert event["event_type"] == "page.changed"
     assert event["price_mentions_before"] == ["৳100"]
     assert event["price_mentions_after"] == ["৳90"]
+    assert event["text_changed"] is True
+    assert "৳100" in event["old_text_excerpt"]
+    assert "৳90" in event["new_text_excerpt"]
+    assert len(event["old_text_excerpt"]) <= 502
+    assert len(event["new_text_excerpt"]) <= 502
     assert len(list_events(r, "watch_abc")) == 1
     assert observe(r, tenant="tenant-b", watch_id="watch_abc", item=first) is None
