@@ -43,3 +43,37 @@ def test_robots_policy_blocks_network_errors(monkeypatch) -> None:
     monkeypatch.setattr(requests, "get", fail)
 
     assert not crawl_tasks._robots_allows("https://example.com/page")
+
+
+def test_run_crawl_fetches_robots_once_per_origin(monkeypatch) -> None:
+    import fakeredis
+
+    policy_requests: list[str] = []
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda url, **kwargs: (
+            policy_requests.append(url)
+            or _Response(200, "User-agent: *\nDisallow: /private\n")
+        ),
+    )
+    monkeypatch.setattr(crawl_tasks, "_store_item", lambda item: item)
+    fetched: list[str] = []
+
+    def fetch(url: str):
+        fetched.append(url)
+        if url.endswith("/start"):
+            return ("<a href='/private'>private</a>"
+                    "<a href='/public'>public</a>"), 200
+        return "<html><body>page</body></html>", 200
+
+    result = crawl_tasks.run_crawl(
+        {"url": "https://example.com/start", "max_pages": 2,
+         "obey_robots": True},
+        redis_client=fakeredis.FakeStrictRedis(decode_responses=True),
+        fetcher=fetch,
+    )
+
+    assert fetched == ["https://example.com/start", "https://example.com/public"]
+    assert result["robots_blocked"] == 1
+    assert policy_requests == ["https://example.com/robots.txt"]

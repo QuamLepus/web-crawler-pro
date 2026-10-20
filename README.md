@@ -378,7 +378,8 @@ skipped because robots policy denied access or could not be retrieved.
 The general crawler permits a target when `robots.txt` returns a 4xx response,
 consistent with the Robots Exclusion Protocol's unavailable-file handling. A
 5xx response or network/request failure blocks that target until the robots
-policy can be retrieved; successfully fetched rules are enforced normally.
+policy can be retrieved; successfully fetched rules are enforced normally. Each
+crawl job retrieves one robots policy per origin and applies it to every path.
 
 ---
 

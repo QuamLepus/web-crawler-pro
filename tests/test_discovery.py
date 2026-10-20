@@ -333,7 +333,8 @@ def no_network_crawl(monkeypatch, tmp_path):
     """`run_crawl` would otherwise hit robots.txt and write into ./output."""
     import workers.crawl_tasks as wt
 
-    monkeypatch.setattr(wt, "_robots_allows", lambda url: True)
+    monkeypatch.setattr(wt, "_robots_allows",
+                        lambda url, cache=None: True)
     monkeypatch.setattr(wt, "CRAWL_OUTPUT_DIR", str(tmp_path / "crawl"))
 
 
@@ -539,7 +540,8 @@ def test_cli_discover_auto_writes_a_report(monkeypatch, tmp_path, capsys):
         return PAGES[url], 200
 
     monkeypatch.setattr("workers.crawl_tasks._plain_fetch", crawl_fetcher)
-    monkeypatch.setattr("workers.crawl_tasks._robots_allows", lambda url: True)
+    monkeypatch.setattr("workers.crawl_tasks._robots_allows",
+                        lambda url, cache=None: True)
 
     rc = main(["discover", "--topic", "best budget laptops 2026",
                "--count", "2", "--auto", "--max-pages", "1",
