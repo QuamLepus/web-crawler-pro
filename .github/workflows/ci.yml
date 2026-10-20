@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_stripe_test_mode:
+        description: Run the secret-gated Stripe test Checkout and CLI delivery checks on main
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -40,7 +46,11 @@ jobs:
 
   stripe-test-mode:
     needs: [test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.event.inputs.run_stripe_test_mode == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
