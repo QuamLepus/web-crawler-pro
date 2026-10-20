@@ -383,7 +383,7 @@ policy can be retrieved; successfully fetched rules are enforced normally. Each
 crawl job retrieves one robots policy per origin and applies it to every path.
 Where `robots.txt` provides a supported `Crawl-delay`, job-backed crawls wait
 for at least the greater of that delay and the configured `DELAY` interval
-between page fetches.
+after retrieving the policy and between page fetches.
 
 ---
 

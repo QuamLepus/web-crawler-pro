@@ -15,22 +15,31 @@ def test_run_crawl_honors_robots_crawl_delay(monkeypatch) -> None:
     monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: Response())
     monkeypatch.setattr(crawl_tasks.cfg, "DELAY_BETWEEN_REQUESTS", 0.25)
     monkeypatch.setattr(crawl_tasks, "_store_item", lambda item: item)
-    delays: list[float] = []
+    events: list[tuple[str, object]] = []
 
     def fetch(url: str):
+        events.append(("fetch", url))
         if url.endswith("/start"):
             return "<a href='/next'>Next</a>", 200
         return "<html><body>Next page</body></html>", 200
+
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", seconds))
 
     crawl_tasks.run_crawl(
         {"url": "https://example.com/start", "max_pages": 2,
          "obey_robots": True},
         redis_client=fakeredis.FakeStrictRedis(decode_responses=True),
         fetcher=fetch,
-        sleeper=delays.append,
+        sleeper=sleep,
     )
 
-    assert delays == [2.0]
+    assert events == [
+        ("sleep", 2.0),
+        ("fetch", "https://example.com/start"),
+        ("sleep", 2.0),
+        ("fetch", "https://example.com/next"),
+    ]
 
 
 def test_run_crawl_applies_configured_delay_between_page_fetches(monkeypatch) -> None:
