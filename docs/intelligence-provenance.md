@@ -65,12 +65,17 @@ the same crawl path. Snapshots are hashed and change events are available from
 `web.changed`. A first snapshot establishes a baseline. Price-like strings are
 reported as text matches only—not verified prices—and ordinary content changes
 are not semantically classified. Change-history cards include at most 500
-characters around the first text difference per side; these bounded excerpts are
+characters around the first text difference per side; these excerpts are
 visible only through the tenant-authenticated history API/UI and are omitted
-from `web.changed` webhook payloads. This is an excerpt, not full version replay.
-Scheduled execution requires Redis, Celery
-workers, and Beat. Watch API validation blocks credentials, localhost, private/reserved literal IPs,
-and `.local` names. At execution, each watched page and robots request resolves
+from `web.changed` webhook payloads. The tenant-authenticated
+`GET /api/v1/watch/{watch_id}/snapshots` endpoint and console retain up to 20 snapshots (including the baseline while it remains
+in the rolling window), newest first. Each stores the title, content hash,
+and up to 5,000 characters of extracted text; records older than 90 days are
+pruned, and the Redis list also expires after 90 days without a new capture.
+These are bounded text snapshots, not raw HTML/assets or a full-fidelity archive.
+Scheduled execution requires Redis, Celery workers, and Beat. Watch API
+validation blocks credentials, localhost, private/reserved literal IPs, and
+`.local` names. At execution, each watched page and robots request resolves
 its hostname, rejects the request if any DNS answer is non-public, and connects
 to a validated numeric address while preserving the hostname for HTTP Host and
 TLS SNI. Redirect targets undergo the same checks, HTTPS redirects cannot

@@ -163,6 +163,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes`);
   }
 
+  getWatchSnapshots(watchId: string): Promise<JsonObject> {
+    return this.request("GET", `watch/${encodeURIComponent(watchId)}/snapshots`);
+  }
+
   createWorkflow(name: string, steps: WorkflowCrawlStep[],
                  scheduleIntervalMinutes?: number): Promise<JsonObject> {
     return this.request("POST", "workflows", {

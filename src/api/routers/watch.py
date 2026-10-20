@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.api.routers.jobs import CtxDep
 from src.intelligence.watch import (DUE, TENANT_WATCHES, WATCH, create_watch,
-                                    get_watch, list_events)
+                                    get_watch, list_events, list_snapshots)
 
 router = APIRouter(prefix="/watch", tags=["web monitoring"])
 
@@ -67,6 +67,19 @@ async def list_watches(ctx: CtxDep, request: Request) -> dict:
             items.append(watch)
     items.sort(key=lambda item: item["created_at"], reverse=True)
     return {"items": items, "total": len(items)}
+
+
+@router.get("/{watch_id}/snapshots", summary="List retained text snapshots for a watch")
+async def snapshots(watch_id: str, ctx: CtxDep, request: Request, limit: int = 20) -> dict:
+    if not re.fullmatch(r"watch_[a-f0-9]{20}", watch_id):
+        raise HTTPException(404, "watch not found")
+    redis = request.app.state.services.redis
+    tenant = str(ctx["tenant"])
+    if not get_watch(redis, watch_id, tenant):
+        raise HTTPException(404, "watch not found")
+    items = list_snapshots(redis, watch_id, limit=max(1, min(limit, 20)))
+    return {"watch_id": watch_id, "items": items, "total": len(items),
+            "retention_days": 90, "max_snapshots": 20}
 
 
 @router.get("/{watch_id}/changes", summary="List detected changes for a watch")

@@ -188,6 +188,10 @@ class Client:
     def watch_changes(self, watch_id: str) -> dict[str, Any]:
         return self._request("GET", f"watch/{watch_id}/changes")
 
+    def watch_snapshots(self, watch_id: str) -> dict[str, Any]:
+        """List the latest retained text snapshots for a monitored page."""
+        return self._request("GET", f"watch/{watch_id}/snapshots")
+
     def close(self) -> None:
         self._http.close()
 

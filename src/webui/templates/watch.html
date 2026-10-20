@@ -42,4 +42,20 @@
     {% else %}<div class="empty"><h3>Select a watch</h3><p>Choose a page to inspect its history.</p></div>{% endif %}
   </section>
 </div>
+{% if selected_watch %}
+<section class="card mt-3">
+  <div class="card-head"><h2>Saved versions</h2><span class="badge">{{ snapshots|length }} / 20</span></div>
+  <p class="small dim card-pad">Most recent first. Up to 20 snapshots are retained for 90 days; each stores at most 5,000 characters of extracted page text.</p>
+  {% if snapshots %}<div class="stack-sm card-pad">
+    {% for snapshot in snapshots %}
+    <details class="card card-pad">
+      <summary class="small">{{ 'Baseline' if snapshot.baseline else 'Version' }} · {{ snapshot.captured_at }}{% if snapshot.title %} · {{ snapshot.title }}{% endif %}</summary>
+      <pre class="small mt-2" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto">{{ snapshot.text }}</pre>
+      {% if snapshot.truncated %}<p class="tiny muted">Text is truncated to the 5,000-character snapshot limit.</p>{% endif %}
+      <p class="tiny muted">SHA-256: {{ snapshot.content_sha256 }}</p>
+    </details>
+    {% endfor %}
+  </div>{% else %}<div class="empty"><h3>No snapshots saved</h3><p>Run the first crawl for this watch to establish a baseline.</p></div>{% endif %}
+</section>
+{% endif %}
 {% endblock %}
