@@ -364,7 +364,7 @@ Interactive docs at `/docs`, GraphiQL at `/graphql`.
 
 ```
 POST /v1/jobs/crawl  →  Scheduler (quota gate)  →  Celery: crawl_domain
-     → BFS within the start domain, robots.txt honoured
+     → BFS within the start domain, fragment-only URL variants deduplicated, robots.txt honoured
      → per page: clean → dedupe → store
      → live progress written to wcp:v1:job:{id}
      → on finish: data_sha256 stamped, crawl.completed webhook emitted
