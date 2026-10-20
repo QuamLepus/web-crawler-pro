@@ -39,6 +39,27 @@ def get_watch(redis, watch_id: str, tenant: str) -> dict | None:
     return record if record.get("tenant") == tenant else None
 
 
+def _text_excerpt(value: str, *, change_at: int, limit: int = 500) -> str:
+    """Return a bounded excerpt around the first changed character."""
+    if len(value) <= limit:
+        return value
+    start = max(0, change_at - limit // 2)
+    end = min(len(value), start + limit)
+    if end - start < limit:
+        start = max(0, end - limit)
+    excerpt = value[start:end]
+    return ("…" if start else "") + excerpt + ("…" if end < len(value) else "")
+
+
+def _first_difference(left: str, right: str) -> int:
+    """Find the common-prefix boundary without a quadratic diff algorithm."""
+    boundary = min(len(left), len(right))
+    index = 0
+    while index < boundary and left[index] == right[index]:
+        index += 1
+    return index
+
+
 def observe(redis, *, tenant: str, watch_id: str, item: dict) -> dict | None:
     """Store one crawl observation and return a change event, if any."""
     key = WATCH.format(watch_id=watch_id)
@@ -54,10 +75,17 @@ def observe(redis, *, tenant: str, watch_id: str, item: dict) -> dict | None:
         old_text = str(watch.get("last_text") or "")
         prices_old = sorted(set(re.findall(r"(?:\$|৳|BDT\s*)\s?\d[\d,.]*", old_text, re.I)))
         prices_new = sorted(set(re.findall(r"(?:\$|৳|BDT\s*)\s?\d[\d,.]*", text, re.I)))
+        text_changed = old_text != text
+        difference_at = _first_difference(old_text, text) if text_changed else 0
         event = {"watch_id": watch_id, "url": watch["url"],
                  "event_type": "page.changed", "changed_at": time.time(),
                  "previous_hash": previous_hash, "content_sha256": content_hash,
                  "title_changed": watch.get("last_title") != title,
+                 "text_changed": text_changed,
+                 "old_text_excerpt": (_text_excerpt(old_text, change_at=difference_at)
+                                      if text_changed else ""),
+                 "new_text_excerpt": (_text_excerpt(text, change_at=difference_at)
+                                      if text_changed else ""),
                  "price_mentions_before": prices_old[:30],
                  "price_mentions_after": prices_new[:30],
                  "summary": "Page content changed; price mentions are text matches, not verified prices."}

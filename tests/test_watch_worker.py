@@ -2,7 +2,7 @@ import time
 
 import fakeredis
 
-from src.intelligence.watch import DUE, create_watch
+from src.intelligence.watch import DUE, create_watch, list_events
 from workers import crawl_tasks
 
 
@@ -69,3 +69,7 @@ def test_crawl_worker_persists_watch_snapshot_and_emits_change(monkeypatch):
     assert len(change_events) == 1
     assert change_events[0][2]["price_mentions_before"] == ["৳100"]
     assert change_events[0][2]["price_mentions_after"] == ["৳90"]
+    assert "old_text_excerpt" not in change_events[0][2]
+    stored = list_events(redis, watch["watch_id"])
+    assert "৳100" in stored[0]["old_text_excerpt"]
+    assert "৳90" in stored[0]["new_text_excerpt"]
