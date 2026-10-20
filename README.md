@@ -376,6 +376,10 @@ to the marketplace with `source_job_id`. Job status, crawl results, and the
 completion webhook also report `robots_blocked`, the number of queued URLs
 skipped because robots policy denied access or could not be retrieved.
 
+Crawl-job cancellation is cooperative: an in-flight page is allowed to finish,
+but the worker stops before starting another page and preserves the cancelled
+state. Cancelled jobs do not emit a crawl-completed or crawl-failed webhook.
+
 The general crawler permits a target when `robots.txt` returns a 4xx response,
 consistent with the Robots Exclusion Protocol's unavailable-file handling. A
 5xx response or network/request failure blocks that target until the robots
