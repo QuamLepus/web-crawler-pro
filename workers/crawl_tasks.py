@@ -327,12 +327,16 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     seen = {start_url}
     collected: list[dict] = []
     pages_done = 0
+    robots_blocked = 0
     failures: list[str] = []
 
     while queue and pages_done < max_pages:
         url = queue.pop(0)
         if obey_robots and not robots_check(url):
+            robots_blocked += 1
             logger.debug("robots.txt disallows %s", url)
+            _update_job(r, job_id, {"state": "running",
+                                    "robots_blocked": robots_blocked})
             continue
         try:
             html, status = fetcher(url)
@@ -373,6 +377,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     digest = canonical_sha256(collected)
     result = {
         "job_id": job_id, "url": start_url, "pages_done": pages_done,
+        "robots_blocked": robots_blocked,
         "items": len(collected), "failures": failures[:10],
         "data_sha256": digest,
         # Callers that need the data itself (the topic-discovery CLI, dataset
@@ -384,6 +389,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     state = "failed" if (not collected and failures) else "succeeded"
     _update_job(r, job_id, {
         "state": state, "pages_done": pages_done,
+        "robots_blocked": robots_blocked,
         "items_collected": len(collected), "data_sha256": digest,
         "error": "; ".join(failures)[:500],
     })

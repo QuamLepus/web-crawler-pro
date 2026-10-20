@@ -78,6 +78,7 @@ class CrawlJobOut(BaseModel):
     url: str
     max_pages: int
     pages_done: int = 0
+    robots_blocked: int = 0
     items_collected: int = 0
     tokens_generated: int = 0
     created_at: datetime

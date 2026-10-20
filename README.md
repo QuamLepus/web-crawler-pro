@@ -371,7 +371,9 @@ POST /v1/jobs/crawl  →  Scheduler (quota gate)  →  Celery: crawl_domain
 ```
 
 Because the digest is written to the job record, a finished crawl can be published straight
-to the marketplace with `source_job_id`.
+to the marketplace with `source_job_id`. Job status, crawl results, and the
+completion webhook also report `robots_blocked`, the number of queued URLs
+skipped because robots policy denied access or could not be retrieved.
 
 The general crawler permits a target when `robots.txt` returns a 4xx response,
 consistent with the Robots Exclusion Protocol's unavailable-file handling. A
