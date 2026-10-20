@@ -58,17 +58,24 @@ jobs:
           STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
           STRIPE_TEST_PRICE_ID: ${{ secrets.STRIPE_TEST_PRICE_ID }}
         run: |
-          if [[ -z "$STRIPE_TEST_SECRET_KEY" && -z "$STRIPE_TEST_PRICE_ID" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Stripe integration skipped; configure STRIPE_TEST_SECRET_KEY and STRIPE_TEST_PRICE_ID Actions secrets."
-          elif [[ -z "$STRIPE_TEST_SECRET_KEY" || -z "$STRIPE_TEST_PRICE_ID" ]]; then
-            echo "::error::Both Stripe test-mode secrets must be configured."
-            exit 1
+          missing=()
+          if [[ -z "$STRIPE_TEST_SECRET_KEY" ]]; then missing+=(STRIPE_TEST_SECRET_KEY); fi
+          if [[ -z "$STRIPE_TEST_PRICE_ID" ]]; then missing+=(STRIPE_TEST_PRICE_ID); fi
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Stripe Actions secrets unavailable/empty: %s\n' "${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            if (( ${#missing[@]} == 2 )); then
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Stripe integration skipped; missing/empty repository Actions secret names: ${missing[*]}."
+            else
+              echo "::error::Missing/empty Stripe repository Actions secret name(s): ${missing[*]}."
+              exit 1
+            fi
           elif [[ "$STRIPE_TEST_SECRET_KEY" != sk_test_* ]]; then
             echo "::error::Refusing a non-test Stripe secret key."
             exit 1
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo 'Both Stripe test secret names are present; values are hidden.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/setup-python@v5
         if: steps.stripe-secrets.outputs.enabled == 'true'
@@ -187,12 +194,17 @@ jobs:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
         run: |
-          if [[ -n "$QUAY_USERNAME" && -n "$QUAY_PASSWORD" ]]; then
+          missing=()
+          if [[ -z "$QUAY_USERNAME" ]]; then missing+=(QUAY_USERNAME); fi
+          if [[ -z "$QUAY_PASSWORD" ]]; then missing+=(QUAY_PASSWORD); fi
+          if (( ${#missing[@]} > 0 )); then
+            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
+            printf 'Quay Actions secrets unavailable/empty: %s\n' "${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::MinIO smoke skipped; missing/empty repository Actions secret name(s): ${missing[*]}."
+          else
             printf '%s' "$QUAY_PASSWORD" | docker login quay.io --username "$QUAY_USERNAME" --password-stdin
             echo "minio_enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::MinIO smoke skipped: configure QUAY_USERNAME and QUAY_PASSWORD repository secrets."
+            echo 'Both Quay secret names are present; values are hidden.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Pull MinIO image
         if: steps.quay-auth.outputs.minio_enabled == 'true'
@@ -305,12 +317,17 @@ jobs:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
         run: |
-          if [[ -n "$QUAY_USERNAME" && -n "$QUAY_PASSWORD" ]]; then
+          missing=()
+          if [[ -z "$QUAY_USERNAME" ]]; then missing+=(QUAY_USERNAME); fi
+          if [[ -z "$QUAY_PASSWORD" ]]; then missing+=(QUAY_PASSWORD); fi
+          if (( ${#missing[@]} > 0 )); then
+            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
+            printf 'Quay Actions secrets unavailable/empty: %s\n' "${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::MinIO smoke skipped; missing/empty repository Actions secret name(s): ${missing[*]}."
+          else
             printf '%s' "$QUAY_PASSWORD" | docker login quay.io --username "$QUAY_USERNAME" --password-stdin
             echo "minio_enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "minio_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::MinIO smoke skipped: configure QUAY_USERNAME and QUAY_PASSWORD repository secrets."
+            echo 'Both Quay secret names are present; values are hidden.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Pull MinIO image
         if: steps.quay-auth.outputs.minio_enabled == 'true'

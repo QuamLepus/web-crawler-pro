@@ -29,8 +29,8 @@ four just-published application images through the GHCR overlay, reports each
 image's Docker virtual size, and starts the published core stack including
 Redis, Postgres, Elasticsearch, Prometheus, Celery Beat, both workers, and the
 dashboard. It also includes MinIO when the `QUAY_USERNAME` and `QUAY_PASSWORD`
-GitHub Actions secrets are configured; without them, CI skips MinIO with a
-warning. The size is the uncompressed sum reported by
+GitHub Actions secrets are configured; without them, CI skips MinIO and
+reports the unavailable secret names (never their values) in the job summary. The size is the uncompressed sum reported by
 Docker; it is not the compressed registry transfer size, and shared layers may
 be counted for each image. PR image-size reports are uploaded as per-image
 artifacts with 30-day retention; the published report is uploaded as one
