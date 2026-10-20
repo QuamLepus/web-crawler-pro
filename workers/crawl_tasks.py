@@ -14,7 +14,7 @@ Tasks:
 from __future__ import annotations
 
 import os
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -93,9 +93,13 @@ def fetch_page(self, url: str, depth: int = 0) -> dict:
         item["text"] = soup.get_text(separator=" ", strip=True)[:5000]
         item["images"] = [urljoin(url, img["src"])
                           for img in soup.find_all("img") if img.has_attr("src")]
+        discovered: set[str] = set()
         for a in soup.find_all("a", href=True):
-            absolute = urljoin(url, a["href"])
-            if urlparse(absolute).netloc == urlparse(url).netloc and depth + 1 < 10:
+            absolute, _fragment = urldefrag(urljoin(url, a["href"]))
+            if (absolute not in discovered
+                    and urlparse(absolute).netloc == urlparse(url).netloc
+                    and depth + 1 < 10):
+                discovered.add(absolute)
                 if frontier.add(absolute, priority=1000.0 - (depth + 1) * 10,
                                 depth=depth + 1, parent=url):
                     links.append(absolute)
@@ -271,9 +275,13 @@ def _same_domain_links(url: str, html: str) -> list[str]:
 
     soup = BeautifulSoup(html, "html.parser")
     out: list[str] = []
+    seen: set[str] = set()
+    source_netloc = urlparse(url).netloc
     for a in soup.find_all("a", href=True):
-        absolute = urljoin(url, a["href"])
-        if urlparse(absolute).netloc == urlparse(url).netloc:
+        absolute, _fragment = urldefrag(urljoin(url, a["href"]))
+        if (absolute not in seen
+                and urlparse(absolute).netloc == source_netloc):
+            seen.add(absolute)
             out.append(absolute)
     return out
 
