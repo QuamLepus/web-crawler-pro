@@ -1175,19 +1175,24 @@ def test_data_studio_full_corpus_aggregate_and_csv_export(signed_in, monkeypatch
     assert response.status_code == 200
     assert "Full-corpus analytics" in response.text
     assert "250 matching documents" in response.text
-    assert "Download aggregate CSV" in response.text
+    assert "Download current page CSV" in response.text
+    assert "limit=50&amp;offset=0" in response.text
     assert "wiki" in response.text and "200" in response.text
     assert calls[0]["source"] == "wiki"
 
     exported = signed_in.get("/app/studio/analytics.csv", params={
-        "group_by": "host", "metric": "avg_quality", "source": "wiki"})
+        "group_by": "host", "metric": "avg_quality", "source": "wiki",
+        "limit": 50, "offset": 50})
     assert exported.status_code == 200
     assert exported.headers["content-type"].startswith("text/csv")
     assert "studio-corpus-analytics.csv" in exported.headers["content-disposition"]
     assert exported.text.lstrip("\ufeff").startswith("host,avg_quality,matched_documents")
     assert "'=HYPERLINK" in exported.text
-    assert calls[-1]["limit"] == 100
+    assert calls[-1]["limit"] == 50
+    assert calls[-1]["offset"] == 50
     assert calls[-1]["source"] == "wiki"
+    out_of_range = signed_in.get("/app/studio/analytics.csv", params={"offset": 5001})
+    assert out_of_range.status_code == 422
 
 
 def test_sso_settings_page_and_secure_configuration_form(signed_in, monkeypatch):

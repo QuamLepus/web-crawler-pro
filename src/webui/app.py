@@ -823,8 +823,10 @@ async def data_studio_analytics_export(
     source: str = Query("", max_length=80), host: str = Query("", max_length=253),
     lang: str = Query("", max_length=20),
     indexed_from: date | None = None, indexed_to: date | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=5000),
 ):
-    """Export at most 100 grouped full-corpus aggregates as CSV."""
+    """Export one bounded page of grouped full-corpus aggregates as CSV."""
     import csv
     import io
 
@@ -836,7 +838,8 @@ async def data_studio_analytics_export(
     response = await api.studio_analytics(
         group_by=group_by, metric=metric, source=source, host=host, lang=lang,
         indexed_from=indexed_from.isoformat() if indexed_from else "",
-        indexed_to=indexed_to.isoformat() if indexed_to else "", limit=100, offset=0)
+        indexed_to=indexed_to.isoformat() if indexed_to else "",
+        limit=limit, offset=offset)
     if not response.ok:
         return HTMLResponse(response.error, status_code=response.status if response.status >= 400 else 502)
     output = io.StringIO(newline="")
