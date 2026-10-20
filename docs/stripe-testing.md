@@ -26,7 +26,9 @@ the tenant's plan changed. Test checkout sessions are expired and test
 customers are deleted on cleanup when possible.
 
 The completion event in the pytest integration test is synthetic and signed
-locally; it is not sent by Stripe. A separate `stripe-test-mode` CI job runs
+locally; it is not sent by Stripe. PR CI builds and version-checks the pinned
+Stripe CLI without credentials, but does not deliver an event. A separate
+`stripe-test-mode` CI job runs
 on pushes to `main`, or from a manual CI dispatch on `main` with
 `run_stripe_test_mode` enabled, when the repository Actions secrets
 `STRIPE_TEST_SECRET_KEY` (`sk_test_...`) and `STRIPE_TEST_PRICE_ID` (an active

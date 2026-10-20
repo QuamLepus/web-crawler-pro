@@ -122,6 +122,24 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: python scripts/stripe-cli-delivery-smoke.py
 
+  stripe-cli-build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - name: Build and version-check the pinned Stripe CLI (no credentials)
+        env:
+          GOBIN: ${{ runner.temp }}/stripe-cli-bin
+        run: |
+          mkdir -p "$GOBIN"
+          go install github.com/stripe/stripe-cli/cmd/stripe@v1.54.0
+          "$GOBIN/stripe" version
+
   sdk-test:
     runs-on: ubuntu-latest
     steps:
