@@ -35,9 +35,8 @@ class WatchCreate(BaseModel):
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        if address and (address.is_private or address.is_loopback or address.is_link_local
-                        or address.is_multicast or address.is_reserved or address.is_unspecified):
-            raise ValueError("private or reserved IP addresses are not allowed")
+        if address and not address.is_global:
+            raise ValueError("non-public IP addresses are not allowed")
         return value
 
 

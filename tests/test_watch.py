@@ -36,7 +36,8 @@ def test_watch_rejects_non_http_and_credential_urls():
                                        enable_graphql=False))
     headers = _auth(client)
     for url in ("file:///etc/passwd", "https://user:pass@example.org/",
-                "http://127.0.0.1/admin", "http://service.local/"):
+                "http://127.0.0.1/admin", "http://169.254.169.254/latest/meta-data/",
+                "http://0.0.0.0/", "http://[::1]/", "http://service.local/"):
         assert client.post("/api/v1/watch", headers=headers,
                            json={"url": url}).status_code == 422
 

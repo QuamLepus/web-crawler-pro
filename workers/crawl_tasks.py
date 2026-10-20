@@ -178,6 +178,38 @@ def _stealth_fetch(url: str):
     return result.html, int(result.status or 200)
 
 
+def _watch_fetch(url: str):
+    """Fetch a watch target with DNS pinning and a bounded response body."""
+    from src.utils.public_http import fetch_public_html
+
+    return fetch_public_html(url, timeout=cfg.REQUEST_TIMEOUT)
+
+
+def _watch_robots_allows(url: str) -> bool:
+    """Check robots.txt through the same pinned public-fetch path.
+
+    For watches, an unreachable or unsafe robots URL fails closed so network
+    errors cannot silently turn a monitoring request into an unrestricted one.
+    """
+    from urllib.parse import urlparse
+    from urllib.robotparser import RobotFileParser
+
+    parts = urlparse(url)
+    robots_url = f"{parts.scheme}://{parts.netloc}/robots.txt"
+    try:
+        text, status = _watch_fetch(robots_url)
+        if status >= 500:
+            return False
+        if status >= 400:
+            return True
+        parser = RobotFileParser()
+        parser.parse(text.splitlines())
+        return parser.can_fetch(cfg.USER_AGENT, url)
+    except Exception as exc:  # noqa: BLE001 - fail closed on unsafe/unreachable robots
+        logger.info("watch robots check blocked %s (%s)", url, exc)
+        return False
+
+
 def _robots_allows(url: str) -> bool:
     """Best-effort robots.txt check; fails open (allow) when unreachable."""
     from urllib.parse import urlparse
@@ -267,8 +299,11 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
     obey_robots = bool(payload.get("obey_robots", True))
 
     r = redis_client if redis_client is not None else _job_redis()
+    is_watch = bool(payload.get("watch_id"))
     if fetcher is None:
-        fetcher = _stealth_fetch if payload.get("stealth") else _plain_fetch
+        fetcher = (_watch_fetch if is_watch else
+                   (_stealth_fetch if payload.get("stealth") else _plain_fetch))
+    robots_check = _watch_robots_allows if is_watch else _robots_allows
 
     _update_job(r, job_id, {"state": "running"})
 
@@ -280,7 +315,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None) -> dict:
 
     while queue and pages_done < max_pages:
         url = queue.pop(0)
-        if obey_robots and not _robots_allows(url):
+        if obey_robots and not robots_check(url):
             logger.debug("robots.txt disallows %s", url)
             continue
         try:
