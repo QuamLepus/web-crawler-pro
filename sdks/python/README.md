@@ -45,4 +45,5 @@ supports bounded pagination and optional state filtering. Crawl
 cancellation is cooperative, so an in-flight page may finish before the job
 stops. Watch methods include `create_watch`, `run_watch`, `watch_changes`, and
 `watch_snapshots`; snapshot history is tenant-scoped, capped at 20 versions, and
-text-only. For other API methods, see `Client` and `ResearchResource` in the package.
+text-only. `client.research` supports `create`, `get`, and paginated `list`.
+For other API methods, see `Client` and `ResearchResource` in the package.

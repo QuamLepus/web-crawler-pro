@@ -17,7 +17,7 @@ const answer = await client.ask("What do indexed sources say about AI chips?");
 console.log(job.research_id, answer.citations);
 ```
 
-Available methods cover indexed `ask`, crawl create/list/status/cancel, research create/status,
+Available methods cover indexed `ask`, crawl create/list/status/cancel, research create/list/status,
 watch create/run/change and retained snapshot retrieval, workflow create/list/get/update/delete,
 schedule/run/history/status/cancel, and Data Studio aggregate/snapshot operations.
 Workflow step IDs and `dependsOn` dependencies enable bounded DAG branching; nodes
