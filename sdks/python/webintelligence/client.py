@@ -152,6 +152,8 @@ class Client:
             response = self._http.request(method, path.lstrip("/"), **kwargs)
         except httpx.HTTPError as exc:
             raise WebIntelligenceError(f"API request failed: {type(exc).__name__}") from exc
+        if response.status_code == 204:
+            return {}
         try:
             payload = response.json()
         except ValueError:
@@ -207,6 +209,10 @@ class Client:
     def watch_snapshots(self, watch_id: str) -> dict[str, Any]:
         """List the latest retained text snapshots for a monitored page."""
         return self._request("GET", f"watch/{watch_id}/snapshots")
+
+    def delete_watch(self, watch_id: str) -> dict[str, Any]:
+        """Stop a page watch; existing snapshots remain available."""
+        return self._request("DELETE", f"watch/{quote(watch_id, safe='')}")
 
     def close(self) -> None:
         self._http.close()

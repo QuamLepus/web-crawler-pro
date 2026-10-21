@@ -187,6 +187,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `watch/${encodeURIComponent(watchId)}/snapshots`);
   }
 
+  deleteWatch(watchId: string): Promise<JsonObject> {
+    return this.request("DELETE", `watch/${encodeURIComponent(watchId)}`);
+  }
+
   createWorkflow(name: string, steps: WorkflowCrawlStep[],
                  scheduleIntervalMinutes?: number): Promise<JsonObject> {
     return this.request("POST", "workflows", {
