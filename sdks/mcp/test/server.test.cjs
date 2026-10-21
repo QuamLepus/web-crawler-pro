@@ -54,7 +54,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   await client.connect(transport);
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'wio_ask', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
+    'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_research_create', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
     'wio_watch_snapshots',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
@@ -81,6 +81,34 @@ test('MCP tool returns a protocol error when the API rejects a call', async () =
     const response = await client.callTool({ name: 'wio_ask', arguments: { question: 'test query' } });
     assert.equal(response.isError, true);
     assert.match(response.content[0].text, /index unavailable/);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP crawl cancellation tool forwards a validated job id', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'crawl-tool-key', fetch: async (url, init) => {
+    request = { url, method: init.method };
+    return new Response(JSON.stringify({ job_id: 'job_aaaaaaaaaaaaaaaaaaaa', state: 'cancelled' }),
+                        { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'crawl-cancel-tool-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_crawl_cancel', arguments: {
+      job_id: 'job_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /cancelled/);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/jobs/job_aaaaaaaaaaaaaaaaaaaa/cancel',
+      method: 'POST',
+    });
   } finally {
     await client.close();
     await server.close();

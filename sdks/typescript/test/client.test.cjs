@@ -21,6 +21,21 @@ test('ask sends auth and the documented request shape', async () => {
   });
 });
 
+test('crawl cancellation uses the tenant job cancel endpoint', async () => {
+  let request;
+  const client = new WebIntelligenceClient({ apiKey: 'crawl-key', baseUrl: 'https://api.example',
+    fetch: async (url, init) => {
+      request = { url, method: init.method };
+      return new Response(JSON.stringify({ job_id: 'job_abc', state: 'cancelled' }), { status: 200 });
+    } });
+  const response = await client.cancelJob('job_aaaaaaaaaaaaaaaaaaaa');
+  assert.equal(response.state, 'cancelled');
+  assert.deepEqual(request, {
+    url: 'https://api.example/api/v1/jobs/job_aaaaaaaaaaaaaaaaaaaa/cancel',
+    method: 'POST',
+  });
+});
+
 test('watch snapshot retrieval uses the tenant snapshots endpoint', async () => {
   let requestUrl;
   const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',

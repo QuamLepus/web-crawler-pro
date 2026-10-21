@@ -40,6 +40,8 @@ running. Historical runs are retained when a workflow is deleted.
 
 The SDK does not start Celery workers or Beat. Recurring and asynchronous
 workflow execution requires those services to be configured in the deployment.
-The client also exposes `create_watch`, `run_watch`, `watch_changes`, and
+The client also exposes `create_crawl`, `get_job`, and `cancel_job`; crawl
+cancellation is cooperative, so an in-flight page may finish before the job
+stops. Watch methods include `create_watch`, `run_watch`, `watch_changes`, and
 `watch_snapshots`; snapshot history is tenant-scoped, capped at 20 versions, and
 text-only. For other API methods, see `Client` and `ResearchResource` in the package.

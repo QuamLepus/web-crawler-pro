@@ -59,6 +59,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_crawl_cancel", "Request cooperative cancellation of a crawl job; an active page may finish first.", {
+    job_id: z.string().regex(/^job_[a-f0-9]{20}$/),
+  }, async ({ job_id }) => {
+    try { return result(await client.cancelJob(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_watch_create", "Create a recurring single-page change watch (minimum 15 minutes).", {
     url: z.string().url(), interval_minutes: z.number().int().min(15).max(10080).optional(),
   }, async ({ url, interval_minutes }) => {

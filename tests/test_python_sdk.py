@@ -134,3 +134,18 @@ def test_sdk_redacts_transport_errors_and_surfaces_http_status():
     assert exc.value.status_code == 401
     assert "top-secret" not in str(exc.value)
     client.close()
+
+
+def test_crawl_job_cancellation_uses_encoded_tenant_endpoint():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"job_id": "job_a", "state": "cancelled"})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.cancel_job("job/a")
+
+    assert result["state"] == "cancelled"
+    assert calls == [("POST", "/api/v1/jobs/job%2Fa/cancel")]

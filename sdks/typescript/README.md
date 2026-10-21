@@ -17,12 +17,13 @@ const answer = await client.ask("What do indexed sources say about AI chips?");
 console.log(job.research_id, answer.citations);
 ```
 
-Available methods cover indexed `ask`, crawl create/status, research create/status,
+Available methods cover indexed `ask`, crawl create/status/cancel, research create/status,
 watch create/run/change and retained snapshot retrieval, workflow create/list/get/update/delete,
 schedule/run/history/status/cancel, and Data Studio aggregate/snapshot operations.
 Workflow step IDs and `dependsOn` dependencies enable bounded DAG branching; nodes
 still run serially, failed nodes skip descendants, and independent branches continue.
-`ask` searches the existing index and does not start a crawl. Workflow cancellation
+`ask` searches the existing index and does not start a crawl. Crawl-job cancellation
+is cooperative; an active page may finish before cancellation takes effect. Workflow cancellation
 is cooperative between crawl steps; recurring workflows support intervals of at
 least 60 minutes and require Celery Beat/workers. Snapshots hold at most 100 result
 rows. The SDK does not retry automatically, so callers can choose retry behavior
