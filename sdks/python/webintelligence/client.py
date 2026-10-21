@@ -237,6 +237,44 @@ class Client:
         """Delete one saved Data Studio query belonging to the authenticated tenant."""
         return self._request("DELETE", f"studio/saved-queries/{quote(saved_id, safe='')}")
 
+    def studio_analytics(self, *, group_by: str | None = None,
+                         metric: str | None = None, source: str | None = None,
+                         host: str | None = None, lang: str | None = None,
+                         indexed_from: str | None = None, indexed_to: str | None = None,
+                         limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
+        """Aggregate the shared indexed corpus using the bounded Studio analytics API."""
+        params = {
+            key: value for key, value in {
+                "group_by": group_by, "metric": metric, "source": source,
+                "host": host, "lang": lang, "indexed_from": indexed_from,
+                "indexed_to": indexed_to, "limit": limit, "offset": offset,
+            }.items() if value is not None
+        }
+        return self._request("GET", "studio/analytics", params=params)
+
+    def create_studio_snapshot(self, name: str, q: str,
+                               rows: list[dict[str, Any]], *,
+                               sources: list[str] | None = None,
+                               group_by: str = "host",
+                               metric: str = "count") -> dict[str, Any]:
+        """Persist a bounded result sample as a tenant-scoped Studio snapshot."""
+        return self._request("POST", "studio/snapshots", json={
+            "name": name, "q": q, "sources": sources or [],
+            "group_by": group_by, "metric": metric, "rows": rows,
+        })
+
+    def list_studio_snapshots(self) -> dict[str, Any]:
+        """List saved Studio result snapshots belonging to the authenticated tenant."""
+        return self._request("GET", "studio/snapshots")
+
+    def get_studio_snapshot(self, snapshot_id: str) -> dict[str, Any]:
+        """Retrieve one tenant-scoped Studio result snapshot."""
+        return self._request("GET", f"studio/snapshots/{quote(snapshot_id, safe='')}")
+
+    def delete_studio_snapshot(self, snapshot_id: str) -> dict[str, Any]:
+        """Delete one tenant-scoped Studio result snapshot."""
+        return self._request("DELETE", f"studio/snapshots/{quote(snapshot_id, safe='')}")
+
     def delete_watch(self, watch_id: str) -> dict[str, Any]:
         """Stop a page watch; existing snapshots remain available."""
         return self._request("DELETE", f"watch/{quote(watch_id, safe='')}")

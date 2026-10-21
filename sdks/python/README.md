@@ -50,5 +50,6 @@ capped at 20 versions, and
 text-only. `client.research` supports `create`, `get`, paginated `list`, and
 cooperative `cancel`; cancellation stops at the next source boundary, so an
 active source crawl may finish first. The client also exposes `save_studio_query`,
-`list_studio_queries`, and `delete_studio_query` for tenant-scoped saved Data Studio queries.
+`list_studio_queries`, and `delete_studio_query` for tenant-scoped saved Data Studio queries,
+plus `studio_analytics` and create/list/get/delete methods for bounded result snapshots.
 For other API methods, see `Client` and `ResearchResource` in the package.
