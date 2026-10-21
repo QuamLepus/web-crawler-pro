@@ -54,7 +54,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   await client.connect(transport);
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_status',
+    'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
     'wio_research_create', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
     'wio_watch_snapshots',
@@ -82,6 +82,33 @@ test('MCP tool returns a protocol error when the API rejects a call', async () =
     const response = await client.callTool({ name: 'wio_ask', arguments: { question: 'test query' } });
     assert.equal(response.isError, true);
     assert.match(response.content[0].text, /index unavailable/);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP crawl list tool forwards tenant pagination and state filters', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'crawl-list-key', fetch: async (url, init) => {
+    request = { url, method: init.method };
+    return new Response(JSON.stringify({ items: [], total: 0, page: 2, page_size: 7 }),
+                        { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'crawl-list-tool-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_crawl_list', arguments: {
+      page: 2, page_size: 7, state: 'running',
+    } });
+    assert.equal(response.isError, undefined);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/jobs?page=2&page_size=7&state=running',
+      method: 'GET',
+    });
   } finally {
     await client.close();
     await server.close();

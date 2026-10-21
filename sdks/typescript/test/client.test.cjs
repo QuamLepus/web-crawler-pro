@@ -21,6 +21,19 @@ test('ask sends auth and the documented request shape', async () => {
   });
 });
 
+test('crawl job listing forwards pagination and an optional state filter', async () => {
+  let requestUrl;
+  const client = new WebIntelligenceClient({ apiKey: 'crawl-key', baseUrl: 'https://api.example',
+    fetch: async (url) => {
+      requestUrl = url;
+      return new Response(JSON.stringify({ items: [], total: 0, page: 2, page_size: 7 }),
+                          { status: 200 });
+    } });
+  const result = await client.listJobs(2, 7, 'running');
+  assert.equal(result.page, 2);
+  assert.equal(requestUrl, 'https://api.example/api/v1/jobs?page=2&page_size=7&state=running');
+});
+
 test('crawl cancellation uses the tenant job cancel endpoint', async () => {
   let request;
   const client = new WebIntelligenceClient({ apiKey: 'crawl-key', baseUrl: 'https://api.example',

@@ -59,6 +59,15 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_crawl_list", "List crawl jobs belonging to the authenticated tenant, optionally filtered by state.", {
+    page: z.number().int().min(1).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+    state: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
+  }, async ({ page, page_size, state }) => {
+    try { return result(await client.listJobs(page, page_size, state)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_crawl_status", "Get a crawl job's state and progress.", {
     job_id: z.string().regex(/^job_[a-f0-9]{20}$/),
   }, async ({ job_id }) => {
