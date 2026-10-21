@@ -6,13 +6,11 @@ from workers import crawl_tasks
 
 
 def test_run_crawl_honors_robots_crawl_delay(monkeypatch) -> None:
-    import requests
-
-    class Response:
-        status_code = 200
-        text = "User-agent: *\nCrawl-delay: 2\n"
-
-    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        crawl_tasks,
+        "_request_text_bounded",
+        lambda _url: ("User-agent: *\nCrawl-delay: 2\n", 200, "text/plain"),
+    )
     monkeypatch.setattr(crawl_tasks.cfg, "DELAY_BETWEEN_REQUESTS", 0.25)
     monkeypatch.setattr(crawl_tasks, "_store_item", lambda item: item)
     events: list[tuple[str, object]] = []

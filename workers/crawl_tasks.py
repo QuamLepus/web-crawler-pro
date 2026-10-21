@@ -27,9 +27,14 @@ logger = setup_logger(__name__)
 cfg = get_config()
 
 FRONTIER_NS = os.getenv("FRONTIER_NAMESPACE", "frontier")
+MAX_CRAWL_RESPONSE_BYTES = 5 * 1024 * 1024
 _ROBOTS_CACHE_MISS = object()
 _ROBOTS_ALLOW_ALL = object()
 _ROBOTS_DENY_ALL = object()
+
+
+class CrawlResponseTooLarge(ValueError):
+    """A crawl response exceeded the worker's bounded-body limit."""
 
 
 def get_frontier() -> URLFrontier:
@@ -71,26 +76,31 @@ def fetch_page(self, url: str, depth: int = 0) -> dict:
         return {"url": url, "links_discovered": 0,
                 "status": "skipped_robots"}
 
-    headers = {"User-Agent": cfg.USER_AGENT}
     try:
-        resp = requests.get(url, headers=headers, timeout=cfg.REQUEST_TIMEOUT)
-        resp.raise_for_status()
+        html, status_code, content_type = _request_text_bounded(url)
+        if status_code >= 400:
+            raise requests.HTTPError(f"HTTP {status_code} for {url}")
+    except CrawlResponseTooLarge as exc:
+        logger.info("frontier crawl skipped oversized response for %s (%s)",
+                    url, exc)
+        frontier.ack(url)
+        return {"url": url, "links_discovered": 0,
+                "status": "skipped_too_large"}
     except Exception as exc:  # noqa: BLE001 - retry any transient network error
         frontier.nack(url)
         raise self.retry(exc=exc)
 
-    content_type = resp.headers.get("Content-Type", "")
     item = {
         "url": url,
         "depth": depth,
-        "status_code": resp.status_code,
+        "status_code": status_code,
         "content_type": content_type,
         "fetched_at": __import__("datetime").datetime.utcnow().isoformat(),
     }
 
     links: list[str] = []
     if "html" in content_type:
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         title = soup.title.string.strip() if soup.title and soup.title.string else ""
         item["title"] = title
         item["text"] = soup.get_text(separator=" ", strip=True)[:5000]
@@ -193,13 +203,48 @@ def canonical_sha256(items) -> str:
     return h.hexdigest()
 
 
-def _plain_fetch(url: str):
-    """Fetch one URL; returns ``(html, status_code)``."""
+def _request_text_bounded(url: str) -> tuple[str, int, str]:
+    """Stream one response and stop reading after the configured body limit."""
     import requests
 
     resp = requests.get(url, headers={"User-Agent": cfg.USER_AGENT},
-                        timeout=cfg.REQUEST_TIMEOUT)
-    return resp.text, int(resp.status_code)
+                        timeout=cfg.REQUEST_TIMEOUT, stream=True)
+    try:
+        content_length = resp.headers.get("Content-Length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = None
+            if (declared_size is not None
+                    and declared_size > MAX_CRAWL_RESPONSE_BYTES):
+                raise CrawlResponseTooLarge(
+                    f"response exceeds {MAX_CRAWL_RESPONSE_BYTES} bytes")
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_CRAWL_RESPONSE_BYTES:
+                raise CrawlResponseTooLarge(
+                    f"response exceeds {MAX_CRAWL_RESPONSE_BYTES} bytes")
+            chunks.append(chunk)
+        body = b"".join(chunks)
+        encoding = resp.encoding or "utf-8"
+        try:
+            text = body.decode(encoding, errors="replace")
+        except LookupError:
+            text = body.decode("utf-8", errors="replace")
+        return text, int(resp.status_code), resp.headers.get("Content-Type", "")
+    finally:
+        resp.close()
+
+
+def _plain_fetch(url: str):
+    """Fetch one URL; returns ``(html, status_code)`` with a bounded body."""
+    html, status, _content_type = _request_text_bounded(url)
+    return html, status
 
 
 def _stealth_fetch(url: str):
@@ -207,7 +252,11 @@ def _stealth_fetch(url: str):
     from src.middleware.stealth_middleware import StealthFetcher
 
     result = StealthFetcher().fetch(url)
-    return result.html, int(result.status or 200)
+    html = result.html
+    if len(html.encode("utf-8")) > MAX_CRAWL_RESPONSE_BYTES:
+        raise CrawlResponseTooLarge(
+            f"stealth response exceeds {MAX_CRAWL_RESPONSE_BYTES} bytes")
+    return html, int(result.status or 200)
 
 
 def _watch_fetch(url: str):
@@ -261,19 +310,19 @@ def _robots_allows(url: str, cache: dict[str, object] | None = None) -> bool:
               if cache is not None else _ROBOTS_CACHE_MISS)
     if policy is _ROBOTS_CACHE_MISS:
         try:
-            resp = requests.get(robots_url, headers={"User-Agent": cfg.USER_AGENT},
-                                timeout=cfg.REQUEST_TIMEOUT)
-            if 400 <= resp.status_code < 500:
+            robots_text, status_code, _content_type = _request_text_bounded(
+                robots_url)
+            if 400 <= status_code < 500:
                 policy = _ROBOTS_ALLOW_ALL
-            elif resp.status_code >= 500:
+            elif status_code >= 500:
                 logger.info("robots.txt server failure for %s (HTTP %s); denying",
-                            url, resp.status_code)
+                            url, status_code)
                 policy = _ROBOTS_DENY_ALL
             else:
                 parser = RobotFileParser()
-                parser.parse(resp.text.splitlines())
+                parser.parse(robots_text.splitlines())
                 policy = parser
-        except requests.RequestException as exc:
+        except (requests.RequestException, CrawlResponseTooLarge) as exc:
             logger.info("robots.txt unavailable for %s (%s); denying", url, exc)
             policy = _ROBOTS_DENY_ALL
         if cache is not None:
