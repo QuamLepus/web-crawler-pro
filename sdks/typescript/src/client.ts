@@ -183,12 +183,14 @@ export class WebIntelligenceClient {
     return this.request("POST", `watch/${encodeURIComponent(watchId)}/run`);
   }
 
-  getWatchChanges(watchId: string): Promise<JsonObject> {
-    return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes`);
+  getWatchChanges(watchId: string, limit?: number): Promise<JsonObject> {
+    const query = limit === undefined ? "" : `?limit=${limit}`;
+    return this.request("GET", `watch/${encodeURIComponent(watchId)}/changes${query}`);
   }
 
-  getWatchSnapshots(watchId: string): Promise<JsonObject> {
-    return this.request("GET", `watch/${encodeURIComponent(watchId)}/snapshots`);
+  getWatchSnapshots(watchId: string, limit?: number): Promise<JsonObject> {
+    const query = limit === undefined ? "" : `?limit=${limit}`;
+    return this.request("GET", `watch/${encodeURIComponent(watchId)}/snapshots${query}`);
   }
 
   deleteWatch(watchId: string): Promise<JsonObject> {
