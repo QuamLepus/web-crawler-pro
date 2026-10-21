@@ -182,8 +182,31 @@ async def list_jobs(ctx: CtxDep, request: Request,
                     page_size: int = Query(20, ge=1, le=100),
                     state: JobState | None = None) -> JobListOut:
     zkey = TENANT_JOBS.format(tenant=ctx["tenant"])
-    total = r.zcard(zkey)
-    ids = r.zrevrange(zkey, (page - 1) * page_size, page * page_size - 1)
+    offset = (page - 1) * page_size
+    total = int(r.zcard(zkey))
+    if state is None:
+        ids = r.zrevrange(zkey, offset, offset + page_size - 1)
+    else:
+        # Filter before pagination so total and page boundaries describe the
+        # filtered result set. Batch Redis reads to keep round trips bounded.
+        ids = []
+        matching = 0
+        batch_size = 100
+        for batch_start in range(0, total, batch_size):
+            batch_ids = r.zrevrange(zkey, batch_start,
+                                    min(batch_start + batch_size, total) - 1)
+            pipe = r.pipeline()
+            for batch_id in batch_ids:
+                id_text = batch_id.decode() if isinstance(batch_id, bytes) else batch_id
+                pipe.hget(JOB_KEY.format(job_id=id_text), "state")
+            states = pipe.execute()
+            for batch_id, job_state in zip(batch_ids, states):
+                state_text = job_state.decode() if isinstance(job_state, bytes) else job_state
+                if state_text == state.value:
+                    if offset <= matching < offset + page_size:
+                        ids.append(batch_id)
+                    matching += 1
+        total = matching
     items: list[CrawlJobOut] = []
     for jid in ids:
         jid_s = jid.decode() if isinstance(jid, bytes) else jid

@@ -183,6 +183,40 @@ def test_full_flow_signup_keys_jobs_graphql(client):
     assert r.status_code == 401
 
 
+def test_crawl_job_state_filter_paginates_matching_jobs_and_counts_matches(client):
+    token = signup(client, email="crawl-list@example.com", org="Crawl List")
+    api_key = make_key(client, token["access_token"])
+    jobs = []
+    for index in range(4):
+        response = client.post(
+            "/v1/jobs/crawl", headers={"X-API-Key": api_key},
+            json={"url": f"https://example.com/{index}", "max_pages": 1},
+        )
+        assert response.status_code == 202, response.text
+        jobs.append(response.json())
+
+    redis_client = client.app.state.services.redis
+    tenant_jobs_key = f"wcp:v1:tenant_jobs:{jobs[0]['tenant']}"
+    states = ["completed", "running", "failed", "running"]
+    for index, (job, state) in enumerate(zip(jobs, states)):
+        redis_client.hset(f"wcp:v1:job:{job['job_id']}", "state", state)
+        redis_client.zadd(tenant_jobs_key, {job["job_id"]: index + 1})
+
+    first_page = client.get(
+        "/v1/jobs?page=1&page_size=1&state=running",
+        headers={"X-API-Key": api_key},
+    )
+    second_page = client.get(
+        "/v1/jobs?page=2&page_size=1&state=running",
+        headers={"X-API-Key": api_key},
+    )
+
+    assert first_page.status_code == second_page.status_code == 200
+    assert first_page.json()["total"] == second_page.json()["total"] == 2
+    assert [item["job_id"] for item in first_page.json()["items"]] == [jobs[3]["job_id"]]
+    assert [item["job_id"] for item in second_page.json()["items"]] == [jobs[1]["job_id"]]
+
+
 def test_auth_context_middleware_sets_tenant_for_search(client):
     """AuthContextMiddleware must expose request.state.tenant so the
     tenant-scoped search backend resolves correctly."""
