@@ -104,6 +104,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_watch_list", "List monitored page watches belonging to the authenticated tenant.", {}, async () => {
+    try { return result(await client.listWatches()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_watch_changes", "Read detected text changes for a monitored page.", {
     watch_id: z.string().regex(/^watch_[a-f0-9]{20}$/),
   }, async ({ watch_id }) => {

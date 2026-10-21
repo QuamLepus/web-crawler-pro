@@ -43,7 +43,7 @@ workflow execution requires those services to be configured in the deployment.
 The client also exposes `create_crawl`, `list_jobs`, `get_job`, and `cancel_job`; `list_jobs`
 supports bounded pagination and optional state filtering. Crawl
 cancellation is cooperative, so an in-flight page may finish before the job
-stops. Watch methods include `create_watch`, `run_watch`, `watch_changes`,
+stops. Watch methods include `list_watches`, `create_watch`, `run_watch`, `watch_changes`,
 `watch_snapshots`, and `delete_watch`; stopping a watch retains its snapshots.
 Snapshot history is tenant-scoped, capped at 20 versions, and
 text-only. `client.research` supports `create`, `get`, paginated `list`, and

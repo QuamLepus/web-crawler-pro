@@ -196,6 +196,10 @@ class Client:
         """Request cooperative cancellation of a crawl job."""
         return self._request("POST", f"jobs/{quote(job_id, safe='')}/cancel")
 
+    def list_watches(self) -> dict[str, Any]:
+        """List page watches belonging to the authenticated tenant."""
+        return self._request("GET", "watch")
+
     def create_watch(self, url: str, *, interval_minutes: int = 60) -> dict[str, Any]:
         return self._request("POST", "watch", json={"url": url,
                              "interval_minutes": interval_minutes})

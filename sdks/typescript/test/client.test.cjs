@@ -62,6 +62,17 @@ test('watch snapshot retrieval uses the tenant snapshots endpoint', async () => 
     'https://api.example/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots');
 });
 
+test('watch listing uses the authenticated tenant endpoint', async () => {
+  let request;
+  const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',
+    fetch: async (url, init) => {
+      request = { url, method: init.method };
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+    } });
+  assert.deepEqual(await client.listWatches(), { items: [], total: 0 });
+  assert.deepEqual(request, { url: 'https://api.example/api/v1/watch', method: 'GET' });
+});
+
 test('watch deletion accepts the API 204 response and encodes the watch id', async () => {
   let request;
   const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',
