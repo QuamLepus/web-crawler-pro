@@ -40,6 +40,43 @@ def test_research_job_tenant_isolation_and_budget():
                        json={"topic": "AI", "sources": 50}).status_code == 422
 
 
+def test_research_job_list_is_paginated_tenant_scoped_and_omits_reports():
+    client = _client()
+    first = _key(client, "research-list-one@example.test")
+    second = _key(client, "research-list-two@example.test")
+
+    def create(headers, topic):
+        response = client.post("/api/v1/research", headers=headers, json={
+            "topic": topic, "sources": 1, "max_pages_per_source": 1})
+        assert response.status_code == 202, response.text
+        return response.json()["research_id"]
+
+    first_ids = [create(first, "First tenant research one"),
+                 create(first, "First tenant research two")]
+    second_id = create(second, "Second tenant research")
+
+    redis = client.app.state.services.redis
+    record_key = f"wcp:v1:research:{first_ids[0]}"
+    record = json.loads(redis.get(record_key))
+    record["report"] = {"claims": [{"claim": "private report content"}]}
+    redis.set(record_key, json.dumps(record))
+
+    page_one = client.get("/api/v1/research?page=1&page_size=1", headers=first)
+    page_two = client.get("/api/v1/research?page=2&page_size=1", headers=first)
+    second_page = client.get("/api/v1/research", headers=second)
+
+    assert page_one.status_code == page_two.status_code == second_page.status_code == 200
+    assert page_one.json()["total"] == page_two.json()["total"] == 2
+    first_page_ids = {page_one.json()["items"][0]["research_id"],
+                      page_two.json()["items"][0]["research_id"]}
+    assert first_page_ids == set(first_ids)
+    assert all("report" not in item for page in (page_one, page_two)
+               for item in page.json()["items"])
+    assert "private report content" not in page_one.text + page_two.text
+    assert second_page.json()["total"] == 1
+    assert [item["research_id"] for item in second_page.json()["items"]] == [second_id]
+
+
 def test_research_report_console_is_authenticated():
     client = _client()
     assert client.get("/app/research/agent", follow_redirects=False).status_code == 303
