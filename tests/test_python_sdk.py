@@ -164,3 +164,18 @@ def test_crawl_job_listing_forwards_pagination_and_state_filter():
 
     assert result["page"] == 2
     assert calls == [("GET", "/api/v1/jobs", "page=2&page_size=7&state=running")]
+
+
+def test_research_cancellation_uses_encoded_tenant_endpoint():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"research_id": "research_abc", "status": "cancelled"})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.research.cancel("research_aaaaaaaaaaaaaaaaaaaa")
+
+    assert result["status"] == "cancelled"
+    assert calls == [("POST", "/api/v1/research/research_aaaaaaaaaaaaaaaaaaaa/cancel")]

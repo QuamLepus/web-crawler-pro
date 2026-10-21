@@ -86,6 +86,20 @@ test('research listing forwards pagination to the tenant endpoint', async () => 
   assert.equal(requestUrl, 'https://api.example/api/v1/research?page=2&page_size=8');
 });
 
+test('research cancellation uses the tenant-scoped cancel endpoint', async () => {
+  let request;
+  const client = new WebIntelligenceClient({ apiKey: 'research-key',
+    baseUrl: 'https://api.example', fetch: async (url, init) => {
+      request = { url, method: init.method };
+      return new Response(JSON.stringify({ status: 'cancelled' }), { status: 200 });
+    } });
+  assert.equal((await client.cancelResearch('research_aaaaaaaaaaaaaaaaaaaa')).status, 'cancelled');
+  assert.deepEqual(request, {
+    url: 'https://api.example/api/v1/research/research_aaaaaaaaaaaaaaaaaaaa/cancel',
+    method: 'POST',
+  });
+});
+
 test('non-success response becomes a typed error without disclosing key', async () => {
   const client = new WebIntelligenceClient({ apiKey: 'secret-token', fetch: async () =>
     new Response(JSON.stringify({ error: { message: 'authentication required' } }), { status: 401 }) });

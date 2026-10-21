@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from redis.exceptions import WatchError
 
 from src.api.routers.jobs import CtxDep
 from src.compute.scheduler import JobPriority, JobSpec
@@ -100,6 +101,52 @@ def _load(request: Request, research_id: str, tenant: str) -> dict:
 @router.get("/{research_id}", summary="Get research job status and cited report")
 async def get_research(research_id: str, ctx: CtxDep, request: Request) -> dict:
     return _load(request, research_id, str(ctx["tenant"]))
+
+
+@router.post("/{research_id}/cancel", summary="Request cooperative research cancellation")
+async def cancel_research(research_id: str, ctx: CtxDep, request: Request) -> dict:
+    tenant = str(ctx["tenant"])
+    current = _load(request, research_id, tenant)
+    if current.get("status") in {"completed", "failed", "cancelled"}:
+        raise HTTPException(409, f"research job already {current.get('status')}")
+
+    redis = request.app.state.services.redis
+    key = JOB.format(research_id=research_id)
+    for _ in range(10):
+        with redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                raw = pipe.get(key)
+                if not raw:
+                    raise HTTPException(404, "research job not found")
+                value = raw.decode() if isinstance(raw, bytes) else raw
+                record = json.loads(value)
+                if record.get("tenant") != tenant:
+                    raise HTTPException(404, "research job not found")
+                if record.get("status") in {"completed", "failed", "cancelled"}:
+                    raise HTTPException(409,
+                                        f"research job already {record.get('status')}")
+                stages = record.get("stages", {})
+                for name, stage_state in stages.items():
+                    if stage_state in {"queued", "running"}:
+                        stages[name] = "cancelled"
+                record.update(status="cancelled", stage="cancelled", stages=stages,
+                              updated_at=datetime.now(timezone.utc).isoformat())
+                pipe.multi()
+                pipe.set(key, json.dumps(record, separators=(",", ":")), ex=TTL)
+                pipe.execute()
+                break
+            except WatchError:
+                continue
+    else:
+        raise HTTPException(503, "research job changed repeatedly; retry cancellation")
+
+    try:
+        request.app.state.services.scheduler.mark(research_id, "cancelled",
+                                                  cancelled_by=tenant)
+    except Exception:
+        pass  # persisted research cancellation remains authoritative
+    return record
 
 
 @router.get("", summary="List research jobs for this tenant")

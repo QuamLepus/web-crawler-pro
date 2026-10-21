@@ -123,7 +123,12 @@ class ResearchResource:
         })
 
     def get(self, research_id: str) -> dict[str, Any]:
-        return self._client._request("GET", f"research/{research_id}")
+        return self._client._request("GET", f"research/{quote(research_id, safe='')}")
+
+    def cancel(self, research_id: str) -> dict[str, Any]:
+        """Request cooperative cancellation of a research job."""
+        return self._client._request("POST",
+                                     f"research/{quote(research_id, safe='')}/cancel")
 
     def list(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
         return self._client._request("GET", "research", params={

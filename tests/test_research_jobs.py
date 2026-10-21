@@ -77,6 +77,28 @@ def test_research_job_list_is_paginated_tenant_scoped_and_omits_reports():
     assert [item["research_id"] for item in second_page.json()["items"]] == [second_id]
 
 
+def test_research_cancellation_is_cooperative_and_tenant_scoped():
+    client = _client()
+    first = _key(client, "research-cancel-one@example.test")
+    second = _key(client, "research-cancel-two@example.test")
+    created = client.post("/api/v1/research", headers=first, json={
+        "topic": "Cancelable research job", "sources": 2,
+        "max_pages_per_source": 2})
+    assert created.status_code == 202, created.text
+    research_id = created.json()["research_id"]
+
+    foreign_cancel = client.post(f"/api/v1/research/{research_id}/cancel", headers=second)
+    assert foreign_cancel.status_code == 404
+    assert client.get(f"/api/v1/research/{research_id}", headers=first).json()["status"] == "queued"
+
+    cancelled = client.post(f"/api/v1/research/{research_id}/cancel", headers=first)
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["stage"] == "cancelled"
+    assert client.get(f"/api/v1/research/{research_id}", headers=first).json()["status"] == "cancelled"
+    assert client.post(f"/api/v1/research/{research_id}/cancel", headers=first).status_code == 409
+
+
 def test_research_report_console_is_authenticated():
     client = _client()
     assert client.get("/app/research/agent", follow_redirects=False).status_code == 303
@@ -128,3 +150,61 @@ def test_research_task_updates_progress_and_persists_report(monkeypatch):
     assert result["status"] == "completed"
     assert saved["stages"]["report"] == "completed"
     assert saved["report"]["claims"][0]["citations"][0]["url"] == "https://source.example/a"
+
+
+def test_research_task_stops_between_source_crawls_when_cancelled(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    research_id = "research_cccccccccccccccccccc"
+    key = f"wcp:v1:research:{research_id}"
+    record = {"research_id": research_id, "tenant": "tenant", "topic": "AI chips",
+              "status": "queued", "stage": "queued", "progress": 0,
+              "stages": {name: "queued" for name in
+                         ("planning", "discovery", "crawl_extract", "source_check", "report")}}
+    redis.set(key, json.dumps(record))
+    monkeypatch.setattr(research_tasks, "_redis", lambda: redis)
+    from src.discovery.service import DiscoveryService, DiscoveryState
+    monkeypatch.setattr("src.discovery.service.run_discovery", lambda payload, redis_client=None: {
+        "state": DiscoveryState.awaiting_approval.value, "job_id": payload["job_id"]})
+    monkeypatch.setattr(DiscoveryService, "approve", lambda self, job_id, dispatch=False: (
+        [{"url": "https://one.example", "domain": "one.example"},
+         {"url": "https://two.example", "domain": "two.example"}], ["crawl_one", "crawl_two"]))
+    crawled = []
+
+    def cancel_during_source(payload, redis_client=None):
+        crawled.append(payload["url"])
+        saved = json.loads(redis.get(key))
+        saved.update(status="cancelled", stage="cancelled")
+        redis.set(key, json.dumps(saved))
+        return {"collected": [], "pages_done": 1}
+
+    monkeypatch.setattr("workers.crawl_tasks.run_crawl", cancel_during_source)
+    result = research_tasks.run_research.run({"research_id": research_id,
+        "tenant": "tenant", "topic": "AI chips", "count": 2,
+        "max_pages_per_site": 1})
+
+    assert result == {"research_id": research_id, "status": "cancelled"}
+    assert crawled == ["https://one.example"]
+    assert json.loads(redis.get(key))["status"] == "cancelled"
+
+
+def test_cancelled_research_task_stops_before_start(monkeypatch):
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    research_id = "research_bbbbbbbbbbbbbbbbbbbb"
+    key = f"wcp:v1:research:{research_id}"
+    record = {"research_id": research_id, "tenant": "tenant", "topic": "AI chips",
+              "status": "cancelled", "stage": "cancelled", "progress": 0,
+              "stages": {name: "cancelled" for name in
+                         ("planning", "discovery", "crawl_extract", "source_check", "report")}}
+    redis.set(key, json.dumps(record))
+    monkeypatch.setattr(research_tasks, "_redis", lambda: redis)
+
+    def unexpected_discovery(*_args, **_kwargs):
+        raise AssertionError("cancelled research must not start discovery")
+
+    monkeypatch.setattr("src.discovery.service.run_discovery", unexpected_discovery)
+    result = research_tasks.run_research.run({"research_id": research_id,
+        "tenant": "tenant", "topic": "AI chips", "count": 1,
+        "max_pages_per_site": 1})
+
+    assert result == {"research_id": research_id, "status": "cancelled"}
+    assert json.loads(redis.get(key))["status"] == "cancelled"

@@ -60,6 +60,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_research_cancel", "Request cancellation of a research job; an active source crawl may finish first.", {
+    research_id: z.string().regex(/^research_[a-f0-9]{20}$/),
+  }, async ({ research_id }) => {
+    try { return result(await client.cancelResearch(research_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_crawl_create", "Queue a crawl job. Robots.txt is obeyed by default.", {
     url: z.string().url(), max_pages: z.number().int().min(1).max(1000).optional(),
   }, async ({ url, max_pages }) => {
