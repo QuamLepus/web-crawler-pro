@@ -68,6 +68,7 @@ def drain_frontier(self, batch: int = 20) -> int:
 def fetch_page(self, url: str, depth: int = 0) -> dict:
     """Fetch a single page, extract links + images, emit crawl item."""
     import requests
+    from src.utils.public_http import UnsafePublicURL
 
     frontier = get_frontier()
     if not _robots_allows(url):
@@ -80,12 +81,12 @@ def fetch_page(self, url: str, depth: int = 0) -> dict:
         html, status_code, content_type = _request_text_bounded(url)
         if status_code >= 400:
             raise requests.HTTPError(f"HTTP {status_code} for {url}")
-    except CrawlResponseTooLarge as exc:
-        logger.info("frontier crawl skipped oversized response for %s (%s)",
+    except (UnsafePublicURL, CrawlResponseTooLarge) as exc:
+        logger.info("frontier crawl skipped unsafe or oversized response for %s (%s)",
                     url, exc)
         frontier.ack(url)
         return {"url": url, "links_discovered": 0,
-                "status": "skipped_too_large"}
+                "status": "skipped_unsafe_or_too_large"}
     except Exception as exc:  # noqa: BLE001 - retry any transient network error
         frontier.nack(url)
         raise self.retry(exc=exc)
@@ -204,41 +205,12 @@ def canonical_sha256(items) -> str:
 
 
 def _request_text_bounded(url: str) -> tuple[str, int, str]:
-    """Stream one response and stop reading after the configured body limit."""
-    import requests
+    """Fetch one public URL with DNS pinning, redirect checks, and a body cap."""
+    from src.utils.public_http import fetch_public_response
 
-    resp = requests.get(url, headers={"User-Agent": cfg.USER_AGENT},
-                        timeout=cfg.REQUEST_TIMEOUT, stream=True)
-    try:
-        content_length = resp.headers.get("Content-Length")
-        if content_length:
-            try:
-                declared_size = int(content_length)
-            except ValueError:
-                declared_size = None
-            if (declared_size is not None
-                    and declared_size > MAX_CRAWL_RESPONSE_BYTES):
-                raise CrawlResponseTooLarge(
-                    f"response exceeds {MAX_CRAWL_RESPONSE_BYTES} bytes")
-        chunks: list[bytes] = []
-        total = 0
-        for chunk in resp.iter_content(chunk_size=64 * 1024):
-            if not chunk:
-                continue
-            total += len(chunk)
-            if total > MAX_CRAWL_RESPONSE_BYTES:
-                raise CrawlResponseTooLarge(
-                    f"response exceeds {MAX_CRAWL_RESPONSE_BYTES} bytes")
-            chunks.append(chunk)
-        body = b"".join(chunks)
-        encoding = resp.encoding or "utf-8"
-        try:
-            text = body.decode(encoding, errors="replace")
-        except LookupError:
-            text = body.decode("utf-8", errors="replace")
-        return text, int(resp.status_code), resp.headers.get("Content-Type", "")
-    finally:
-        resp.close()
+    return fetch_public_response(
+        url, timeout=cfg.REQUEST_TIMEOUT, user_agent=cfg.USER_AGENT,
+        max_response_bytes=MAX_CRAWL_RESPONSE_BYTES)
 
 
 def _plain_fetch(url: str):
@@ -302,8 +274,6 @@ def _robots_allows(url: str, cache: dict[str, object] | None = None) -> bool:
     from urllib.parse import urlparse
     from urllib.robotparser import RobotFileParser
 
-    import requests
-
     parts = urlparse(url)
     robots_url = f"{parts.scheme}://{parts.netloc}/robots.txt"
     policy = (cache.get(robots_url, _ROBOTS_CACHE_MISS)
@@ -322,7 +292,7 @@ def _robots_allows(url: str, cache: dict[str, object] | None = None) -> bool:
                 parser = RobotFileParser()
                 parser.parse(robots_text.splitlines())
                 policy = parser
-        except (requests.RequestException, CrawlResponseTooLarge) as exc:
+        except Exception as exc:  # noqa: BLE001 - robots fetch must fail closed
             logger.info("robots.txt unavailable for %s (%s); denying", url, exc)
             policy = _ROBOTS_DENY_ALL
         if cache is not None:

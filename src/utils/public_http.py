@@ -115,7 +115,8 @@ def _public_addresses(host: str, port: int) -> list[str]:
     return addresses
 
 
-def _read_response(url: str, timeout: float):
+def _read_response(url: str, timeout: float, *, max_response_bytes: int,
+                   user_agent: str):
     scheme, host, port, path, host_header = _target(url)
     addresses = _public_addresses(host, port)
     connection_type = (_PinnedHTTPSConnection if scheme == "https"
@@ -124,7 +125,7 @@ def _read_response(url: str, timeout: float):
     try:
         connection.putrequest("GET", path, skip_host=True)
         connection.putheader("Host", host_header)
-        connection.putheader("User-Agent", "WebCrawlerPro-Watch/1.0")
+        connection.putheader("User-Agent", user_agent)
         connection.putheader("Accept", "text/html,application/xhtml+xml,*/*;q=0.5")
         connection.putheader("Accept-Encoding", "identity")
         connection.putheader("Connection", "close")
@@ -136,14 +137,14 @@ def _read_response(url: str, timeout: float):
                 declared_size = int(content_length)
             except ValueError:
                 declared_size = None
-            if declared_size is not None and declared_size > MAX_RESPONSE_BYTES:
-                raise UnsafePublicURL("response exceeds the watch size limit")
+            if declared_size is not None and declared_size > max_response_bytes:
+                raise UnsafePublicURL("response exceeds the configured size limit")
         content_encoding = (response.getheader("Content-Encoding") or "identity").lower()
         if content_encoding not in {"", "identity"}:
-            raise UnsafePublicURL("compressed responses are not accepted for watches")
-        body = response.read(MAX_RESPONSE_BYTES + 1)
-        if len(body) > MAX_RESPONSE_BYTES:
-            raise UnsafePublicURL("response exceeds the watch size limit")
+            raise UnsafePublicURL("compressed responses are not accepted")
+        body = response.read(max_response_bytes + 1)
+        if len(body) > max_response_bytes:
+            raise UnsafePublicURL("response exceeds the configured size limit")
         content_type = response.getheader("Content-Type", "")
         status = response.status
         location = response.getheader("Location")
@@ -152,19 +153,28 @@ def _read_response(url: str, timeout: float):
         connection.close()
 
 
-def fetch_public_html(url: str, *, timeout: float = 15.0,
-                      max_redirects: int = MAX_REDIRECTS) -> tuple[str, int]:
-    """Fetch a public URL without DNS-rebinding or private redirect exposure.
+def fetch_public_response(
+    url: str,
+    *,
+    timeout: float = 15.0,
+    max_redirects: int = MAX_REDIRECTS,
+    user_agent: str = "WebCrawlerPro/1.0",
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
+) -> tuple[str, int, str]:
+    """Fetch a public URL, returning decoded text, status, and content type.
 
-    The hostname is resolved and validated for every request, then the socket
-    connects to that exact numeric address. Redirects are revalidated and HTTPS
-    redirects may not downgrade to HTTP. This intentionally connects directly
-    rather than using ambient HTTP proxy settings, which could change DNS
-    resolution outside this process.
+    Each hostname is resolved and validated before the socket connects to that
+    exact numeric address. Redirects are revalidated, HTTPS redirects may not
+    downgrade, and the response is bounded. The connection is direct, without
+    ambient HTTP proxy settings that could change DNS resolution.
     """
+    if max_response_bytes < 0:
+        raise ValueError("max_response_bytes must be non-negative")
     current = url
     for redirect_count in range(max_redirects + 1):
-        status, location, content_type, body = _read_response(current, timeout)
+        status, location, content_type, body = _read_response(
+            current, timeout, max_response_bytes=max_response_bytes,
+            user_agent=user_agent)
         if status in {301, 302, 303, 307, 308} and location:
             if redirect_count >= max_redirects:
                 raise UnsafePublicURL("too many redirects")
@@ -173,8 +183,8 @@ def fetch_public_html(url: str, *, timeout: float = 15.0,
             current_scheme = urlsplit(current).scheme.lower()
             if current_scheme == "https" and next_scheme != "https":
                 raise UnsafePublicURL("HTTPS redirects may not downgrade to HTTP")
-            # Validate URL syntax and DNS policy before following. _read_response
-            # repeats the check immediately before opening the next connection.
+            # Validate URL syntax here; _read_response resolves and checks all
+            # DNS answers immediately before opening the next connection.
             _target(next_url)
             current = next_url
             continue
@@ -188,5 +198,20 @@ def fetch_public_html(url: str, *, timeout: float = 15.0,
             text = body.decode(charset, errors="replace")
         except LookupError:
             text = body.decode("utf-8", errors="replace")
-        return text, status
+        return text, status, content_type
     raise UnsafePublicURL("too many redirects")
+
+
+def fetch_public_html(
+    url: str,
+    *,
+    timeout: float = 15.0,
+    max_redirects: int = MAX_REDIRECTS,
+    user_agent: str = "WebCrawlerPro-Watch/1.0",
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
+) -> tuple[str, int]:
+    """Compatibility wrapper returning text and status for public HTML fetches."""
+    text, status, _content_type = fetch_public_response(
+        url, timeout=timeout, max_redirects=max_redirects, user_agent=user_agent,
+        max_response_bytes=max_response_bytes)
+    return text, status

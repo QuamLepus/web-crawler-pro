@@ -83,6 +83,23 @@ def test_fetch_pins_validated_public_address_and_preserves_host(local_http):
     assert _Handler.requests == [("/pricing?q=annual", f"example.test:{local_http}")]
 
 
+def test_fetch_public_response_returns_content_type(local_http):
+    text, status, content_type = public_http.fetch_public_response(
+        f"http://example.test:{local_http}/page")
+
+    assert status == 200
+    assert "Public" in text
+    assert content_type == "text/html; charset=utf-8"
+
+
+def test_fetch_public_response_honors_custom_body_limit(local_http):
+    with pytest.raises(public_http.UnsafePublicURL, match="size limit"):
+        public_http.fetch_public_response(
+            f"http://example.test:{local_http}/large", max_response_bytes=8)
+
+    assert len(_Handler.requests) == 1
+
+
 def test_redirect_to_private_address_is_rejected_before_connection(local_http):
     _Handler.redirect_to = f"http://internal.test:{local_http}/admin"
 
