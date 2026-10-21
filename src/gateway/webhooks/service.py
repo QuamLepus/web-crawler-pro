@@ -1,7 +1,8 @@
 """Outbound webhooks: signed, retried, tenant-scoped job notifications.
 
-Event types: ``job.completed``, ``job.failed``, ``dataset.ready``,
-``quota.warning``, ``marketplace.purchase``, ``bounty.fulfilled``.
+Event types include ``job.completed``, ``job.failed``, ``dataset.ready``,
+``quota.warning``, ``marketplace.purchase``, ``bounty.fulfilled``, and
+``research.completed``, ``research.failed``, and ``research.cancelled``.
 
 Security: every delivery carries an HMAC-SHA256 signature over
 ``{timestamp}.{body}`` using the subscription's secret
@@ -31,7 +32,7 @@ EVENT_TYPES = (
     # public v1 aliases (src/api/schemas.WebhookEvent)
     "crawl.completed", "crawl.failed", "crawl.cancelled", "data.ready",
     "export.ready", "dataset.sold", "web.changed",
-    "research.completed", "research.failed",
+    "research.completed", "research.failed", "research.cancelled",
 )
 
 MAX_ATTEMPTS = 5
