@@ -60,7 +60,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
-    'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
+    'wio_studio_analytics', 'wio_studio_snapshot_create', 'wio_studio_snapshot_get',
+    'wio_watch_changes', 'wio_watch_create',
     'wio_watch_delete', 'wio_watch_list', 'wio_watch_run', 'wio_watch_snapshots',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
     'wio_workflow_get', 'wio_workflow_list', 'wio_workflow_run',
@@ -414,6 +415,37 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
     ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP Studio snapshot create tool submits a bounded result sample', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'studio-snapshot-key', fetch: async (url, init) => {
+    request = { url, method: init.method, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ snapshot_id: 'snapshot_aaaaaaaaaaaaaaaaaaaa' }),
+                        { status: 201 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'studio-snapshot-create-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_studio_snapshot_create', arguments: {
+      name: 'Solar sample', q: 'solar', rows: [{ rank: 1,
+        url: 'https://example.org/article', score: 0.8 }],
+    } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /snapshot_aaaaaaaaaaaaaaaaaaaa/);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/studio/snapshots',
+      method: 'POST',
+      body: { name: 'Solar sample', q: 'solar', sources: [], group_by: 'host', metric: 'count',
+        rows: [{ rank: 1, url: 'https://example.org/article', score: 0.8 }] },
+    });
   } finally {
     await client.close();
     await server.close();

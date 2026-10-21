@@ -14,6 +14,17 @@ function failure(error: unknown) {
     isError: true };
 }
 
+const studioSnapshotRowSchema = z.object({
+  rank: z.number().int().min(1).max(100),
+  url: z.string().url().max(2048).refine((value) => /^https?:\/\//i.test(value),
+    "result URLs must use HTTP or HTTPS"),
+  title: z.string().max(512).optional(),
+  host: z.string().max(253).optional(),
+  snippet: z.string().max(4000).optional(),
+  score: z.number().finite().optional(),
+  source: z.string().max(80).optional(),
+});
+
 const workflowStepSchema = z.object({
   step_id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).optional(),
   depends_on: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/)).max(9)
@@ -237,6 +248,20 @@ export function buildServer(client: WebIntelligenceClient) {
       groupBy: args.group_by, metric: args.metric, source: args.source,
       host: args.host, lang: args.lang, indexedFrom: args.indexed_from,
       indexedTo: args.indexed_to, limit: args.limit, offset: args.offset,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_studio_snapshot_create", "Save an immutable Data Studio result sample with up to 100 rows.", {
+    name: z.string().min(1).max(100),
+    q: z.string().min(1).max(2048),
+    sources: z.array(z.string().max(256)).max(10).optional(),
+    group_by: z.enum(["host", "source"]).optional(),
+    metric: z.enum(["count", "avg_score"]).optional(),
+    rows: z.array(studioSnapshotRowSchema).min(1).max(100),
+  }, async ({ name, q, sources, group_by, metric, rows }) => {
+    try { return result(await client.createStudioSnapshot({
+      name, q, sources, groupBy: group_by, metric, rows,
     })); }
     catch (error) { return failure(error); }
   });
