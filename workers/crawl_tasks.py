@@ -242,9 +242,9 @@ def _request_text_bounded(url: str) -> tuple[str, int, str]:
 
 
 def _plain_fetch(url: str):
-    """Fetch one URL; returns ``(html, status_code)`` with a bounded body."""
-    html, status, _content_type = _request_text_bounded(url)
-    return html, status
+    """Fetch one URL; return text, status and response content type."""
+    text, status, content_type = _request_text_bounded(url)
+    return text, status, content_type or "text/html"
 
 
 def _stealth_fetch(url: str):
@@ -351,22 +351,28 @@ def _robots_crawl_delay(url: str, cache: dict[str, object]) -> float:
         return 0.0
 
 
-def _extract_item(url: str, html: str, status: int) -> dict:
-    """Pull the fields the quality pipeline expects out of a raw response."""
+def _extract_item(url: str, html: str, status: int,
+                  content_type: str = "text/html") -> dict:
+    """Extract HTML or textual content without mislabeling other media."""
     from bs4 import BeautifulSoup
 
+    media_type = content_type.split(";", 1)[0].strip().lower()
     item = {
         "url": url,
         "status_code": status,
-        "content_type": "text/html",
+        "content_type": content_type,
         "fetched_at": _utcnow_iso(),
     }
-    soup = BeautifulSoup(html, "html.parser")
-    item["title"] = (
-        soup.title.string.strip() if soup.title and soup.title.string else "")
-    item["text"] = soup.get_text(separator=" ", strip=True)[:5000]
-    item["images"] = [urljoin(url, img["src"])
-                      for img in soup.find_all("img") if img.has_attr("src")]
+    if "html" in media_type:
+        soup = BeautifulSoup(html, "html.parser")
+        item["title"] = (
+            soup.title.string.strip() if soup.title and soup.title.string else "")
+        item["text"] = soup.get_text(separator=" ", strip=True)[:5000]
+        item["images"] = [urljoin(url, img["src"])
+                          for img in soup.find_all("img") if img.has_attr("src")]
+    elif (media_type.startswith("text/") or media_type.endswith(("+json", "+xml"))
+          or media_type in {"application/json", "application/xml"}):
+        item["text"] = html[:5000]
     return item
 
 
@@ -486,7 +492,15 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
             sleeper(delay)
         has_requested_page = True
         try:
-            html, status = fetcher(url)
+            fetched = fetcher(url)
+            if len(fetched) == 2:
+                html, status = fetched
+                content_type = "text/html"
+            elif len(fetched) == 3:
+                html, status, content_type = fetched
+                content_type = str(content_type or "text/html")
+            else:
+                raise ValueError("fetcher must return (text, status[, content_type])")
         except Exception as exc:  # noqa: BLE001 - one bad page must not kill the job
             failures.append(f"{url}: {exc}")
             logger.warning("fetch failed for %s: %s", url, exc)
@@ -499,7 +513,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
             _update_job(r, job_id, {"pages_done": pages_done,
                                     "items_collected": len(collected)})
             continue
-        item = _extract_item(url, html, status)
+        item = _extract_item(url, html, status, content_type)
         watch_id = payload.get("watch_id")
         if watch_id:
             try:
@@ -519,10 +533,11 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
         if kept is not None:
             collected.append(kept)
 
-        for link in _same_domain_links(url, html):
-            if link not in seen:
-                seen.add(link)
-                queue.append(link)
+        if "html" in content_type.lower():
+            for link in _same_domain_links(url, html):
+                if link not in seen:
+                    seen.add(link)
+                    queue.append(link)
 
         _update_job(r, job_id, {"pages_done": pages_done,
                                 "items_collected": len(collected)})
