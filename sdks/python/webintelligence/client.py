@@ -176,7 +176,11 @@ class Client:
             "max_pages": max_pages, "obey_robots": obey_robots})
 
     def get_job(self, job_id: str) -> dict[str, Any]:
-        return self._request("GET", f"jobs/{job_id}")
+        return self._request("GET", f"jobs/{quote(job_id, safe='')}")
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        """Request cooperative cancellation of a crawl job."""
+        return self._request("POST", f"jobs/{quote(job_id, safe='')}/cancel")
 
     def create_watch(self, url: str, *, interval_minutes: int = 60) -> dict[str, Any]:
         return self._request("POST", "watch", json={"url": url,

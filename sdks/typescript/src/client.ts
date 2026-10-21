@@ -137,6 +137,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `jobs/${encodeURIComponent(jobId)}`);
   }
 
+  cancelJob(jobId: string): Promise<JsonObject> {
+    return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
   createResearch(options: ResearchCreateOptions): Promise<JsonObject> {
     return this.request("POST", "research", {
       topic: options.topic, sources: options.sources ?? 5,
