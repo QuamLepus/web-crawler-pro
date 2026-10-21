@@ -118,15 +118,17 @@ export function buildServer(client: WebIntelligenceClient) {
 
   server.tool("wio_watch_changes", "Read detected text changes for a monitored page.", {
     watch_id: z.string().regex(/^watch_[a-f0-9]{20}$/),
-  }, async ({ watch_id }) => {
-    try { return result(await client.getWatchChanges(watch_id)); }
+    limit: z.number().int().min(1).max(100).optional(),
+  }, async ({ watch_id, limit }) => {
+    try { return result(await client.getWatchChanges(watch_id, limit)); }
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_watch_snapshots", "Read up to 20 retained text snapshots for a monitored page.", {
+  server.tool("wio_watch_snapshots", "Read retained text snapshots for a monitored page (maximum 20).", {
     watch_id: z.string().regex(/^watch_[a-f0-9]{20}$/),
-  }, async ({ watch_id }) => {
-    try { return result(await client.getWatchSnapshots(watch_id)); }
+    limit: z.number().int().min(1).max(20).optional(),
+  }, async ({ watch_id, limit }) => {
+    try { return result(await client.getWatchSnapshots(watch_id, limit)); }
     catch (error) { return failure(error); }
   });
 

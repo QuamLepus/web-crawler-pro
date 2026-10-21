@@ -207,12 +207,15 @@ class Client:
     def run_watch(self, watch_id: str) -> dict[str, Any]:
         return self._request("POST", f"watch/{watch_id}/run")
 
-    def watch_changes(self, watch_id: str) -> dict[str, Any]:
-        return self._request("GET", f"watch/{watch_id}/changes")
+    def watch_changes(self, watch_id: str, *, limit: int | None = None) -> dict[str, Any]:
+        params = {"limit": limit} if limit is not None else None
+        return self._request("GET", f"watch/{watch_id}/changes", params=params)
 
-    def watch_snapshots(self, watch_id: str) -> dict[str, Any]:
-        """List the latest retained text snapshots for a monitored page."""
-        return self._request("GET", f"watch/{watch_id}/snapshots")
+    def watch_snapshots(self, watch_id: str, *,
+                        limit: int | None = None) -> dict[str, Any]:
+        """List retained text snapshots, optionally limiting the count to 20."""
+        params = {"limit": limit} if limit is not None else None
+        return self._request("GET", f"watch/{watch_id}/snapshots", params=params)
 
     def delete_watch(self, watch_id: str) -> dict[str, Any]:
         """Stop a page watch; existing snapshots remain available."""

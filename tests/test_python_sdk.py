@@ -209,3 +209,21 @@ def test_watch_listing_uses_tenant_endpoint():
 
     assert result == {"items": [], "total": 0}
     assert calls == [("GET", "/api/v1/watch")]
+
+
+def test_watch_change_and_snapshot_limits_are_forwarded():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.watch_changes("watch_aaaaaaaaaaaaaaaaaaaa", limit=12)
+        client.watch_snapshots("watch_aaaaaaaaaaaaaaaaaaaa", limit=6)
+
+    assert calls == [
+        ("GET", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/changes?limit=12"),
+        ("GET", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots?limit=6"),
+    ]

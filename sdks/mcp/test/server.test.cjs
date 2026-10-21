@@ -444,6 +444,31 @@ test('MCP Studio analytics tool forwards bounded full-corpus filters', async () 
   }
 });
 
+test('MCP watch changes tool forwards the bounded result limit', async () => {
+  let requestUrl;
+  const api = new WebIntelligenceClient({ apiKey: 'watch-key', fetch: async (url) => {
+    requestUrl = url;
+    return new Response(JSON.stringify({ items: [], watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa' }),
+                        { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'watch-changes-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_watch_changes', arguments: {
+      watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa', limit: 15,
+    } });
+    assert.equal(response.isError, undefined);
+    assert.equal(requestUrl,
+      'http://localhost:8000/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/changes?limit=15');
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test('MCP watch snapshots tool retrieves the bounded tenant history', async () => {
   let requestUrl;
   const api = new WebIntelligenceClient({ apiKey: 'watch-key', fetch: async (url) => {
@@ -458,12 +483,12 @@ test('MCP watch snapshots tool retrieves the bounded tenant history', async () =
   await client.connect(clientTransport);
   try {
     const response = await client.callTool({ name: 'wio_watch_snapshots', arguments: {
-      watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa',
+      watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa', limit: 7,
     } });
     assert.equal(response.isError, undefined);
     assert.match(response.content[0].text, /baseline/);
     assert.equal(requestUrl,
-      'http://localhost:8000/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots');
+      'http://localhost:8000/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots?limit=7');
   } finally {
     await client.close();
     await server.close();

@@ -62,6 +62,21 @@ test('watch snapshot retrieval uses the tenant snapshots endpoint', async () => 
     'https://api.example/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots');
 });
 
+test('watch change and snapshot methods forward optional result limits', async () => {
+  const urls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',
+    fetch: async (url) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+    } });
+  await client.getWatchChanges('watch_aaaaaaaaaaaaaaaaaaaa', 12);
+  await client.getWatchSnapshots('watch_aaaaaaaaaaaaaaaaaaaa', 6);
+  assert.deepEqual(urls, [
+    'https://api.example/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/changes?limit=12',
+    'https://api.example/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots?limit=6',
+  ]);
+});
+
 test('watch listing uses the authenticated tenant endpoint', async () => {
   let request;
   const client = new WebIntelligenceClient({ apiKey: 'watch-key', baseUrl: 'https://api.example',

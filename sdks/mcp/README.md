@@ -9,7 +9,8 @@ Tools: `wio_ask`, `wio_research_create`, `wio_research_list`, `wio_research_stat
 `wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,
-`wio_studio_analytics`, and `wio_studio_snapshot_get`. Research cancellation
+`wio_studio_analytics`, and `wio_studio_snapshot_get`. Watch change reads accept a limit up to 100;
+snapshot reads are capped at 20. Research cancellation
 stops at source boundaries, so an active source crawl may finish first. Workflow
 tools operate on bounded sequential or dependency-DAG crawl recipes; DAG steps run serially,
 and failed steps skip descendants while independent branches continue. Workflow
