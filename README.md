@@ -379,6 +379,9 @@ skipped because robots policy denied access or could not be retrieved.
 Crawl-job cancellation is cooperative: an in-flight page is allowed to finish,
 but the worker stops before starting another page and preserves the cancelled
 state. A `crawl.cancelled` webhook is emitted when the crawl job is cancelled.
+For non-watch crawls, HTTP responses with status 400 or higher count as failed
+page attempts and are not stored as crawl items; watch jobs retain status pages
+for change monitoring.
 
 The general crawler permits a target when `robots.txt` returns a 4xx response,
 consistent with the Robots Exclusion Protocol's unavailable-file handling. A

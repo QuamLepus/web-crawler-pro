@@ -493,6 +493,12 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
             continue
 
         pages_done += 1
+        if status >= 400 and not is_watch:
+            failures.append(f"{url}: HTTP {status}")
+            logger.info("crawl page returned HTTP %s for %s", status, url)
+            _update_job(r, job_id, {"pages_done": pages_done,
+                                    "items_collected": len(collected)})
+            continue
         item = _extract_item(url, html, status)
         watch_id = payload.get("watch_id")
         if watch_id:
