@@ -194,3 +194,18 @@ def test_watch_deletion_accepts_no_content_and_uses_tenant_endpoint():
 
     assert result == {}
     assert calls == [("DELETE", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa")]
+
+
+def test_watch_listing_uses_tenant_endpoint():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.list_watches()
+
+    assert result == {"items": [], "total": 0}
+    assert calls == [("GET", "/api/v1/watch")]
