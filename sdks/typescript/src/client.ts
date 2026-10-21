@@ -59,6 +59,15 @@ export interface StudioAnalyticsOptions {
   offset?: number;
 }
 
+export interface StudioSavedQueryOptions {
+  name: string;
+  q: string;
+  limit?: number;
+  sources?: string[];
+  groupBy?: "host" | "source";
+  metric?: "count" | "avg_score";
+}
+
 export interface StudioSnapshotCreateOptions {
   name: string;
   q: string;
@@ -267,6 +276,22 @@ export class WebIntelligenceClient {
     }
     const query = params.toString();
     return this.request("GET", `studio/analytics${query ? `?${query}` : ""}`);
+  }
+
+  saveStudioQuery(options: StudioSavedQueryOptions): Promise<JsonObject> {
+    return this.request("POST", "studio/saved-queries", {
+      name: options.name, q: options.q, limit: options.limit ?? 25,
+      sources: options.sources ?? [], group_by: options.groupBy ?? "host",
+      metric: options.metric ?? "count",
+    });
+  }
+
+  listStudioQueries(page = 1, pageSize = 20): Promise<JsonObject> {
+    return this.request("GET", `studio/saved-queries?page=${page}&page_size=${pageSize}`);
+  }
+
+  deleteStudioQuery(savedId: string): Promise<JsonObject> {
+    return this.request("DELETE", `studio/saved-queries/${encodeURIComponent(savedId)}`);
   }
 
   createStudioSnapshot(options: StudioSnapshotCreateOptions): Promise<JsonObject> {

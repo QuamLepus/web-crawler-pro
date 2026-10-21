@@ -226,6 +226,29 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('Studio saved queries map fields, paginate, and handle 204 deletion', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'saved-query-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return init.method === 'DELETE' ? new Response(null, { status: 204 })
+      : new Response(JSON.stringify({ items: [], total: 0 }),
+        { status: init.method === 'POST' ? 201 : 200 });
+  } });
+  await client.saveStudioQuery({ name: 'Solar', q: 'solar panels', limit: 30,
+    sources: ['news'], groupBy: 'source', metric: 'avg_score' });
+  await client.listStudioQueries(2, 7);
+  assert.deepEqual(await client.deleteStudioQuery('saved/a'), {});
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/studio/saved-queries', method: 'POST',
+      body: { name: 'Solar', q: 'solar panels', limit: 30, sources: ['news'],
+        group_by: 'source', metric: 'avg_score' } },
+    { url: 'http://localhost:8000/api/v1/studio/saved-queries?page=2&page_size=7',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/studio/saved-queries/saved%2Fa',
+      method: 'DELETE', body: undefined },
+  ]);
+});
+
 test('Studio snapshots use bounded row payloads and handle 204 deletion', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'studio-key', fetch: async (url, init) => {

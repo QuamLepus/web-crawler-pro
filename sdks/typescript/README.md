@@ -19,7 +19,7 @@ console.log(job.research_id, answer.citations);
 
 Available methods cover indexed `ask`, crawl create/list/status/cancel, research create/list/status/cancel,
 watch list/create/run/delete/change and retained snapshot retrieval, workflow create/list/get/update/delete,
-schedule/run/history/status/cancel, and Data Studio aggregate/snapshot operations.
+schedule/run/history/status/cancel, and Data Studio aggregate, saved-query, and snapshot operations.
 Watch change/snapshot reads accept optional limits (up to 100 changes or 20 snapshots).
 Workflow step IDs and `dependsOn` dependencies enable bounded DAG branching; nodes
 still run serially, failed nodes skip descendants, and independent branches continue.
