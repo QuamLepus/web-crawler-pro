@@ -4,7 +4,7 @@ This stdio MCP server exposes Web Intelligence OS APIs as tools for MCP-compatib
 clients. Requires Node.js 18+, a reachable Web Intelligence OS API, and an API
 key with appropriate permissions.
 
-Tools: `wio_ask`, `wio_research_create`, `wio_research_status`,
+Tools: `wio_ask`, `wio_research_create`, `wio_research_list`, `wio_research_status`,
 `wio_crawl_create`, `wio_crawl_list`, `wio_crawl_status`, `wio_crawl_cancel`, `wio_watch_create`, `wio_watch_changes`, `wio_watch_snapshots`,
 `wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,

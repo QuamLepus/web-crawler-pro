@@ -73,6 +73,19 @@ test('research request uses stable snake-case API fields', async () => {
   assert.equal(parsed.sources, 3);
 });
 
+test('research listing forwards pagination to the tenant endpoint', async () => {
+  let requestUrl;
+  const client = new WebIntelligenceClient({ apiKey: 'research-key',
+    baseUrl: 'https://api.example', fetch: async (url) => {
+      requestUrl = url;
+      return new Response(JSON.stringify({ items: [], total: 0, page: 2, page_size: 8 }),
+                          { status: 200 });
+    } });
+  const result = await client.listResearch(2, 8);
+  assert.equal(result.page, 2);
+  assert.equal(requestUrl, 'https://api.example/api/v1/research?page=2&page_size=8');
+});
+
 test('non-success response becomes a typed error without disclosing key', async () => {
   const client = new WebIntelligenceClient({ apiKey: 'secret-token', fetch: async () =>
     new Response(JSON.stringify({ error: { message: 'authentication required' } }), { status: 401 }) });

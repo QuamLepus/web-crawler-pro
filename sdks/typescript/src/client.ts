@@ -161,6 +161,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `research/${encodeURIComponent(researchId)}`);
   }
 
+  listResearch(page = 1, pageSize = 20): Promise<JsonObject> {
+    return this.request("GET", `research?page=${page}&page_size=${pageSize}`);
+  }
+
   createWatch(options: WatchCreateOptions): Promise<JsonObject> {
     return this.request("POST", "watch", {
       url: options.url, interval_minutes: options.intervalMinutes ?? 60,

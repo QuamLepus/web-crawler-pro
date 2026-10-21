@@ -52,6 +52,14 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_research_list", "List research jobs belonging to the authenticated tenant.", {
+    page: z.number().int().min(1).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+  }, async ({ page, page_size }) => {
+    try { return result(await client.listResearch(page, page_size)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_crawl_create", "Queue a crawl job. Robots.txt is obeyed by default.", {
     url: z.string().url(), max_pages: z.number().int().min(1).max(1000).optional(),
   }, async ({ url, max_pages }) => {
