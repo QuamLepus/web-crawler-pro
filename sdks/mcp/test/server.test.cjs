@@ -60,7 +60,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
-    'wio_studio_analytics', 'wio_studio_snapshot_create', 'wio_studio_snapshot_delete',
+    'wio_studio_analytics', 'wio_studio_query_delete', 'wio_studio_query_list',
+    'wio_studio_query_save', 'wio_studio_snapshot_create', 'wio_studio_snapshot_delete',
     'wio_studio_snapshot_get', 'wio_studio_snapshot_list',
     'wio_watch_changes', 'wio_watch_create',
     'wio_watch_delete', 'wio_watch_list', 'wio_watch_run', 'wio_watch_snapshots',
@@ -415,6 +416,51 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP Studio saved-query tools save, paginate, and delete tenant queries', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'studio-query-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    if (init.method === 'DELETE') return new Response(null, { status: 204 });
+    return new Response(JSON.stringify(init.method === 'POST'
+      ? { saved_id: 'saved_aaaaaaaaaaaaaaaaaaaa' } : { items: [], total: 0 }),
+    { status: init.method === 'POST' ? 201 : 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'studio-query-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const saved = await client.callTool({ name: 'wio_studio_query_save', arguments: {
+      name: 'Solar', q: 'solar panels', limit: 30, sources: ['news'],
+      group_by: 'source', metric: 'avg_score',
+    } });
+    const listed = await client.callTool({ name: 'wio_studio_query_list', arguments: {
+      page: 2, page_size: 7,
+    } });
+    const deleted = await client.callTool({ name: 'wio_studio_query_delete', arguments: {
+      saved_id: 'saved_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    assert.equal(saved.isError, undefined);
+    assert.equal(listed.isError, undefined);
+    assert.equal(deleted.isError, undefined);
+    assert.match(saved.content[0].text, /saved_aaaaaaaaaaaaaaaaaaaa/);
+    assert.equal(deleted.content[0].text, '{}');
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/studio/saved-queries', method: 'POST',
+        body: { name: 'Solar', q: 'solar panels', limit: 30, sources: ['news'],
+          group_by: 'source', metric: 'avg_score' } },
+      { url: 'http://localhost:8000/api/v1/studio/saved-queries?page=2&page_size=7',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/studio/saved-queries/saved_aaaaaaaaaaaaaaaaaaaa',
+        method: 'DELETE', body: undefined },
     ]);
   } finally {
     await client.close();

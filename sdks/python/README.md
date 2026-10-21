@@ -49,5 +49,6 @@ snapshots up to 20, and stopping a watch retains its snapshots. Snapshot history
 capped at 20 versions, and
 text-only. `client.research` supports `create`, `get`, paginated `list`, and
 cooperative `cancel`; cancellation stops at the next source boundary, so an
-active source crawl may finish first. For other API methods, see `Client` and
-`ResearchResource` in the package.
+active source crawl may finish first. The client also exposes `save_studio_query`,
+`list_studio_queries`, and `delete_studio_query` for tenant-scoped saved Data Studio queries.
+For other API methods, see `Client` and `ResearchResource` in the package.

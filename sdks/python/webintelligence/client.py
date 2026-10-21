@@ -217,6 +217,26 @@ class Client:
         params = {"limit": limit} if limit is not None else None
         return self._request("GET", f"watch/{watch_id}/snapshots", params=params)
 
+    def save_studio_query(self, name: str, q: str, *, limit: int = 25,
+                          sources: list[str] | None = None,
+                          group_by: str = "host", metric: str = "count") -> dict[str, Any]:
+        """Save a bounded Data Studio query for the authenticated tenant."""
+        return self._request("POST", "studio/saved-queries", json={
+            "name": name, "q": q, "limit": limit, "sources": sources or [],
+            "group_by": group_by, "metric": metric,
+        })
+
+    def list_studio_queries(self, *, page: int = 1,
+                            page_size: int = 20) -> dict[str, Any]:
+        """List saved Data Studio queries belonging to the authenticated tenant."""
+        return self._request("GET", "studio/saved-queries", params={
+            "page": page, "page_size": page_size,
+        })
+
+    def delete_studio_query(self, saved_id: str) -> dict[str, Any]:
+        """Delete one saved Data Studio query belonging to the authenticated tenant."""
+        return self._request("DELETE", f"studio/saved-queries/{quote(saved_id, safe='')}")
+
     def delete_watch(self, watch_id: str) -> dict[str, Any]:
         """Stop a page watch; existing snapshots remain available."""
         return self._request("DELETE", f"watch/{quote(watch_id, safe='')}")

@@ -234,6 +234,34 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_studio_query_save", "Save a bounded Data Studio query for the authenticated tenant.", {
+    name: z.string().min(1).max(100), q: z.string().min(1).max(2048),
+    limit: z.number().int().min(1).max(100).optional(),
+    sources: z.array(z.string().max(80)).max(10).optional(),
+    group_by: z.enum(["host", "source"]).optional(),
+    metric: z.enum(["count", "avg_score"]).optional(),
+  }, async ({ name, q, limit, sources, group_by, metric }) => {
+    try { return result(await client.saveStudioQuery({
+      name, q, limit, sources, groupBy: group_by, metric,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_studio_query_list", "List saved Data Studio queries belonging to the authenticated tenant.", {
+    page: z.number().int().min(1).max(10000).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+  }, async ({ page, page_size }) => {
+    try { return result(await client.listStudioQueries(page, page_size)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_studio_query_delete", "Delete a saved Data Studio query belonging to the authenticated tenant.", {
+    saved_id: z.string().regex(/^saved_[a-f0-9]{20}$/),
+  }, async ({ saved_id }) => {
+    try { return result(await client.deleteStudioQuery(saved_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_studio_analytics", "Aggregate the full indexed corpus using safe dimensions and filters; returns grouped values, not document contents.", {
     group_by: z.enum(["source", "host", "lang", "snapshot", "day"]).optional(),
     metric: z.enum(["count", "avg_authority", "avg_quality", "avg_body_chars"]).optional(),

@@ -227,3 +227,35 @@ def test_watch_change_and_snapshot_limits_are_forwarded():
         ("GET", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/changes?limit=12"),
         ("GET", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa/snapshots?limit=6"),
     ]
+
+
+def test_studio_saved_query_methods_follow_tenant_api_contract():
+    calls = []
+
+    def handler(request):
+        calls.append({
+            "method": request.method,
+            "path": request.url.raw_path.decode(),
+            "body": request.read().decode() if request.content else None,
+        })
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(201 if request.method == "POST" else 200,
+                              json={"items": [], "total": 0})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.save_studio_query("Solar", "solar panels", limit=30, sources=["news"],
+                                 group_by="source", metric="avg_score")
+        client.list_studio_queries(page=2, page_size=7)
+        assert client.delete_studio_query("saved/a") == {}
+
+    assert calls == [
+        {"method": "POST", "path": "/api/v1/studio/saved-queries",
+         "body": '{"name":"Solar","q":"solar panels","limit":30,"sources":["news"],'
+                 '"group_by":"source","metric":"avg_score"}'},
+        {"method": "GET", "path": "/api/v1/studio/saved-queries?page=2&page_size=7",
+         "body": None},
+        {"method": "DELETE", "path": "/api/v1/studio/saved-queries/saved%2Fa",
+         "body": None},
+    ]
