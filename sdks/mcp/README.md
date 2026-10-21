@@ -4,13 +4,14 @@ This stdio MCP server exposes Web Intelligence OS APIs as tools for MCP-compatib
 clients. Requires Node.js 18+, a reachable Web Intelligence OS API, and an API
 key with appropriate permissions.
 
-Tools: `wio_ask`, `wio_research_create`, `wio_research_list`, `wio_research_status`,
+Tools: `wio_ask`, `wio_research_create`, `wio_research_list`, `wio_research_status`, `wio_research_cancel`,
 `wio_crawl_create`, `wio_crawl_list`, `wio_crawl_status`, `wio_crawl_cancel`, `wio_watch_create`, `wio_watch_changes`, `wio_watch_snapshots`,
 `wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,
-`wio_studio_analytics`, and `wio_studio_snapshot_get`. Workflow tools operate on
-bounded sequential or dependency-DAG crawl recipes; DAG steps run serially,
+`wio_studio_analytics`, and `wio_studio_snapshot_get`. Research cancellation
+stops at source boundaries, so an active source crawl may finish first. Workflow
+tools operate on bounded sequential or dependency-DAG crawl recipes; DAG steps run serially,
 and failed steps skip descendants while independent branches continue. Workflow
 cancellation takes effect after the active crawl step completes. Creation can optionally schedule runs (minimum 60 minutes),
 which requires Celery Beat and workflow workers to be running.
