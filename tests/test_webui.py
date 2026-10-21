@@ -284,7 +284,7 @@ def test_webhook_subscribe_then_render(signed_in):
         data={
             "url": "https://hooks.example.test/wcp",
             "description": "etl pipeline",
-            "events": ["crawl.completed"],
+            "events": ["crawl.completed", "crawl.cancelled"],
         },
         follow_redirects=False,
     )
@@ -294,6 +294,7 @@ def test_webhook_subscribe_then_render(signed_in):
     page = signed_in.get("/app/settings")
     assert page.status_code == 200
     assert "hooks.example.test" in page.text
+    assert "crawl.cancelled" in page.text
 
 
 def test_webhook_event_names_match_the_api_schema():

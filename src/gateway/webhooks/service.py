@@ -29,7 +29,7 @@ EVENT_TYPES = (
     "job.completed", "job.failed", "dataset.ready",
     "quota.warning", "marketplace.purchase", "bounty.fulfilled",
     # public v1 aliases (src/api/schemas.WebhookEvent)
-    "crawl.completed", "crawl.failed", "data.ready",
+    "crawl.completed", "crawl.failed", "crawl.cancelled", "data.ready",
     "export.ready", "dataset.sold", "web.changed",
     "research.completed", "research.failed",
 )

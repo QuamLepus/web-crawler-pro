@@ -378,7 +378,7 @@ skipped because robots policy denied access or could not be retrieved.
 
 Crawl-job cancellation is cooperative: an in-flight page is allowed to finish,
 but the worker stops before starting another page and preserves the cancelled
-state. Cancelled jobs do not emit a crawl-completed or crawl-failed webhook.
+state. A `crawl.cancelled` webhook is emitted when the crawl job is cancelled.
 
 The general crawler permits a target when `robots.txt` returns a 4xx response,
 consistent with the Robots Exclusion Protocol's unavailable-file handling. A

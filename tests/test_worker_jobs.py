@@ -148,6 +148,11 @@ def test_run_crawl_stops_after_current_page_when_cancelled(crawl_env, monkeypatc
     redis.hset(job_key, mapping={"state": "running"})
     monkeypatch.setattr(wt, "_store_item", lambda item: item)
     fetched: list[str] = []
+    events: list[str] = []
+    monkeypatch.setattr(
+        wt, "_emit",
+        lambda tenant, event, data, redis_client=None: events.append(event),
+    )
 
     def fetch(url: str):
         fetched.append(url)
@@ -156,13 +161,14 @@ def test_run_crawl_stops_after_current_page_when_cancelled(crawl_env, monkeypatc
 
     result = wt.run_crawl(
         {"url": "https://example.com/start", "max_pages": 3,
-         "tenant": "", "job_id": job_id, "obey_robots": False},
+         "tenant": "tenant-a", "job_id": job_id, "obey_robots": False},
         redis_client=redis, fetcher=fetch)
 
     assert fetched == ["https://example.com/start"]
     assert result["state"] == "cancelled"
     assert result["pages_done"] == 1
     assert redis.hget(job_key, "state") == "cancelled"
+    assert events == ["crawl.cancelled"]
 
     wt._update_job(redis, job_id, {"state": "completed"})
     assert redis.hget(job_key, "state") == "cancelled"

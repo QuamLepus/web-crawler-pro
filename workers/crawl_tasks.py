@@ -494,9 +494,9 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
         "items_collected": len(collected), "data_sha256": digest,
         "error": "; ".join(failures)[:500],
     })
-    if state != "cancelled":
-        _emit(tenant, "crawl.failed" if state == "failed" else "crawl.completed",
-              result, redis_client=r)
+    event = {"failed": "crawl.failed", "cancelled": "crawl.cancelled"}.get(
+        state, "crawl.completed")
+    _emit(tenant, event, result, redis_client=r)
     return result
 
 
