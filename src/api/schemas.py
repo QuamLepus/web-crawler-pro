@@ -311,6 +311,7 @@ class DiscoveryPreviewOut(BaseModel):
 class WebhookEvent(str, Enum):
     crawl_completed = "crawl.completed"
     crawl_failed = "crawl.failed"
+    crawl_cancelled = "crawl.cancelled"
     data_ready = "data.ready"
     export_ready = "export.ready"
     quota_warning = "quota.warning"

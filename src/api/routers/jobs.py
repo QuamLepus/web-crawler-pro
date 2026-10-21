@@ -117,7 +117,8 @@ async def submit_crawl(body: CrawlJobCreate, request: Request, ctx: CtxDep,
     if body.webhook_url:
         try:
             svc.webhooks.subscribe(tenant, body.webhook_url,
-                                   ["crawl.completed", "crawl.failed", "data.ready"])
+                                   ["crawl.completed", "crawl.failed",
+                                    "crawl.cancelled", "data.ready"])
         except ValueError:
             pass  # invalid URL — job still runs; client can fix subscription
 

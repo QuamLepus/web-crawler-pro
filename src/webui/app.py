@@ -1809,6 +1809,7 @@ def webhook_events() -> list[str]:
         return [
             "crawl.completed",
             "crawl.failed",
+            "crawl.cancelled",
             "data.ready",
             "export.ready",
             "quota.warning",
