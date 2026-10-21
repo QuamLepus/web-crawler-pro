@@ -59,6 +59,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_crawl_status", "Get a crawl job's state and progress.", {
+    job_id: z.string().regex(/^job_[a-f0-9]{20}$/),
+  }, async ({ job_id }) => {
+    try { return result(await client.getJob(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_crawl_cancel", "Request cooperative cancellation of a crawl job; an active page may finish first.", {
     job_id: z.string().regex(/^job_[a-f0-9]{20}$/),
   }, async ({ job_id }) => {
