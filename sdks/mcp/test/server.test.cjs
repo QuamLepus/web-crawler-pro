@@ -57,7 +57,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
     'wio_studio_analytics', 'wio_studio_snapshot_get', 'wio_watch_changes', 'wio_watch_create',
-    'wio_watch_snapshots',
+    'wio_watch_delete', 'wio_watch_snapshots',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
     'wio_workflow_get', 'wio_workflow_list', 'wio_workflow_run',
     'wio_workflow_runs', 'wio_workflow_status', 'wio_workflow_update',
@@ -136,6 +136,33 @@ test('MCP research cancellation tool forwards a validated research id', async ()
     assert.deepEqual(request, {
       url: 'http://localhost:8000/api/v1/research/research_aaaaaaaaaaaaaaaaaaaa/cancel',
       method: 'POST',
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP watch delete tool stops a validated watch and handles 204', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'watch-delete-key', fetch: async (url, init) => {
+    request = { url, method: init.method };
+    return new Response(null, { status: 204 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'watch-delete-tool-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_watch_delete', arguments: {
+      watch_id: 'watch_aaaaaaaaaaaaaaaaaaaa',
+    } });
+    assert.equal(response.isError, undefined);
+    assert.equal(response.content[0].text, '{}');
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa',
+      method: 'DELETE',
     });
   } finally {
     await client.close();

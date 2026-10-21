@@ -179,3 +179,18 @@ def test_research_cancellation_uses_encoded_tenant_endpoint():
 
     assert result["status"] == "cancelled"
     assert calls == [("POST", "/api/v1/research/research_aaaaaaaaaaaaaaaaaaaa/cancel")]
+
+
+def test_watch_deletion_accepts_no_content_and_uses_tenant_endpoint():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(204)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.delete_watch("watch_aaaaaaaaaaaaaaaaaaaa")
+
+    assert result == {}
+    assert calls == [("DELETE", "/api/v1/watch/watch_aaaaaaaaaaaaaaaaaaaa")]

@@ -118,6 +118,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_watch_delete", "Stop a monitored page watch; retained snapshots remain available.", {
+    watch_id: z.string().regex(/^watch_[a-f0-9]{20}$/),
+  }, async ({ watch_id }) => {
+    try { return result(await client.deleteWatch(watch_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_workflow_create", "Create a bounded workflow with sequential defaults or explicit DAG dependencies (up to 10 steps; execution is serial).", {
     name: z.string().min(1).max(100),
     steps: z.array(workflowStepSchema).min(1).max(10),
