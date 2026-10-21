@@ -20,8 +20,8 @@
 <div class="grid g-main">
   <section class="card">
     <div class="card-head"><h2>Recent research jobs</h2></div>
-    {% if jobs %}<div class="table-wrap"><table class="data"><thead><tr><th>Topic</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead><tbody>
-      {% for job in jobs %}<tr><td><a href="/app/research/agent?research_id={{ job.research_id }}">{{ job.topic }}</a></td><td>{{ job.stage }}</td><td><span class="badge">{{ job.status }}</span></td><td>{{ job.created_at }}</td></tr>{% endfor %}
+    {% if jobs %}<div class="table-wrap"><table class="data"><thead><tr><th>Topic</th><th>Stage</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+      {% for job in jobs %}<tr><td><a href="/app/research/agent?research_id={{ job.research_id }}">{{ job.topic }}</a></td><td>{{ job.stage }}</td><td><span class="badge">{{ job.status }}</span></td><td>{{ job.created_at }}</td><td>{% if job.status in ['queued', 'running'] %}<form method="post" action="/app/research/agent/{{ job.research_id }}/cancel" onsubmit="return confirm('Cancel this research job? An active source crawl may finish first.');"><button class="btn btn-sm" type="submit">Cancel</button></form>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="empty"><h3>No research jobs yet</h3><p>Submit a topic to start.</p></div>{% endif %}
   </section>
   <section class="card">
@@ -39,7 +39,8 @@
         </article>{% else %}<div class="empty"><p>No source-supported excerpts were extracted.</p></div>{% endfor %}
       </div>
     {% elif selected and selected.get('error') %}<div class="alert danger m-2">{{ selected.error }}</div>
-    {% elif selected %}<div class="card-pad" data-research-poll="{{ selected.research_id }}"><div class="skeleton" style="height:14px;width:55%"></div><p class="mt-2">Stage: {{ selected.stage }} · {{ selected.progress }}%</p><progress class="mt-1" max="100" value="{{ selected.progress }}" aria-label="Research progress">{{ selected.progress }}%</progress><p class="tiny muted mt-2">Stages: {% for name, state in selected.stages.items() %}{{ name }} {{ state }}{% if not loop.last %} · {% endif %}{% endfor %}</p></div>
+    {% elif selected and selected.get('status') in ['completed', 'failed', 'cancelled'] %}<div class="card-pad"><p>Status: <span class="badge">{{ selected.status }}</span></p>{% if selected.get('error') %}<div class="alert danger mt-2">{{ selected.error }}</div>{% elif selected.status == 'cancelled' %}<p class="tiny muted mt-2">Research was cancelled. A source crawl active at cancellation time may have finished.</p>{% endif %}</div>
+    {% elif selected %}<div class="card-pad" data-research-poll="{{ selected.research_id }}"><div class="skeleton" style="height:14px;width:55%"></div><p class="mt-2">Stage: {{ selected.stage }} · {{ selected.progress }}%</p><progress class="mt-1" max="100" value="{{ selected.progress }}" aria-label="Research progress">{{ selected.progress }}%</progress><p class="tiny muted mt-2">Stages: {% for name, state in selected.stages.items() %}{{ name }} {{ state }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% if selected.status in ['queued', 'running'] %}<form method="post" action="/app/research/agent/{{ selected.research_id }}/cancel" class="mt-2" onsubmit="return confirm('Cancel this research job? An active source crawl may finish first.');"><button class="btn btn-secondary" type="submit">Cancel research</button></form>{% endif %}</div>
     {% else %}<div class="empty"><h3>Choose a report</h3><p>Select a research job to inspect its status and citations.</p></div>{% endif %}
   </section>
 </div>
@@ -54,7 +55,7 @@
    try {
      const response = await fetch('/app/poll/research/' + encodeURIComponent(id), {headers: {'Accept':'application/json'}});
      const job = await response.json();
-     if (job.status === 'completed' || job.status === 'failed') location.reload();
+     if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') location.reload();
      else setTimeout(refresh, 3000);
    } catch (_) { setTimeout(refresh, 5000); }
  };
