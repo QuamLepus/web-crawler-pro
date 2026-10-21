@@ -266,10 +266,22 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_studio_snapshot_list", "List Data Studio result snapshots saved by the authenticated tenant.", {}, async () => {
+    try { return result(await client.listStudioSnapshots()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_studio_snapshot_get", "Retrieve an immutable bounded Data Studio result snapshot.", {
     snapshot_id: z.string().regex(/^snapshot_[a-f0-9]{20}$/),
   }, async ({ snapshot_id }) => {
     try { return result(await client.getStudioSnapshot(snapshot_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_studio_snapshot_delete", "Delete a saved Data Studio result snapshot belonging to the authenticated tenant.", {
+    snapshot_id: z.string().regex(/^snapshot_[a-f0-9]{20}$/),
+  }, async ({ snapshot_id }) => {
+    try { return result(await client.deleteStudioSnapshot(snapshot_id)); }
     catch (error) { return failure(error); }
   });
 
