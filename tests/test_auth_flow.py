@@ -146,6 +146,10 @@ def test_full_flow_signup_keys_jobs_graphql(client):
     key2 = make_key(client, tok2["access_token"], name="k2")
     r = client.get(f"/v1/jobs/{job_id}", headers={"X-API-Key": key2})
     assert r.status_code == 404
+    r = client.post(f"/v1/jobs/{job_id}/cancel", headers={"X-API-Key": key2})
+    assert r.status_code == 404
+    assert client.app.state.services.redis.hget(f"wcp:v1:job:{job_id}", "state") in (
+        b"queued", "queued")
 
     # 5. GraphQL viewer + jobs via API key
     r = client.post("/graphql", headers={"X-API-Key": api_key},
