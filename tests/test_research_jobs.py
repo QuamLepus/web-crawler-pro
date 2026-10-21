@@ -77,10 +77,17 @@ def test_research_job_list_is_paginated_tenant_scoped_and_omits_reports():
     assert [item["research_id"] for item in second_page.json()["items"]] == [second_id]
 
 
-def test_research_cancellation_is_cooperative_and_tenant_scoped():
+def test_research_cancellation_is_cooperative_and_tenant_scoped(monkeypatch):
     client = _client()
+    events = []
+    monkeypatch.setattr(client.app.state.services.webhooks, "emit",
+                        lambda tenant, event, data: events.append((tenant, event, data)))
     first = _key(client, "research-cancel-one@example.test")
     second = _key(client, "research-cancel-two@example.test")
+    expected_tenant = client.app.state.services.api_keys.lookup(first["X-API-Key"]).tenant
+    subscription = client.app.state.services.webhooks.subscribe(
+        expected_tenant, "https://hooks.example/research", ["research.cancelled"])
+    assert "research.cancelled" in subscription.events
     created = client.post("/api/v1/research", headers=first, json={
         "topic": "Cancelable research job", "sources": 2,
         "max_pages_per_source": 2})
@@ -97,6 +104,12 @@ def test_research_cancellation_is_cooperative_and_tenant_scoped():
     assert cancelled.json()["stage"] == "cancelled"
     assert client.get(f"/api/v1/research/{research_id}", headers=first).json()["status"] == "cancelled"
     assert client.post(f"/api/v1/research/{research_id}/cancel", headers=first).status_code == 409
+    assert len(events) == 1
+    event_tenant, event_name, event_data = events[0]
+    assert event_tenant == expected_tenant
+    assert event_name == "research.cancelled"
+    assert event_data == {"research_id": research_id,
+                          "topic": "Cancelable research job"}
 
 
 def test_research_report_console_is_authenticated():

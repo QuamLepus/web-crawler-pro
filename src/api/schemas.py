@@ -321,6 +321,7 @@ class WebhookEvent(str, Enum):
     web_changed = "web.changed"
     research_completed = "research.completed"
     research_failed = "research.failed"
+    research_cancelled = "research.cancelled"
 
 
 class WebhookCreate(BaseModel):

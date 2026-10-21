@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -15,6 +16,7 @@ from redis.exceptions import WatchError
 from src.api.routers.jobs import CtxDep
 from src.compute.scheduler import JobPriority, JobSpec
 
+logger = logging.getLogger("wcp.api.research")
 router = APIRouter(prefix="/research", tags=["research"])
 JOB = "wcp:v1:research:{research_id}"
 TENANT_JOBS = "wcp:v1:research:tenant:{tenant}"
@@ -144,8 +146,16 @@ async def cancel_research(research_id: str, ctx: CtxDep, request: Request) -> di
     try:
         request.app.state.services.scheduler.mark(research_id, "cancelled",
                                                   cancelled_by=tenant)
-    except Exception:
-        pass  # persisted research cancellation remains authoritative
+    except Exception as exc:
+        logger.warning("could not mark research scheduler job %s cancelled: %s",
+                       research_id, exc)
+    try:
+        request.app.state.services.webhooks.emit(
+            tenant, "research.cancelled",
+            {"research_id": research_id, "topic": record.get("topic", "")})
+    except Exception as exc:
+        logger.warning("research cancellation webhook failed for %s: %s",
+                       research_id, exc)
     return record
 
 
