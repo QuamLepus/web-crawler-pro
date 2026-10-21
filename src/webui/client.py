@@ -212,6 +212,9 @@ class Api:
     def research(self, research_id: str) -> Any:
         return self.get(f"/api/v1/research/{research_id}")
 
+    def research_cancel(self, research_id: str) -> Any:
+        return self.post(f"/api/v1/research/{research_id}/cancel")
+
     # -- monitoring -------------------------------------------------------- #
     def watches(self) -> Any:
         return self.get("/api/v1/watch")

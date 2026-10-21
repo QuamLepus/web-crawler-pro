@@ -1248,7 +1248,21 @@ async def research_agent_create(request: Request, topic: str = Form("", max_leng
     if not result.ok:
         return _redirect("/app/research/agent", result.error, "danger")
     return _redirect("/app/research/agent?research_id=" + result.get("research_id", ""),
-                      "Research job queued", "ok")
+                     "Research job queued", "ok")
+
+
+@router.post("/app/research/agent/{research_id}/cancel", response_class=HTMLResponse,
+             name="research_agent_cancel")
+async def research_agent_cancel(request: Request, research_id: str):
+    api, _me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.research_cancel(research_id)
+    if not result.ok:
+        return _redirect("/app/research/agent?research_id=" + research_id,
+                         result.error, "danger")
+    return _redirect("/app/research/agent?research_id=" + research_id,
+                     "Cancellation requested; the active source may finish first", "ok")
 
 
 @router.get("/app/poll/research/{research_id}", name="poll_research")
