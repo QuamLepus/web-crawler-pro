@@ -175,6 +175,13 @@ class Client:
         return self._request("POST", "jobs/crawl", json={"url": url,
             "max_pages": max_pages, "obey_robots": obey_robots})
 
+    def list_jobs(self, *, page: int = 1, page_size: int = 20,
+                  state: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if state is not None:
+            params["state"] = state
+        return self._request("GET", "jobs", params=params)
+
     def get_job(self, job_id: str) -> dict[str, Any]:
         return self._request("GET", f"jobs/{quote(job_id, safe='')}")
 

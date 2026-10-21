@@ -149,3 +149,18 @@ def test_crawl_job_cancellation_uses_encoded_tenant_endpoint():
 
     assert result["state"] == "cancelled"
     assert calls == [("POST", "/api/v1/jobs/job%2Fa/cancel")]
+
+
+def test_crawl_job_listing_forwards_pagination_and_state_filter():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path, request.url.query.decode()))
+        return httpx.Response(200, json={"items": [], "total": 0, "page": 2, "page_size": 7})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.list_jobs(page=2, page_size=7, state="running")
+
+    assert result["page"] == 2
+    assert calls == [("GET", "/api/v1/jobs", "page=2&page_size=7&state=running")]

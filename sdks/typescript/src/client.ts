@@ -25,6 +25,8 @@ export interface AskOptions {
   topK?: number;
 }
 
+export type CrawlJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
+
 export interface ResearchCreateOptions {
   topic: string;
   sources?: number;
@@ -131,6 +133,12 @@ export class WebIntelligenceClient {
   createCrawl(url: string, options: { maxPages?: number; obeyRobots?: boolean } = {}): Promise<JsonObject> {
     return this.request("POST", "jobs/crawl", { url,
       max_pages: options.maxPages ?? 10, obey_robots: options.obeyRobots ?? true });
+  }
+
+  listJobs(page = 1, pageSize = 20, state?: CrawlJobState): Promise<JsonObject> {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (state !== undefined) params.set("state", state);
+    return this.request("GET", `jobs?${params.toString()}`);
   }
 
   getJob(jobId: string): Promise<JsonObject> {
