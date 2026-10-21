@@ -16,10 +16,14 @@ test('MCP ask tool forwards safely to the API client and returns citations', asy
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const response = await client.callTool({ name: 'wio_ask', arguments: { question: 'what is known?' } });
+  const response = await client.callTool({ name: 'wio_ask', arguments: {
+    question: 'what is known?', max_pages: 30, max_seconds: 120, top_k: 4,
+  } });
   assert.equal(request.url, 'http://localhost:8000/api/v1/ask');
   assert.equal(request.headers['X-API-Key'], 'test-key');
-  assert.equal(request.body.question, 'what is known?');
+  assert.deepEqual(request.body, {
+    question: 'what is known?', budget: { max_pages: 30, max_seconds: 120 }, top_k: 4,
+  });
   assert.equal(response.isError, undefined);
   assert.match(response.content[0].text, /source\.example/);
   await client.close();

@@ -30,8 +30,11 @@ export function buildServer(client: WebIntelligenceClient) {
     question: z.string().min(3).max(4096),
     max_pages: z.number().int().min(1).max(500).optional(),
     max_seconds: z.number().int().min(1).max(3600).optional(),
-  }, async ({ question, max_pages, max_seconds }) => {
-    try { return result(await client.ask(question, { maxPages: max_pages, maxSeconds: max_seconds })); }
+    top_k: z.number().int().min(1).max(20).optional(),
+  }, async ({ question, max_pages, max_seconds, top_k }) => {
+    try { return result(await client.ask(question, {
+      maxPages: max_pages, maxSeconds: max_seconds, topK: top_k,
+    })); }
     catch (error) { return failure(error); }
   });
 
