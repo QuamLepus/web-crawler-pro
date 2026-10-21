@@ -191,3 +191,23 @@ def test_run_crawl_does_not_start_a_pre_cancelled_job(crawl_env):
     assert result["state"] == "cancelled"
     assert result["pages_done"] == 0
     assert redis.hget(job_key, "state") == "cancelled"
+
+
+def test_run_crawl_does_not_store_http_error_pages(crawl_env, monkeypatch):
+    wt, redis = crawl_env
+    monkeypatch.setattr(
+        wt, "_store_item",
+        lambda _item: pytest.fail("HTTP error page must not be stored"),
+    )
+
+    result = wt.run_crawl(
+        {"url": "https://example.com/missing", "max_pages": 1,
+         "tenant": "", "job_id": "job_http_error", "obey_robots": False},
+        redis_client=redis,
+        fetcher=lambda _url: ("<html><title>Not found</title></html>", 404),
+    )
+
+    assert result["pages_done"] == 1
+    assert result["items"] == 0
+    assert result["failures"] == ["https://example.com/missing: HTTP 404"]
+    assert redis.hget("wcp:v1:job:job_http_error", "state") == "failed"
