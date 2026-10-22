@@ -191,20 +191,29 @@ class MarketplaceService:
             raise MarketplaceError("dataset not found")
         if lst.seller_tenant == buyer:
             raise MarketplaceError("sellers cannot review their own dataset")
-        verified = self.r.exists(f"mkt:purchase-index:{buyer}") and \
-            dataset_id in {x.decode() if isinstance(x, bytes) else x
-                           for x in self.r.smembers(f"mkt:buyers:{dataset_id}")}
+        buyers = {x.decode() if isinstance(x, bytes) else x
+                  for x in self.r.smembers(f"mkt:buyers:{dataset_id}")}
+        if buyer not in buyers:
+            raise MarketplaceError("purchase required to review dataset")
+
         rid = uuid.uuid4().hex[:12]
+        reviewer_key = f"mkt:reviewer:{dataset_id}:{buyer}"
+        if not self.r.set(reviewer_key, rid, nx=True):
+            raise MarketplaceError("buyer has already reviewed this dataset")
         rev = {"review_id": rid, "dataset_id": dataset_id, "buyer_tenant": buyer,
                "rating": int(rating), "comment": comment,
-               "verified_purchase": bool(verified),
+               "verified_purchase": True,
                "created_at": utcnow().isoformat()}
-        pipe = self.r.pipeline()
-        pipe.hset(f"mkt:review:{rid}", mapping={"data": json.dumps(rev)})
-        pipe.rpush(f"mkt:reviews:{dataset_id}", rid)
-        pipe.hincrby(f"mkt:rating:{dataset_id}", "sum", int(rating))
-        pipe.hincrby(f"mkt:rating:{dataset_id}", "count", 1)
-        pipe.execute()
+        try:
+            pipe = self.r.pipeline()
+            pipe.hset(f"mkt:review:{rid}", mapping={"data": json.dumps(rev)})
+            pipe.rpush(f"mkt:reviews:{dataset_id}", rid)
+            pipe.hincrby(f"mkt:rating:{dataset_id}", "sum", int(rating))
+            pipe.hincrby(f"mkt:rating:{dataset_id}", "count", 1)
+            pipe.execute()
+        except Exception:
+            self.r.delete(reviewer_key)
+            raise
         return ReviewOut(**rev)
 
     def list_reviews(self, dataset_id: str, limit: int = 50) -> list[ReviewOut]:
