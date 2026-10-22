@@ -226,6 +226,22 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('marketplace methods search published datasets and encode dataset IDs', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify([{ dataset_id: 'ds_public', status: 'published' }]),
+      { status: 200 });
+  } });
+  await client.searchMarketplaceDatasets({ q: 'climate change', tag: 'energy',
+    maxPriceCents: 500, limit: 5 });
+  await client.getMarketplaceDataset('dataset:1');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
+  ]);
+});
+
 test('provenance methods store, retrieve, and export tenant records', async () => {
   const calls = [];
   const record = { record_id: 'record:one', source_url: 'https://example.org/data',

@@ -63,7 +63,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_discovery_candidates', 'wio_discovery_create', 'wio_discovery_list',
     'wio_discovery_preview', 'wio_discovery_results', 'wio_discovery_status',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
-    'wio_graph_relation_add', 'wio_provenance_manifest_export',
+    'wio_graph_relation_add', 'wio_marketplace_dataset_get',
+    'wio_marketplace_dataset_search', 'wio_provenance_manifest_export',
     'wio_provenance_record_get', 'wio_provenance_record_store', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
     'wio_search',
@@ -554,6 +555,37 @@ test('MCP discovery preview is a bounded dry-run and submits no crawl job', asyn
       body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
         language: 'en', per_domain: 2 },
     });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP marketplace tools search public listings and fetch a safe dataset ID', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify([{ dataset_id: 'ds_public', status: 'published' }]),
+      { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'marketplace-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const search = await client.callTool({ name: 'wio_marketplace_dataset_search', arguments: {
+      q: 'climate change', tag: 'energy', max_price_cents: 500, limit: 5,
+    } });
+    const get = await client.callTool({ name: 'wio_marketplace_dataset_get', arguments: {
+      dataset_id: 'dataset:1',
+    } });
+    assert.equal(search.isError, undefined);
+    assert.equal(get.isError, undefined);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
+    ]);
   } finally {
     await client.close();
     await server.close();

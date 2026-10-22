@@ -144,6 +144,38 @@ def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
     assert r.json()["dataset_id"]
 
 
+def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    tenant = client.app.state.services.users.list_orgs()[0].id
+    marketplace = MarketplaceService(client.app.state.services.redis)
+
+    def listing(owner, title, digest):
+        return marketplace.create_listing(owner, title=title,
+            description="A published corpus used to verify tenant visibility rules.",
+            tags=["visibility"], price_usd_cents=100, license="CC-BY-4.0",
+            content_sha256=digest * 64)
+
+    public = listing("seller-public", "Public dataset", "a")
+    private = listing("seller-private", "Private draft", "b")
+    marketplace.update_listing(private.dataset_id, "seller-private", status="draft")
+    own_draft = listing(tenant, "Tenant draft", "c")
+    marketplace.update_listing(own_draft.dataset_id, tenant, status="draft")
+
+    headers = _headers(api_key)
+    assert client.get(f"/v1/marketplace/datasets/{public.dataset_id}",
+                      headers=headers).status_code == 200
+    assert client.get(f"/v1/marketplace/datasets/{private.dataset_id}",
+                      headers=headers).status_code == 404
+    assert client.get(f"/v1/marketplace/datasets/{own_draft.dataset_id}",
+                      headers=headers).status_code == 200
+    search = client.get("/v1/marketplace/datasets", headers=headers).json()
+    visible_ids = {item["dataset_id"] for item in search}
+    assert public.dataset_id in visible_ids
+    assert private.dataset_id not in visible_ids
+    assert own_draft.dataset_id not in visible_ids
+
+
 def test_dataset_publish_still_rejects_unhashed_jobs(client, api_key):
     r = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
                     json={"title": "No Digest",
