@@ -529,12 +529,22 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
 def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key):
     from src.marketplace.service import MarketplaceService
 
-    poster = client.app.state.services.users.list_orgs()[0].id
+    headers = _headers(api_key)
+    target_urls = ["https://example.org/source-a", "https://example.org/source-b"]
+    created = client.post("/v1/marketplace/bounties", headers=headers, json={
+        "title": "Curate public sources",
+        "spec": "Collect and curate a set of public records from approved sources.",
+        "reward_usd_cents": 5000, "deadline_days": 10,
+        "target_urls": target_urls,
+    })
+    assert created.status_code == 201, created.text
+    bounty_id = created.json()["bounty_id"]
+    assert created.json()["target_urls"] == target_urls
+    public_open = client.get("/v1/marketplace/bounties", headers=headers)
+    published = next(item for item in public_open.json()
+                     if item["bounty_id"] == bounty_id)
+    assert published["target_urls"] == target_urls
     marketplace = MarketplaceService(client.app.state.services.redis)
-    bounty = marketplace.create_bounty(
-        poster, title="Curate public sources",
-        spec="Collect and curate a set of public records from approved sources.",
-        reward_usd_cents=5000, deadline_days=10, target_urls=[])
     submitted = []
     for index in range(2):
         listing = marketplace.create_listing(
@@ -543,12 +553,12 @@ def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key
             tags=["bounty"], price_usd_cents=0, license="CC-BY-4.0",
             content_sha256=f"{index + 1:064x}")
         marketplace.submit_for_bounty(
-            f"worker-{index}", bounty.bounty_id, listing.dataset_id)
+            f"worker-{index}", bounty_id, listing.dataset_id)
         submitted.append(listing.dataset_id)
 
     headers = _headers(api_key)
     listed = client.get(
-        f"/v1/marketplace/bounties/{bounty.bounty_id}/submissions",
+        f"/v1/marketplace/bounties/{bounty_id}/submissions",
         headers=headers, params={"limit": 1, "offset": 1})
     assert listed.status_code == 200, listed.text
     assert listed.json() == [sorted(submitted)[1]]
@@ -560,7 +570,7 @@ def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key
     foreign_key = client.post("/keys", headers=bearer,
                               json={"name": "other"}).json()["key"]
     hidden = client.get(
-        f"/v1/marketplace/bounties/{bounty.bounty_id}/submissions",
+        f"/v1/marketplace/bounties/{bounty_id}/submissions",
         headers=_headers(foreign_key))
     assert hidden.status_code == 404
     assert hidden.json()["detail"] == "bounty not found"
