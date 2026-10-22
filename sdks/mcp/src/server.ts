@@ -363,6 +363,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_delivery_get", "Retrieve a non-expired dataset delivery manifest belonging to the authenticated tenant; this does not purchase or renew a delivery.", {
+    delivery_id: z.string().regex(/^dlv_[a-f0-9]{12}$/),
+  }, async ({ delivery_id }) => {
+    try { return result(await client.getMarketplaceDelivery(delivery_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_watch_create", "Create a recurring single-page change watch (minimum 15 minutes).", {
     url: z.string().url(), interval_minutes: z.number().int().min(15).max(10080).optional(),
   }, async ({ url, interval_minutes }) => {

@@ -281,10 +281,12 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   await client.searchMarketplaceDatasets({ q: 'climate change', tag: 'energy',
     maxPriceCents: 500, limit: 5 });
   await client.getMarketplaceDataset('dataset:1');
+  await client.getMarketplaceDelivery('dlv_0123456789ab');
   assert.deepEqual(calls, [
     { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },
   ]);
 });
 

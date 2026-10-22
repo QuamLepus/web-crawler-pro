@@ -288,6 +288,10 @@ export class WebIntelligenceClient {
     return this.request<JsonObject[]>("GET", `marketplace/bounties?limit=${limit}`);
   }
 
+  getMarketplaceDelivery(deliveryId: string): Promise<JsonObject> {
+    return this.request("GET", `marketplace/deliveries/${encodeURIComponent(deliveryId)}`);
+  }
+
   storeProvenanceRecord(record: JsonObject): Promise<JsonObject> {
     return this.request("POST", "provenance/records", record);
   }
