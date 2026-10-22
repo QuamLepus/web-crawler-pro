@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def utcnow() -> datetime:
@@ -392,6 +392,26 @@ class DatasetListingCreate(BaseModel):
     license: str = "CC-BY-4.0"
     source_job_id: Optional[str] = None
     sample_rows: int = Field(default=50, ge=10, le=500)
+
+
+class DatasetListingUpdate(BaseModel):
+    """Validated partial update for a seller-owned marketplace listing."""
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=3, max_length=140)
+    description: str | None = Field(default=None, min_length=20, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=15)
+    price_usd_cents: int | None = Field(default=None, ge=0, le=10_000_000)
+    license: str | None = Field(default=None, min_length=1, max_length=80)
+    status: Literal["draft", "published", "suspended", "archived"] | None = None
+
+    @model_validator(mode="after")
+    def _require_update_fields(self):
+        if not self.model_fields_set:
+            raise ValueError("at least one listing field must be provided")
+        if any(getattr(self, name) is None for name in self.model_fields_set):
+            raise ValueError("listing update fields cannot be null")
+        return self
 
 
 class DatasetListingOut(BaseModel):

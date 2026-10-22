@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.routers.jobs import JOB_KEY, CtxDep
 from src.api.schemas import (BountyCreate, BountyOut, DatasetListingCreate,
-                             DatasetListingOut, DeliveryManifest,
+                             DatasetListingOut, DatasetListingUpdate, DeliveryManifest,
                              MarketplacePurchaseOut, MarketplaceReviewPublicOut,
                              ReviewCreate, ReviewOut)
 from src.marketplace.service import MarketplaceError, MarketplaceService
@@ -124,11 +124,12 @@ async def dataset_preview(dataset_id: str, ctx: CtxDep, request: Request,
 
 
 @router.patch("/datasets/{dataset_id}", response_model=DatasetListingOut)
-async def update_dataset(dataset_id: str, changes: dict, ctx: CtxDep,
-                         request: Request) -> DatasetListingOut:
+async def update_dataset(dataset_id: str, changes: DatasetListingUpdate,
+                         ctx: CtxDep, request: Request) -> DatasetListingOut:
     mkt = _mkt(request)
     try:
-        lst = mkt.update_listing(dataset_id, ctx["tenant"], **changes)
+        lst = mkt.update_listing(
+            dataset_id, ctx["tenant"], **changes.model_dump(exclude_unset=True))
     except MarketplaceError as exc:
         msg = str(exc)
         code = 404 if msg == "not found" else 403 if "forbidden" in msg else 422

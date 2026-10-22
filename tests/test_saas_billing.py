@@ -253,6 +253,36 @@ def test_marketplace_seller_inventory_is_scoped_and_filters_status(client, api_k
     assert invalid.status_code == 422
 
 
+def test_marketplace_listing_patch_rejects_invalid_values_and_unknown_fields(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    seller = client.app.state.services.users.list_orgs()[0].id
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        seller, title="Patch validation target",
+        description="Dataset used to test marketplace listing patch validation.",
+        tags=["validation"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="a" * 64)
+    url = f"/v1/marketplace/datasets/{listing.dataset_id}"
+    headers = _headers(api_key)
+
+    for payload in (
+        {"price_usd_cents": -1},
+        {"status": "hidden"},
+        {"seller_tenant": "attacker"},
+        {"title": None},
+        {},
+    ):
+        response = client.patch(url, headers=headers, json=payload)
+        assert response.status_code == 422, (payload, response.text)
+    assert marketplace.get_listing(listing.dataset_id).price_usd_cents == 0
+
+    valid = client.patch(url, headers=headers,
+                         json={"status": "draft", "price_usd_cents": 0})
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["status"] == "draft"
+
+
 def test_marketplace_tag_updates_normalize_and_refresh_search_indexes(client):
     from src.marketplace.service import MarketplaceError, MarketplaceService
 
