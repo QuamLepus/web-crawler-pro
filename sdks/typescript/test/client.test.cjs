@@ -226,6 +226,22 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('semantic search forwards bounded query and optional metadata filters', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'search-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ results: [], took_ms: 1 }), { status: 200 });
+  } });
+  await client.semanticSearch('solar panels', { topK: 25, filter: { language: 'en', year: 2025 } });
+  await client.semanticSearch('clean energy');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/search', method: 'POST',
+      body: { query: 'solar panels', top_k: 25, filter: { language: 'en', year: 2025 } } },
+    { url: 'http://localhost:8000/api/v1/search', method: 'POST',
+      body: { query: 'clean energy' } },
+  ]);
+});
+
 test('webhook methods preserve tenant API contracts and array responses', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'webhook-key', fetch: async (url, init) => {

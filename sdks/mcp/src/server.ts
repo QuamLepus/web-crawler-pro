@@ -26,6 +26,11 @@ const webhookTestDataSchema = z.record(z.unknown()).refine((data) => {
   catch { return false; }
 }, "test data must be JSON and at most 64 KiB");
 
+const semanticSearchFilterSchema = z.record(z.string().min(1).max(128),
+  z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]))
+  .refine((filter) => Object.keys(filter).length <= 50,
+    "filter supports at most 50 metadata fields");
+
 const studioSnapshotRowSchema = z.object({
   rank: z.number().int().min(1).max(100),
   url: z.string().url().max(2048).refine((value) => /^https?:\/\//i.test(value),
@@ -58,6 +63,15 @@ export function buildServer(client: WebIntelligenceClient) {
     try { return result(await client.ask(question, {
       maxPages: max_pages, maxSeconds: max_seconds, topK: top_k,
     })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_search", "Run semantic search against the authenticated tenant's indexed documents; results include matching text and metadata.", {
+    query: z.string().min(1).max(4096),
+    top_k: z.number().int().min(1).max(100).optional(),
+    filter: semanticSearchFilterSchema.optional(),
+  }, async ({ query, top_k, filter }) => {
+    try { return result(await client.semanticSearch(query, { topK: top_k, filter })); }
     catch (error) { return failure(error); }
   });
 
