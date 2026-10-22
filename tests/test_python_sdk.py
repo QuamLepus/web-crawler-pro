@@ -285,6 +285,20 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_own_search_index_levels_reads_roadmap_metadata():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"levels": [{"level": 0, "name": "starter"}]})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.get_search_index_levels() == {"levels": [{"level": 0, "name": "starter"}]}
+
+    assert calls == [("GET", "/api/v1/search-index/levels")]
+
+
 def test_billing_methods_read_plans_and_current_tenant_usage():
     calls = []
 

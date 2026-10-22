@@ -188,6 +188,10 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def get_search_index_levels(self) -> dict[str, Any]:
+        """Read the available levels for the platform's own search index."""
+        return self._request("GET", "search-index/levels")
+
     def list_billing_plans(self) -> dict[str, Any]:
         """Read public plan and pricing information."""
         return self._request("GET", "billing/plans")

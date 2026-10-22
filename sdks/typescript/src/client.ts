@@ -253,6 +253,10 @@ export class WebIntelligenceClient {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
   }
 
+  getSearchIndexLevels(): Promise<JsonObject> {
+    return this.request("GET", "search-index/levels");
+  }
+
   listBillingPlans(): Promise<JsonObject> {
     return this.request("GET", "billing/plans");
   }
