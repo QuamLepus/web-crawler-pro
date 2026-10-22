@@ -19,7 +19,8 @@ console.log(job.research_id, answer.citations);
 
 Available methods cover indexed `ask`, crawl create/list/status/cancel, research create/list/status/cancel,
 watch list/create/run/delete/change and retained snapshot retrieval, workflow create/list/get/update/delete,
-schedule/run/history/status/cancel, and Data Studio aggregate, saved-query, and snapshot operations.
+schedule/run/history/status/cancel, webhook subscription and delivery operations, and Data Studio aggregate,
+saved-query, and snapshot operations. Webhook creation returns the signing secret once; store it securely and avoid logging it.
 Watch change/snapshot reads accept optional limits (up to 100 changes or 20 snapshots).
 Workflow step IDs and `dependsOn` dependencies enable bounded DAG branching; nodes
 still run serially, failed nodes skip descendants, and independent branches continue.

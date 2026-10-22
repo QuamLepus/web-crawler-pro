@@ -67,4 +67,7 @@ async def test_hook(body: WebhookTestRequest, ctx: CtxDep,
 @router.get("/{sub_id}/deliveries", summary="Recent delivery attempts")
 async def deliveries(sub_id: str, ctx: CtxDep, request: Request,
                      limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[dict]:
-    return _svc(request).recent_deliveries(sub_id, limit=limit)
+    svc = _svc(request)
+    if svc.get_sub(ctx["tenant"], sub_id) is None:
+        raise HTTPException(404, "not found")
+    return svc.recent_deliveries(sub_id, limit=limit)

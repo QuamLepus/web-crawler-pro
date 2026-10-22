@@ -52,4 +52,6 @@ cooperative `cancel`; cancellation stops at the next source boundary, so an
 active source crawl may finish first. The client also exposes `save_studio_query`,
 `list_studio_queries`, and `delete_studio_query` for tenant-scoped saved Data Studio queries,
 plus `studio_analytics` and create/list/get/delete methods for bounded result snapshots.
+Webhook methods cover create/list/delete, signed test delivery, and recent delivery attempts.
+Webhook creation returns a signing secret once; store it securely and avoid logging it.
 For other API methods, see `Client` and `ResearchResource` in the package.

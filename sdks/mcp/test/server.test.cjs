@@ -65,6 +65,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_studio_snapshot_get', 'wio_studio_snapshot_list',
     'wio_watch_changes', 'wio_watch_create',
     'wio_watch_delete', 'wio_watch_list', 'wio_watch_run', 'wio_watch_snapshots',
+    'wio_webhook_create', 'wio_webhook_delete', 'wio_webhook_deliveries',
+    'wio_webhook_list', 'wio_webhook_test',
     'wio_workflow_cancel', 'wio_workflow_create', 'wio_workflow_delete',
     'wio_workflow_get', 'wio_workflow_list', 'wio_workflow_run',
     'wio_workflow_runs', 'wio_workflow_status', 'wio_workflow_update',
@@ -416,6 +418,72 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP webhook tools preserve subscription, test, and delivery contracts', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'webhook-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    if (url.endsWith('/webhooks') && init.method === 'POST') {
+      return new Response(JSON.stringify({ id: '012345abcdef', secret: 'whsec-test-only' }),
+                          { status: 201 });
+    }
+    if (url.endsWith('/webhooks/test')) {
+      return new Response(JSON.stringify({ queued_deliveries: ['dlv_test'] }), { status: 200 });
+    }
+    if (init.method === 'DELETE') {
+      return new Response(JSON.stringify({ deleted: '012345abcdef' }), { status: 200 });
+    }
+    return new Response(JSON.stringify([{ id: '012345abcdef' }]), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'webhook-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const created = await client.callTool({ name: 'wio_webhook_create', arguments: {
+      url: 'https://hooks.example/receiver', events: ['research.completed'],
+      description: 'Research',
+    } });
+    const listed = await client.callTool({ name: 'wio_webhook_list', arguments: {} });
+    const tested = await client.callTool({ name: 'wio_webhook_test', arguments: {
+      subscription_id: '012345abcdef', event: 'research.completed',
+      data: { research_id: 'research_test' },
+    } });
+    const deliveries = await client.callTool({ name: 'wio_webhook_deliveries', arguments: {
+      subscription_id: '012345abcdef', limit: 12,
+    } });
+    const deleted = await client.callTool({ name: 'wio_webhook_delete', arguments: {
+      subscription_id: '012345abcdef',
+    } });
+    assert.equal(created.isError, undefined);
+    assert.equal(listed.isError, undefined);
+    assert.equal(tested.isError, undefined);
+    assert.equal(deliveries.isError, undefined);
+    assert.equal(deleted.isError, undefined);
+    assert.match(created.content[0].text, /"secret"/);
+    assert.match(listed.content[0].text, /012345abcdef/);
+    assert.match(tested.content[0].text, /dlv_test/);
+    assert.match(deliveries.content[0].text, /012345abcdef/);
+    assert.match(deleted.content[0].text, /"deleted"/);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/webhooks', method: 'POST',
+        body: { url: 'https://hooks.example/receiver', events: ['research.completed'],
+          description: 'Research' } },
+      { url: 'http://localhost:8000/api/v1/webhooks', method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/webhooks/test', method: 'POST',
+        body: { subscription_id: '012345abcdef', event: 'research.completed',
+          data: { research_id: 'research_test' } } },
+      { url: 'http://localhost:8000/api/v1/webhooks/012345abcdef/deliveries?limit=12',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/webhooks/012345abcdef', method: 'DELETE',
+        body: undefined },
     ]);
   } finally {
     await client.close();

@@ -26,6 +26,16 @@ export interface AskOptions {
 }
 
 export type CrawlJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type WebhookEvent = "crawl.completed" | "crawl.failed" | "crawl.cancelled" |
+  "data.ready" | "export.ready" | "quota.warning" | "dataset.sold" |
+  "discovery.completed" | "discovery.approved" | "web.changed" |
+  "research.completed" | "research.failed" | "research.cancelled";
+
+export interface WebhookCreateOptions {
+  url: string;
+  events: WebhookEvent[];
+  description?: string;
+}
 
 export interface ResearchCreateOptions {
   topic: string;
@@ -92,8 +102,8 @@ export class WebIntelligenceClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private async request<T extends JsonObject>(method: string, path: string,
-                                               body?: JsonObject): Promise<T> {
+  private async request<T = JsonObject>(method: string, path: string,
+                                         body?: JsonObject): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -118,8 +128,8 @@ export class WebIntelligenceClient {
         }
         throw new WebIntelligenceError(message, response.status, payload);
       }
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        throw new WebIntelligenceError("API returned a non-object JSON response", response.status, payload);
+      if (!payload || typeof payload !== "object") {
+        throw new WebIntelligenceError("API returned an unsupported JSON response", response.status, payload);
       }
       return payload as T;
     } catch (error) {
@@ -276,6 +286,35 @@ export class WebIntelligenceClient {
     }
     const query = params.toString();
     return this.request("GET", `studio/analytics${query ? `?${query}` : ""}`);
+  }
+
+  createWebhook(options: WebhookCreateOptions): Promise<JsonObject> {
+    return this.request("POST", "webhooks", {
+      url: options.url, events: options.events, description: options.description ?? "",
+    });
+  }
+
+  listWebhooks(): Promise<JsonObject[]> {
+    return this.request<JsonObject[]>("GET", "webhooks");
+  }
+
+  deleteWebhook(subscriptionId: string): Promise<JsonObject> {
+    return this.request("DELETE", `webhooks/${encodeURIComponent(subscriptionId)}`);
+  }
+
+  testWebhook(subscriptionId: string, options: {
+    event?: WebhookEvent; data?: JsonObject;
+  } = {}): Promise<JsonObject> {
+    return this.request("POST", "webhooks/test", {
+      subscription_id: subscriptionId,
+      ...(options.event === undefined ? {} : { event: options.event }),
+      ...(options.data === undefined ? {} : { data: options.data }),
+    });
+  }
+
+  listWebhookDeliveries(subscriptionId: string, limit = 50): Promise<JsonObject[]> {
+    return this.request<JsonObject[]>("GET",
+      `webhooks/${encodeURIComponent(subscriptionId)}/deliveries?limit=${limit}`);
   }
 
   saveStudioQuery(options: StudioSavedQueryOptions): Promise<JsonObject> {

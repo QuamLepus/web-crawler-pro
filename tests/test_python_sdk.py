@@ -261,6 +261,52 @@ def test_studio_saved_query_methods_follow_tenant_api_contract():
     ]
 
 
+def test_webhook_methods_handle_secret_creation_and_list_responses():
+    import json
+
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.read()) if request.content else None
+        calls.append({"method": request.method, "path": request.url.raw_path.decode(),
+                      "body": body})
+        if request.method == "POST" and request.url.path.endswith("/test"):
+            return httpx.Response(200, json={"queued_deliveries": ["dlv_test"]})
+        if request.method == "POST":
+            return httpx.Response(201, json={"id": "012345abcdef", "secret": "whsec-test-only"})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"deleted": "012345abcdef"})
+        return httpx.Response(200, json=[{"id": "012345abcdef"}])
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        created = client.create_webhook("https://hooks.example/receiver",
+                                        ["research.completed"], description="Research")
+        listed = client.list_webhooks()
+        tested = client.test_webhook("012345abcdef", event="research.completed",
+                                     data={"research_id": "research_test"})
+        deliveries = client.list_webhook_deliveries("012345abcdef", limit=12)
+        deleted = client.delete_webhook("012345abcdef")
+
+    assert created["id"] == "012345abcdef"
+    assert listed == [{"id": "012345abcdef"}]
+    assert tested == {"queued_deliveries": ["dlv_test"]}
+    assert deliveries == [{"id": "012345abcdef"}]
+    assert deleted == {"deleted": "012345abcdef"}
+    assert calls == [
+        {"method": "POST", "path": "/api/v1/webhooks",
+         "body": {"url": "https://hooks.example/receiver", "events": ["research.completed"],
+                  "description": "Research"}},
+        {"method": "GET", "path": "/api/v1/webhooks", "body": None},
+        {"method": "POST", "path": "/api/v1/webhooks/test",
+         "body": {"subscription_id": "012345abcdef", "event": "research.completed",
+                  "data": {"research_id": "research_test"}}},
+        {"method": "GET", "path": "/api/v1/webhooks/012345abcdef/deliveries?limit=12",
+         "body": None},
+        {"method": "DELETE", "path": "/api/v1/webhooks/012345abcdef", "body": None},
+    ]
+
+
 def test_studio_analytics_and_snapshot_methods_follow_api_contract():
     import json
 

@@ -9,7 +9,8 @@ Tools: `wio_ask`, `wio_research_create`, `wio_research_list`, `wio_research_stat
 `wio_workflow_create`, `wio_workflow_list`, `wio_workflow_get`,
 `wio_workflow_update`, `wio_workflow_delete`, `wio_workflow_runs`,
 `wio_workflow_run`, `wio_workflow_status`, `wio_workflow_cancel`,
-`wio_studio_analytics`, `wio_studio_query_save`, `wio_studio_query_list`, `wio_studio_query_delete`, `wio_studio_snapshot_create`, `wio_studio_snapshot_list`, `wio_studio_snapshot_get`, and `wio_studio_snapshot_delete`. Saved queries are tenant-scoped and allow result limits from 1 to 100. `wio_ask` accepts a `top_k` limit from 1 to 20. Snapshot creation is capped at 100 rows and 1 MB by the API. Watch change reads accept a limit up to 100;
+`wio_webhook_create`, `wio_webhook_list`, `wio_webhook_delete`, `wio_webhook_test`, `wio_webhook_deliveries`,
+`wio_studio_analytics`, `wio_studio_query_save`, `wio_studio_query_list`, `wio_studio_query_delete`, `wio_studio_snapshot_create`, `wio_studio_snapshot_list`, `wio_studio_snapshot_get`, and `wio_studio_snapshot_delete`. Saved queries are tenant-scoped and allow result limits from 1 to 100. `wio_ask` accepts a `top_k` limit from 1 to 20. Webhook creation returns its signing secret once; store it securely and do not share or log it. Test-event payloads are limited to 64 KiB, and delivery history reads to 200 attempts. Snapshot creation is capped at 100 rows and 1 MB by the API. Watch change reads accept a limit up to 100;
 snapshot reads are capped at 20. Research cancellation
 stops at source boundaries, so an active source crawl may finish first. Workflow
 tools operate on bounded sequential or dependency-DAG crawl recipes; DAG steps run serially,
