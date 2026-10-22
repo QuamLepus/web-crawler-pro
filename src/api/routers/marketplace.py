@@ -219,7 +219,8 @@ async def create_bounty(body: BountyCreate, ctx: CtxDep,
                      title=b.title, spec=b.spec,
                      reward_usd_cents=b.reward_usd_cents,
                      deadline=__import__("datetime").datetime.fromisoformat(b.deadline),
-                     status=b.status, submissions=b.submissions)
+                     status=b.status, submissions=b.submissions,
+                     target_urls=b.target_urls)
 
 
 @router.get("/bounties", response_model=list[BountyOut])

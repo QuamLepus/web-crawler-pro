@@ -490,6 +490,7 @@ class BountyOut(BaseModel):
     deadline: datetime
     status: str
     submissions: int = 0
+    target_urls: list[str] = Field(default_factory=list)
 
 
 class DeliveryManifest(BaseModel):

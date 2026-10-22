@@ -82,6 +82,7 @@ class Bounty:
     status: str = "open"               # open|claimed|submitted|awarded|expired
     assigned_to: str | None = None
     submissions: int = 0
+    target_urls: list[str] = field(default_factory=list)
 
 
 class MarketplaceError(Exception):
@@ -438,7 +439,8 @@ class MarketplaceService:
                       target_urls: list[str]) -> Bounty:
         b = Bounty(bounty_id=f"bty_{uuid.uuid4().hex[:12]}", poster_tenant=poster,
                    title=title, spec=spec, reward_usd_cents=reward_usd_cents,
-                   deadline=(utcnow() + timedelta(days=deadline_days)).isoformat())
+                   deadline=(utcnow() + timedelta(days=deadline_days)).isoformat(),
+                   target_urls=target_urls)
         pipe = self.r.pipeline()
         pipe.hset(f"mkt:bounty:{b.bounty_id}", mapping={"data": json.dumps(asdict(b))})
         pipe.zadd("mkt:bounties:open", {b.bounty_id: self._clock()})
@@ -448,8 +450,16 @@ class MarketplaceService:
         return b
 
     def get_bounty(self, bounty_id: str) -> Optional[Bounty]:
-        raw = self.r.hget(f"mkt:bounty:{bounty_id}", "data")
-        return Bounty(**json.loads(raw)) if raw else None
+        key = f"mkt:bounty:{bounty_id}"
+        raw = self.r.hget(key, "data")
+        if not raw:
+            return None
+        bounty = Bounty(**json.loads(raw))
+        if not bounty.target_urls:
+            raw_targets = self.r.hget(key, "targets")
+            if raw_targets:
+                bounty.target_urls = json.loads(raw_targets)
+        return bounty
 
     def submit_for_bounty(self, worker: str, bounty_id: str,
                           dataset_id: str) -> dict:
@@ -529,7 +539,7 @@ class MarketplaceService:
                     bounty_id=b.bounty_id, poster_tenant=b.poster_tenant,
                     title=b.title, spec=b.spec, reward_usd_cents=b.reward_usd_cents,
                     deadline=datetime.fromisoformat(b.deadline), status=b.status,
-                    submissions=b.submissions))
+                    submissions=b.submissions, target_urls=b.target_urls))
                 if len(out) >= limit:
                     break
         if expired_ids:
