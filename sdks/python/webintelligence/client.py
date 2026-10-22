@@ -192,6 +192,10 @@ class Client:
         """Read the available levels for the platform's own search index."""
         return self._request("GET", "search-index/levels")
 
+    def get_search_index_stats(self) -> dict[str, Any]:
+        """Read public build/availability metrics without internal filesystem paths."""
+        return self._request("GET", "search-index/stats")
+
     def correct_search_index_query(self, query: str) -> dict[str, Any]:
         """Check spelling against the platform's own-index vocabulary."""
         return self._request("GET", "search-index/spell", params={"q": query})
