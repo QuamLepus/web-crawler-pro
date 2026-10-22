@@ -75,6 +75,14 @@ export interface DiscoveryPreviewOptions {
   perDomain?: number;
 }
 
+export interface DiscoveryCreateOptions {
+  count?: number;
+  seeds?: string[];
+  language?: string;
+  maxPagesPerSite?: number;
+  perDomain?: number;
+}
+
 export interface WatchCreateOptions {
   url: string;
   intervalMinutes?: number;
@@ -236,6 +244,33 @@ export class WebIntelligenceClient {
 
   cancelJob(jobId: string): Promise<JsonObject> {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  createDiscovery(topic: string, options: DiscoveryCreateOptions = {}): Promise<JsonObject> {
+    return this.request("POST", "discovery", {
+      topic, count: options.count ?? 10, seeds: options.seeds ?? [],
+      language: options.language ?? "en", auto: false,
+      max_pages_per_site: options.maxPagesPerSite ?? 5,
+      per_domain: options.perDomain ?? 1, obey_robots: true,
+    });
+  }
+
+  listDiscoveries(page = 1, pageSize = 20): Promise<JsonObject> {
+    return this.request("GET", `discovery?page=${page}&page_size=${pageSize}`);
+  }
+
+  getDiscovery(jobId: string): Promise<JsonObject> {
+    return this.request("GET", `discovery/${encodeURIComponent(jobId)}`);
+  }
+
+  discoveryCandidates(jobId: string, onlySelected = false): Promise<JsonObject[]> {
+    const params = onlySelected ? "?only_selected=true" : "";
+    return this.request<JsonObject[]>("GET",
+      `discovery/${encodeURIComponent(jobId)}/candidates${params}`);
+  }
+
+  cancelDiscovery(jobId: string): Promise<JsonObject> {
+    return this.request("POST", `discovery/${encodeURIComponent(jobId)}/cancel`);
   }
 
   previewDiscovery(topic: string, options: DiscoveryPreviewOptions = {}): Promise<JsonObject> {

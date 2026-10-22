@@ -285,6 +285,45 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_discovery_job_methods_keep_crawling_behind_approval():
+    import json
+
+    calls = []
+
+    def handler(request):
+        calls.append({"method": request.method, "path": request.url.raw_path.decode(),
+                      "body": json.loads(request.read()) if request.content else None})
+        payload = [{"domain": "example.org"}] if request.url.path.endswith("/candidates") \
+            else {"job_id": "disc_aaaaaaaaaaaa", "state": "awaiting_approval"}
+        return httpx.Response(202 if request.method == "POST"
+                              and request.url.path == "/api/v1/discovery" else 200,
+                              json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.create_discovery("AI medical devices", count=7,
+                                seeds=["https://example.org"], language="en",
+                                max_pages_per_site=3, per_domain=2)
+        client.list_discoveries(page=2, page_size=7)
+        client.get_discovery("disc_aaaaaaaaaaaa")
+        client.discovery_candidates("disc_aaaaaaaaaaaa", only_selected=True)
+        client.cancel_discovery("disc_aaaaaaaaaaaa")
+
+    assert calls == [
+        {"method": "POST", "path": "/api/v1/discovery",
+         "body": {"topic": "AI medical devices", "count": 7,
+                  "seeds": ["https://example.org"], "language": "en", "auto": False,
+                  "max_pages_per_site": 3, "per_domain": 2, "obey_robots": True}},
+        {"method": "GET", "path": "/api/v1/discovery?page=2&page_size=7", "body": None},
+        {"method": "GET", "path": "/api/v1/discovery/disc_aaaaaaaaaaaa", "body": None},
+        {"method": "GET",
+         "path": "/api/v1/discovery/disc_aaaaaaaaaaaa/candidates?only_selected=true",
+         "body": None},
+        {"method": "POST", "path": "/api/v1/discovery/disc_aaaaaaaaaaaa/cancel",
+         "body": None},
+    ]
+
+
 def test_discovery_preview_forwards_dry_run_options_and_defaults():
     import json
 

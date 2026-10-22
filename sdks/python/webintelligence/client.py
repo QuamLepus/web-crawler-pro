@@ -188,6 +188,44 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def create_discovery(self, topic: str, *, count: int = 10,
+                         seeds: list[str] | None = None, language: str = "en",
+                         max_pages_per_site: int = 5,
+                         per_domain: int = 1) -> dict[str, Any]:
+        """Queue candidate discovery for manual review; does not start crawls.
+
+        The API charges ``count`` requests from quota when the job is created.
+        Crawling remains gated behind an explicit approval action.
+        """
+        return self._request("POST", "discovery", json={
+            "topic": topic, "count": count, "seeds": seeds or [],
+            "language": language, "auto": False,
+            "max_pages_per_site": max_pages_per_site,
+            "per_domain": per_domain, "obey_robots": True,
+        })
+
+    def list_discoveries(self, *, page: int = 1,
+                         page_size: int = 20) -> dict[str, Any]:
+        """List discovery jobs belonging to the authenticated tenant."""
+        return self._request("GET", "discovery", params={
+            "page": page, "page_size": page_size,
+        })
+
+    def get_discovery(self, job_id: str) -> dict[str, Any]:
+        """Read status for one tenant-owned discovery job."""
+        return self._request("GET", f"discovery/{quote(job_id, safe='')}")
+
+    def discovery_candidates(self, job_id: str, *,
+                             only_selected: bool = False) -> list[dict[str, Any]]:
+        """Read ranked candidates for a tenant-owned discovery job."""
+        params = {"only_selected": True} if only_selected else None
+        return self._request("GET", f"discovery/{quote(job_id, safe='')}/candidates",
+                             params=params)
+
+    def cancel_discovery(self, job_id: str) -> dict[str, Any]:
+        """Cancel a tenant-owned discovery job before approval."""
+        return self._request("POST", f"discovery/{quote(job_id, safe='')}/cancel")
+
     def preview_discovery(self, topic: str, *, count: int | None = None,
                           seeds: list[str] | None = None, language: str | None = None,
                           per_domain: int | None = None) -> dict[str, Any]:

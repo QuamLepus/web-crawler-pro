@@ -226,6 +226,37 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('discovery job methods keep crawling behind explicit approval', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'discovery-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    const payload = url.includes('/candidates') ? [{ domain: 'example.org' }]
+      : { job_id: 'disc_aaaaaaaaaaaa', state: 'awaiting_approval' };
+    return new Response(JSON.stringify(payload), { status: init.method === 'POST'
+      && url.endsWith('/discovery') ? 202 : 200 });
+  } });
+  await client.createDiscovery('AI medical devices', { count: 7,
+    seeds: ['https://example.org'], language: 'en', maxPagesPerSite: 3, perDomain: 2 });
+  await client.listDiscoveries(2, 7);
+  await client.getDiscovery('disc_aaaaaaaaaaaa');
+  await client.discoveryCandidates('disc_aaaaaaaaaaaa', true);
+  await client.cancelDiscovery('disc_aaaaaaaaaaaa');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/discovery', method: 'POST',
+      body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+        language: 'en', auto: false, max_pages_per_site: 3, per_domain: 2,
+        obey_robots: true } },
+    { url: 'http://localhost:8000/api/v1/discovery?page=2&page_size=7',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/candidates?only_selected=true',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/cancel',
+      method: 'POST', body: undefined },
+  ]);
+});
+
 test('discovery preview forwards dry-run controls without creating a job', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'discovery-preview-key', fetch: async (url, init) => {

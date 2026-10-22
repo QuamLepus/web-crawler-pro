@@ -170,6 +170,52 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_discovery_create", "Queue candidate discovery for human review; this does not start crawls. The requested count consumes quota up front, and robots.txt remains enabled.", {
+    topic: z.string().min(2).max(400),
+    count: z.number().int().min(1).max(50).optional(),
+    seeds: z.array(z.string().url().refine((value) =>
+      ["http:", "https:"].includes(new URL(value).protocol),
+      "seed URLs must use HTTP or HTTPS")).max(50).optional(),
+    language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/).optional(),
+    max_pages_per_site: z.number().int().min(1).max(50).optional(),
+    per_domain: z.number().int().min(1).max(5).optional(),
+  }, async ({ topic, count, seeds, language, max_pages_per_site, per_domain }) => {
+    try { return result(await client.createDiscovery(topic, {
+      count, seeds, language, maxPagesPerSite: max_pages_per_site, perDomain: per_domain,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_list", "List discovery jobs belonging to the authenticated tenant.", {
+    page: z.number().int().min(1).max(10000).optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+  }, async ({ page, page_size }) => {
+    try { return result(await client.listDiscoveries(page, page_size)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_status", "Read status for one tenant-owned discovery job.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+  }, async ({ job_id }) => {
+    try { return result(await client.getDiscovery(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_candidates", "Read ranked candidate sites for a tenant-owned discovery job; this does not crawl them.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+    only_selected: z.boolean().optional(),
+  }, async ({ job_id, only_selected }) => {
+    try { return result(await client.discoveryCandidates(job_id, only_selected)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_cancel", "Cancel a queued or running discovery job before it is approved.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+  }, async ({ job_id }) => {
+    try { return result(await client.cancelDiscovery(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_graph_list", "List up to 500 entities and relationships in the authenticated tenant's knowledge graph.", {
     limit: z.number().int().min(1).max(500).optional(),
   }, async ({ limit }) => {
