@@ -95,6 +95,13 @@ class MarketplaceService:
         self.r = redis_client
         self._clock = clock or time.time
 
+    @staticmethod
+    def _normalize_tags(tags: Any) -> list[str]:
+        if (not isinstance(tags, list) or len(tags) > 15 or
+                any(not isinstance(tag, str) for tag in tags)):
+            raise MarketplaceError("tags must be a list of at most 15 strings")
+        return list(dict.fromkeys(tag.strip().lower() for tag in tags if tag.strip()))
+
     # ------------------------------ listings ---------------------------- #
     def create_listing(self, seller: str, *, title: str, description: str,
                        tags: list[str], price_usd_cents: int, license: str,
@@ -105,7 +112,7 @@ class MarketplaceService:
             raise MarketplaceError("dataset must be hashed (content_sha256) before listing")
         lst = Listing(
             dataset_id=f"ds_{uuid.uuid4().hex[:16]}", seller_tenant=seller,
-            title=title, description=description, tags=[t.lower() for t in tags],
+            title=title, description=description, tags=self._normalize_tags(tags),
             price_usd_cents=price_usd_cents, license=license,
             token_count=token_count, record_count=record_count,
             size_bytes=size_bytes, content_sha256=content_sha256,
@@ -136,9 +143,22 @@ class MarketplaceService:
         bad = set(changes) - allowed
         if bad:
             raise MarketplaceError(f"fields not editable: {sorted(bad)}")
+        old_tags = list(lst.tags)
+        updated_tags = None
+        if "tags" in changes:
+            updated_tags = self._normalize_tags(changes["tags"])
+            changes = {**changes, "tags": updated_tags}
+
         for k, v in changes.items():
             setattr(lst, k, v)
-        self.r.hset(f"mkt:listing:{dataset_id}", "data", json.dumps(asdict(lst)))
+        pipe = self.r.pipeline()
+        if updated_tags is not None:
+            for tag in set(old_tags) | set(updated_tags):
+                pipe.srem(f"mkt:tag:{tag}", dataset_id)
+            for tag in updated_tags:
+                pipe.sadd(f"mkt:tag:{tag}", dataset_id)
+        pipe.hset(f"mkt:listing:{dataset_id}", "data", json.dumps(asdict(lst)))
+        pipe.execute()
         return lst
 
     def search_listings(self, *, query: str = "", tag: str = "",

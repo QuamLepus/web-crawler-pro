@@ -220,6 +220,34 @@ def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, ap
     assert own_draft.dataset_id not in visible_ids
 
 
+def test_marketplace_tag_updates_normalize_and_refresh_search_indexes(client):
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Tag index test dataset",
+        description="Dataset used to validate marketplace tag-index updates.",
+        tags=[" Old Tag ", "old tag"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="a" * 64)
+    assert listing.tags == ["old tag"]
+    assert listing.dataset_id in {
+        item.dataset_id for item in marketplace.search_listings(tag="OLD TAG")}
+
+    updated = marketplace.update_listing(
+        listing.dataset_id, "seller", tags=[" New Tag ", "FRESH", "fresh"])
+
+    assert updated.tags == ["new tag", "fresh"]
+    assert listing.dataset_id not in {
+        item.dataset_id for item in marketplace.search_listings(tag="old tag")}
+    assert listing.dataset_id in {
+        item.dataset_id for item in marketplace.search_listings(tag="NEW TAG")}
+    assert listing.dataset_id in {
+        item.dataset_id for item in marketplace.search_listings(tag="fresh")}
+    with pytest.raises(MarketplaceError, match="at most 15 strings"):
+        marketplace.update_listing(listing.dataset_id, "seller", tags="invalid")
+    assert marketplace.get_listing(listing.dataset_id).tags == ["new tag", "fresh"]
+
+
 def test_marketplace_purchase_fails_closed_without_strong_signing_secret(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
