@@ -259,3 +259,45 @@ def test_studio_saved_query_methods_follow_tenant_api_contract():
         {"method": "DELETE", "path": "/api/v1/studio/saved-queries/saved%2Fa",
          "body": None},
     ]
+
+
+def test_studio_analytics_and_snapshot_methods_follow_api_contract():
+    import json
+
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.read()) if request.content else None
+        calls.append({"method": request.method, "path": request.url.raw_path.decode(),
+                      "body": body})
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        if request.method == "POST":
+            return httpx.Response(201, json={"snapshot_id": "snapshot_aaaaaaaaaaaaaaaaaaaa"})
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.studio_analytics(group_by="host", metric="avg_quality", source="wiki & docs",
+                                limit=10, offset=2)
+        client.create_studio_snapshot("Solar", "solar panels", [
+            {"rank": 1, "url": "https://example.org", "score": 0.8}],
+            group_by="source", metric="avg_score")
+        client.list_studio_snapshots()
+        client.get_studio_snapshot("snapshot_aaaaaaaaaaaaaaaaaaaa")
+        assert client.delete_studio_snapshot("snapshot_aaaaaaaaaaaaaaaaaaaa") == {}
+
+    assert calls == [
+        {"method": "GET",
+         "path": "/api/v1/studio/analytics?group_by=host&metric=avg_quality&source=wiki+%26+docs&limit=10&offset=2",
+         "body": None},
+        {"method": "POST", "path": "/api/v1/studio/snapshots",
+         "body": {"name": "Solar", "q": "solar panels", "sources": [],
+                  "group_by": "source", "metric": "avg_score",
+                  "rows": [{"rank": 1, "url": "https://example.org", "score": 0.8}]}},
+        {"method": "GET", "path": "/api/v1/studio/snapshots", "body": None},
+        {"method": "GET", "path": "/api/v1/studio/snapshots/snapshot_aaaaaaaaaaaaaaaaaaaa",
+         "body": None},
+        {"method": "DELETE", "path": "/api/v1/studio/snapshots/snapshot_aaaaaaaaaaaaaaaaaaaa",
+         "body": None},
+    ]
