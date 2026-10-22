@@ -297,6 +297,20 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
                                       accepted.dataset_id)
     assert marketplace.get_bounty(bounty.bounty_id).submissions == 1
 
+    awarded = marketplace.award_bounty("poster", bounty.bounty_id,
+                                       accepted.dataset_id)
+    assert awarded["awarded_to_dataset"] == accepted.dataset_id
+    with pytest.raises(MarketplaceError, match="bounty is awarded"):
+        marketplace.award_bounty("poster", bounty.bounty_id, accepted.dataset_id)
+
+    expired = marketplace.create_bounty(
+        "poster", title="Expired public records",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=0, target_urls=[])
+    with pytest.raises(MarketplaceError, match="bounty expired"):
+        marketplace.award_bounty("poster", expired.bounty_id, accepted.dataset_id)
+    assert marketplace.get_bounty(expired.bounty_id).status == "expired"
+
 
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
     from src.marketplace.service import MarketplaceService

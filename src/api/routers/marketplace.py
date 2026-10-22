@@ -217,4 +217,7 @@ async def award_bounty(bounty_id: str, dataset_id: str, ctx: CtxDep,
         return _mkt(request).award_bounty(ctx["tenant"], bounty_id, dataset_id)
     except MarketplaceError as exc:
         msg = str(exc)
-        raise HTTPException(404 if "not found" in msg else 403 if "poster" in msg else 400, msg)
+        code = (404 if "not found" in msg else
+                403 if "poster" in msg else
+                409 if "bounty is" in msg or "bounty expired" in msg else 400)
+        raise HTTPException(code, msg)
