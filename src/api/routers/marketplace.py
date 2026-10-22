@@ -130,7 +130,10 @@ async def add_review(dataset_id: str, body: ReviewCreate, ctx: CtxDep,
         return _mkt(request).add_review(ctx["tenant"], dataset_id,
                                         body.rating, body.comment)
     except MarketplaceError as exc:
-        raise HTTPException(400, str(exc))
+        message = str(exc)
+        code = (403 if "purchase required" in message else
+                409 if "already reviewed" in message else 400)
+        raise HTTPException(code, message)
 
 
 @router.get("/datasets/{dataset_id}/reviews",
