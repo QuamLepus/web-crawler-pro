@@ -143,6 +143,25 @@ class MarketplaceService:
         bad = set(changes) - allowed
         if bad:
             raise MarketplaceError(f"fields not editable: {sorted(bad)}")
+        if "status" in changes and changes["status"] not in {
+                "draft", "published", "suspended", "archived"}:
+            raise MarketplaceError("invalid listing status")
+        if "price_usd_cents" in changes:
+            price = changes["price_usd_cents"]
+            if type(price) is not int or not 0 <= price <= 10_000_000:
+                raise MarketplaceError("price_usd_cents must be between 0 and 10000000")
+        if "title" in changes:
+            title = changes["title"]
+            if not isinstance(title, str) or not 3 <= len(title) <= 140:
+                raise MarketplaceError("title must contain between 3 and 140 characters")
+        if "description" in changes:
+            description = changes["description"]
+            if not isinstance(description, str) or not 20 <= len(description) <= 5000:
+                raise MarketplaceError("description must contain between 20 and 5000 characters")
+        if "license" in changes:
+            license_name = changes["license"]
+            if not isinstance(license_name, str) or not 1 <= len(license_name) <= 80:
+                raise MarketplaceError("license must contain between 1 and 80 characters")
         old_tags = list(lst.tags)
         updated_tags = None
         if "tags" in changes:
