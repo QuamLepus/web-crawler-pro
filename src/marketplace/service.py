@@ -260,8 +260,23 @@ class MarketplaceService:
         if buyer not in buyers:
             raise MarketplaceError("purchase required to review dataset")
 
-        rid = uuid.uuid4().hex[:12]
         reviewer_key = f"mkt:reviewer:{dataset_id}:{buyer}"
+        if self.r.exists(reviewer_key):
+            raise MarketplaceError("buyer has already reviewed this dataset")
+        # Pre-existing reviews predate the reviewer lock. Backfill the marker
+        # when encountered so the one-review rule also holds across upgrades.
+        for raw_review_id in self.r.lrange(f"mkt:reviews:{dataset_id}", 0, -1):
+            existing_id = (raw_review_id.decode()
+                           if isinstance(raw_review_id, bytes) else raw_review_id)
+            existing_raw = self.r.hget(f"mkt:review:{existing_id}", "data")
+            if not existing_raw:
+                continue
+            existing = json.loads(existing_raw)
+            if existing.get("buyer_tenant") == buyer:
+                self.r.set(reviewer_key, existing_id, nx=True)
+                raise MarketplaceError("buyer has already reviewed this dataset")
+
+        rid = uuid.uuid4().hex[:12]
         if not self.r.set(reviewer_key, rid, nx=True):
             raise MarketplaceError("buyer has already reviewed this dataset")
         rev = {"review_id": rid, "dataset_id": dataset_id, "buyer_tenant": buyer,
