@@ -312,6 +312,26 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     assert marketplace.get_bounty(expired.bounty_id).status == "expired"
 
 
+def test_open_bounty_listing_expires_deadlines_and_fills_result_limit(client):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    expired = marketplace.create_bounty(
+        "poster", title="Past deadline bounty",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=0, target_urls=[])
+    current = marketplace.create_bounty(
+        "poster", title="Current public bounty",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+
+    listed = marketplace.list_open_bounties(limit=2)
+
+    assert [bounty.bounty_id for bounty in listed] == [current.bounty_id]
+    assert marketplace.get_bounty(expired.bounty_id).status == "expired"
+    assert marketplace.r.zscore("mkt:bounties:open", expired.bounty_id) is None
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
     from src.marketplace.service import MarketplaceService
 

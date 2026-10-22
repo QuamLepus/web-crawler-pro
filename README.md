@@ -350,7 +350,7 @@ curl -X POST localhost:8000/v1/jobs/crawl -H "X-API-Key: $KEY" \
 | Marketplace | datasets, bounties, submissions, awards, purchases, reviews, deliveries |
 | Ops | `GET /healthz`, `/readyz`, `/metrics` |
 
-Marketplace reviews can be submitted only by a tenant that purchased the dataset, once per dataset; review reads omit buyer tenant IDs and follow listing visibility (published listings, or the authenticated seller's own listings). Bounty submissions must reference a published listing owned by the submitting tenant, and submitting the same listing twice does not inflate the submission count. A bounty can be awarded only once by its poster, and an expired bounty cannot be awarded.
+Marketplace reviews can be submitted only by a tenant that purchased the dataset, once per dataset; review reads omit buyer tenant IDs and follow listing visibility (published listings, or the authenticated seller's own listings). Bounty submissions must reference a published listing owned by the submitting tenant, and submitting the same listing twice does not inflate the submission count. A bounty can be awarded only once by its poster, and an expired bounty cannot be awarded. Open-bounty reads lazily mark past-deadline items as expired and omit them.
 
 Interactive docs at `/docs`, GraphiQL at `/graphql`.
 
