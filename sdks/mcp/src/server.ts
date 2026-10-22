@@ -369,6 +369,17 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_bounty_submissions_list", "List submitted dataset IDs for a bounty owned by the authenticated poster.", {
+    bounty_id: z.string().regex(/^bty_[a-f0-9]{12}$/),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).max(10000).optional(),
+  }, async ({ bounty_id, limit, offset }) => {
+    try {
+      return result(await client.listMarketplaceBountySubmissions(
+        bounty_id, limit, offset));
+    } catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_my_datasets_list", "List datasets published or managed by the authenticated seller, including drafts, with optional status and pagination filters.", {
     status: z.enum(["draft", "published", "suspended", "archived"]).optional(),
     limit: z.number().int().min(1).max(100).optional(),

@@ -265,6 +265,14 @@ class Client:
         """List open public marketplace bounties; does not submit or award work."""
         return self._request("GET", "marketplace/bounties", params={"limit": limit})
 
+    def list_marketplace_bounty_submissions(self, bounty_id: str, *,
+                                            limit: int = 50,
+                                            offset: int = 0) -> list[str]:
+        """List submissions for a bounty owned by this tenant."""
+        return self._request("GET",
+            f"marketplace/bounties/{quote(bounty_id, safe='')}/submissions",
+            params={"limit": limit, "offset": offset})
+
     def store_provenance_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Store caller-supplied provenance metadata for this tenant."""
         return self._request("POST", "provenance/records", json=record)
