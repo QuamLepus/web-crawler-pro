@@ -30,6 +30,36 @@ test('MCP ask tool forwards safely to the API client and returns citations', asy
   await server.close();
 });
 
+test('MCP billing tools read public plans and the authenticated tenant usage', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, key: init.headers['X-API-Key'] });
+    const payload = url.endsWith('/billing/plans') ? { tiers: { starter: {} } }
+      : { tenant: 'tenant-1', period: '2026-10', requests: 12 };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'billing-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const plans = await client.callTool({ name: 'wio_billing_plans', arguments: {} });
+    const usage = await client.callTool({ name: 'wio_billing_usage', arguments: {} });
+    assert.equal(plans.isError, undefined);
+    assert.equal(usage.isError, undefined);
+    assert.match(plans.content[0].text, /starter/);
+    assert.match(usage.content[0].text, /tenant-1/);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/billing/plans', method: 'GET', key: 'billing-key' },
+      { url: 'http://localhost:8000/api/v1/billing/usage', method: 'GET', key: 'billing-key' },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test('stdio MCP transport initializes, lists tools, and forwards an authenticated API call', async (t) => {
   const http = require('node:http');
   const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
@@ -58,7 +88,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   await client.connect(transport);
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
+    'wio_ask', 'wio_billing_plans', 'wio_billing_usage', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
     'wio_discovery_approve', 'wio_discovery_cancel', 'wio_discovery_candidate_drop',
     'wio_discovery_candidates', 'wio_discovery_create', 'wio_discovery_list',
     'wio_discovery_preview', 'wio_discovery_results', 'wio_discovery_status',

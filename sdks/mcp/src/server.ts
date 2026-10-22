@@ -161,6 +161,16 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_billing_plans", "Read public pricing plan information; this tool does not create a checkout session.", {}, async () => {
+    try { return result(await client.listBillingPlans()); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_billing_usage", "Read the authenticated tenant's current-period usage summary; this is read-only and does not change a plan.", {}, async () => {
+    try { return result(await client.getBillingUsage()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_crawl_create", "Queue a crawl job. Robots.txt is obeyed by default.", {
     url: z.string().url(), max_pages: z.number().int().min(1).max(1000).optional(),
   }, async ({ url, max_pages }) => {

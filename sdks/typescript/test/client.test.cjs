@@ -226,6 +226,23 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('billing methods read plans and current-tenant usage', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify(url.endsWith('/billing/plans')
+      ? { tiers: { starter: {} } } : { tenant: 'tenant-1', requests: 12 }), { status: 200 });
+  } });
+  const plans = await client.listBillingPlans();
+  const usage = await client.getBillingUsage();
+  assert.deepEqual(plans, { tiers: { starter: {} } });
+  assert.deepEqual(usage, { tenant: 'tenant-1', requests: 12 });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/billing/plans', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/billing/usage', method: 'GET' },
+  ]);
+});
+
 test('marketplace methods search published datasets and encode dataset IDs', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {

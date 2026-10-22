@@ -285,6 +285,26 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_billing_methods_read_plans_and_current_tenant_usage():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        payload = {"tiers": {"starter": {}}} if request.url.path.endswith("/billing/plans") \
+            else {"tenant": "tenant-1", "requests": 12}
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.list_billing_plans() == {"tiers": {"starter": {}}}
+        assert client.get_billing_usage() == {"tenant": "tenant-1", "requests": 12}
+
+    assert calls == [
+        ("GET", "/api/v1/billing/plans"),
+        ("GET", "/api/v1/billing/usage"),
+    ]
+
+
 def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     calls = []
 

@@ -188,6 +188,14 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def list_billing_plans(self) -> dict[str, Any]:
+        """Read public plan and pricing information."""
+        return self._request("GET", "billing/plans")
+
+    def get_billing_usage(self) -> dict[str, Any]:
+        """Read the authenticated tenant's current-period usage summary."""
+        return self._request("GET", "billing/usage")
+
     def search_marketplace_datasets(self, *, q: str = "", tag: str = "",
                                     max_price_cents: int | None = None,
                                     limit: int = 20) -> list[dict[str, Any]]:

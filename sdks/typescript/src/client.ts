@@ -253,6 +253,14 @@ export class WebIntelligenceClient {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
   }
 
+  listBillingPlans(): Promise<JsonObject> {
+    return this.request("GET", "billing/plans");
+  }
+
+  getBillingUsage(): Promise<JsonObject> {
+    return this.request("GET", "billing/usage");
+  }
+
   searchMarketplaceDatasets(options: MarketplaceSearchOptions = {}): Promise<JsonObject[]> {
     const params = new URLSearchParams();
     if (options.q !== undefined) params.set("q", options.q);
