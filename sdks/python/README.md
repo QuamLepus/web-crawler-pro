@@ -40,7 +40,7 @@ running. Historical runs are retained when a workflow is deleted.
 
 The SDK does not start Celery workers or Beat. Recurring and asynchronous
 workflow execution requires those services to be configured in the deployment.
-The client also exposes `semantic_search`, `rag_query`, `create_crawl`, `list_jobs`, `get_job`, and `cancel_job`; `list_jobs`
+The client also exposes `list_graph`, `upsert_graph_entity`, `get_graph_entity`, and `add_graph_relation` for tenant-isolated graph data (exact normalized alias matching, not fuzzy resolution), plus `semantic_search`, `rag_query`, `create_crawl`, `list_jobs`, `get_job`, and `cancel_job`; `list_jobs`
 supports bounded pagination and optional state filtering. Crawl
 cancellation is cooperative, so an in-flight page may finish before the job
 stops. Watch methods include `list_watches`, `create_watch`, `run_watch`, `watch_changes`,

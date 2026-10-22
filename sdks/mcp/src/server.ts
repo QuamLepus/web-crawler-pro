@@ -26,6 +26,13 @@ const webhookTestDataSchema = z.record(z.unknown()).refine((data) => {
   catch { return false; }
 }, "test data must be JSON and at most 64 KiB");
 
+const graphPropertiesSchema = z.record(z.string().max(128), z.unknown()).refine((data) => {
+  try { return Buffer.byteLength(JSON.stringify(data), "utf8") <= 65536; }
+  catch { return false; }
+}, "graph properties must be JSON and at most 64 KiB");
+
+const graphEntityIdSchema = z.string().regex(/^ent_[a-f0-9]{24}$/);
+
 const semanticSearchFilterSchema = z.record(z.string().min(1).max(128),
   z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]))
   .refine((filter) => Object.keys(filter).length <= 50,
@@ -145,6 +152,44 @@ export function buildServer(client: WebIntelligenceClient) {
     job_id: z.string().regex(/^job_[a-f0-9]{20}$/),
   }, async ({ job_id }) => {
     try { return result(await client.cancelJob(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_graph_list", "List up to 500 entities and relationships in the authenticated tenant's knowledge graph.", {
+    limit: z.number().int().min(1).max(500).optional(),
+  }, async ({ limit }) => {
+    try { return result(await client.listGraph(limit)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_graph_entity_upsert", "Create or exactly resolve a tenant graph entity; aliases merge only when they resolve unambiguously.", {
+    name: z.string().min(1).max(256),
+    entity_type: z.string().min(1).max(80).optional(),
+    aliases: z.array(z.string().max(256)).max(50).optional(),
+    properties: graphPropertiesSchema.optional(),
+  }, async ({ name, entity_type, aliases, properties }) => {
+    try { return result(await client.upsertGraphEntity({
+      name, entityType: entity_type, aliases, properties,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_graph_entity_get", "Retrieve one tenant-owned graph entity and its relationships.", {
+    entity_id: graphEntityIdSchema,
+  }, async ({ entity_id }) => {
+    try { return result(await client.getGraphEntity(entity_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_graph_relation_add", "Connect two existing entities in the authenticated tenant's graph.", {
+    source_id: graphEntityIdSchema,
+    target_id: graphEntityIdSchema,
+    relation: z.string().min(1).max(80),
+    properties: graphPropertiesSchema.optional(),
+  }, async ({ source_id, target_id, relation, properties }) => {
+    try { return result(await client.addGraphRelation({
+      sourceId: source_id, targetId: target_id, relation, properties,
+    })); }
     catch (error) { return failure(error); }
   });
 

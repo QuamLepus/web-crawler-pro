@@ -59,7 +59,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
-    'wio_rag',
+    'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
+    'wio_graph_relation_add', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
     'wio_search',
     'wio_studio_analytics', 'wio_studio_query_delete', 'wio_studio_query_list',
@@ -420,6 +421,54 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP knowledge-graph tools forward tenant-scoped bounded contracts', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'graph-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ entity_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa' }),
+      { status: init.method === 'POST' && url.endsWith('/relations') ? 201 : 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'graph-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const listed = await client.callTool({ name: 'wio_graph_list', arguments: { limit: 12 } });
+    const entity = await client.callTool({ name: 'wio_graph_entity_upsert', arguments: {
+      name: 'Open Knowledge', entity_type: 'Project', aliases: ['OK'],
+      properties: { region: 'global' },
+    } });
+    const fetched = await client.callTool({ name: 'wio_graph_entity_get', arguments: {
+      entity_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+    } });
+    const relation = await client.callTool({ name: 'wio_graph_relation_add', arguments: {
+      source_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+      target_id: 'ent_bbbbbbbbbbbbbbbbbbbbbbbb', relation: 'supports',
+      properties: { confidence: 0.9 },
+    } });
+    assert.equal(listed.isError, undefined);
+    assert.equal(entity.isError, undefined);
+    assert.equal(fetched.isError, undefined);
+    assert.equal(relation.isError, undefined);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/graph?limit=12', method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/graph/entities', method: 'POST',
+        body: { name: 'Open Knowledge', entity_type: 'Project', aliases: ['OK'],
+          properties: { region: 'global' } } },
+      { url: 'http://localhost:8000/api/v1/graph/entities/ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/graph/relations', method: 'POST',
+        body: { source_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+          target_id: 'ent_bbbbbbbbbbbbbbbbbbbbbbbb', relation: 'supports',
+          properties: { confidence: 0.9 } } },
     ]);
   } finally {
     await client.close();

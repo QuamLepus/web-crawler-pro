@@ -188,6 +188,31 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def list_graph(self, *, limit: int = 100) -> dict[str, Any]:
+        """List the authenticated tenant's bounded knowledge graph."""
+        return self._request("GET", "graph", params={"limit": limit})
+
+    def upsert_graph_entity(self, name: str, *, entity_type: str = "Entity",
+                            aliases: list[str] | None = None,
+                            properties: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create or exactly resolve a tenant graph entity and merge its fields."""
+        return self._request("POST", "graph/entities", json={
+            "name": name, "entity_type": entity_type,
+            "aliases": aliases or [], "properties": properties or {},
+        })
+
+    def get_graph_entity(self, entity_id: str) -> dict[str, Any]:
+        """Retrieve a tenant graph entity and its relationships."""
+        return self._request("GET", f"graph/entities/{quote(entity_id, safe='')}")
+
+    def add_graph_relation(self, source_id: str, target_id: str, relation: str, *,
+                           properties: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Connect two existing graph entities owned by the authenticated tenant."""
+        return self._request("POST", "graph/relations", json={
+            "source_id": source_id, "target_id": target_id,
+            "relation": relation, "properties": properties or {},
+        })
+
     def rag_query(self, query: str, *, top_k: int | None = None,
                   include_sources: bool | None = None) -> dict[str, Any]:
         """Synthesize a tenant-scoped answer from retrieved indexed content."""

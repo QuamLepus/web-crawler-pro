@@ -285,6 +285,44 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_knowledge_graph_methods_follow_api_contract():
+    import json
+
+    calls = []
+
+    def handler(request):
+        calls.append({
+            "method": request.method, "path": request.url.raw_path.decode(),
+            "body": json.loads(request.read()) if request.content else None,
+        })
+        return httpx.Response(201 if request.method == "POST"
+                              and request.url.path.endswith("/relations") else 200,
+                              json={"entity_id": "ent_aaaaaaaaaaaaaaaaaaaaaaaa"})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.list_graph(limit=12)
+        client.upsert_graph_entity("Open Knowledge", entity_type="Project",
+                                   aliases=["OK"], properties={"region": "global"})
+        client.get_graph_entity("ent_aaaaaaaaaaaaaaaaaaaaaaaa")
+        client.add_graph_relation("ent_aaaaaaaaaaaaaaaaaaaaaaaa",
+                                  "ent_bbbbbbbbbbbbbbbbbbbbbbbb", "supports",
+                                  properties={"confidence": 0.9})
+
+    assert calls == [
+        {"method": "GET", "path": "/api/v1/graph?limit=12", "body": None},
+        {"method": "POST", "path": "/api/v1/graph/entities",
+         "body": {"name": "Open Knowledge", "entity_type": "Project", "aliases": ["OK"],
+                  "properties": {"region": "global"}}},
+        {"method": "GET", "path": "/api/v1/graph/entities/ent_aaaaaaaaaaaaaaaaaaaaaaaa",
+         "body": None},
+        {"method": "POST", "path": "/api/v1/graph/relations",
+         "body": {"source_id": "ent_aaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_id": "ent_bbbbbbbbbbbbbbbbbbbbbbbb", "relation": "supports",
+                  "properties": {"confidence": 0.9}}},
+    ]
+
+
 def test_rag_query_encodes_query_and_forwards_optional_controls():
     calls = []
 
