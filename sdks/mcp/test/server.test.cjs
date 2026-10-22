@@ -59,8 +59,9 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
-    'wio_discovery_cancel', 'wio_discovery_candidates', 'wio_discovery_create',
-    'wio_discovery_list', 'wio_discovery_preview', 'wio_discovery_status',
+    'wio_discovery_approve', 'wio_discovery_cancel', 'wio_discovery_candidate_drop',
+    'wio_discovery_candidates', 'wio_discovery_create', 'wio_discovery_list',
+    'wio_discovery_preview', 'wio_discovery_results', 'wio_discovery_status',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
     'wio_graph_relation_add', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
@@ -479,6 +480,48 @@ test('MCP discovery job tools queue only human-reviewed candidates and expose st
         method: 'GET', body: undefined },
       { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/cancel',
         method: 'POST', body: undefined },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP discovery review requires explicit domains before starting crawls', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'discovery-review-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    const payload = url.endsWith('/results') ? { sites_total: 1 }
+      : url.includes('/candidates') ? [{ domain: 'example.org', rejected: true }]
+        : { job_id: 'disc_aaaaaaaaaaaa', state: 'crawling' };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'discovery-review-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const dropped = await client.callTool({ name: 'wio_discovery_candidate_drop', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa', domain: 'example.org',
+    } });
+    const approved = await client.callTool({ name: 'wio_discovery_approve', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa', domains: ['example.org'],
+    } });
+    const report = await client.callTool({ name: 'wio_discovery_results', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa',
+    } });
+    for (const response of [dropped, approved, report]) {
+      assert.equal(response.isError, undefined);
+    }
+    assert.match(report.content[0].text, /sites_total/);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/candidates/example.org',
+        method: 'DELETE', body: undefined },
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/approve',
+        method: 'POST', body: { domains: ['example.org'] } },
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/results',
+        method: 'GET', body: undefined },
     ]);
   } finally {
     await client.close();

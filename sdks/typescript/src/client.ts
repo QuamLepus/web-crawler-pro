@@ -273,6 +273,19 @@ export class WebIntelligenceClient {
     return this.request("POST", `discovery/${encodeURIComponent(jobId)}/cancel`);
   }
 
+  dropDiscoveryCandidate(jobId: string, domain: string): Promise<JsonObject[]> {
+    return this.request<JsonObject[]>("DELETE",
+      `discovery/${encodeURIComponent(jobId)}/candidates/${encodeURIComponent(domain)}`);
+  }
+
+  approveDiscovery(jobId: string, domains: string[]): Promise<JsonObject> {
+    return this.request("POST", `discovery/${encodeURIComponent(jobId)}/approve`, { domains });
+  }
+
+  getDiscoveryResults(jobId: string): Promise<JsonObject> {
+    return this.request("GET", `discovery/${encodeURIComponent(jobId)}/results`);
+  }
+
   previewDiscovery(topic: string, options: DiscoveryPreviewOptions = {}): Promise<JsonObject> {
     return this.request("POST", "discovery/preview", {
       topic,

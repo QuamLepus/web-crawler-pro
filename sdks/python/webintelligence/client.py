@@ -226,6 +226,21 @@ class Client:
         """Cancel a tenant-owned discovery job before approval."""
         return self._request("POST", f"discovery/{quote(job_id, safe='')}/cancel")
 
+    def drop_discovery_candidate(self, job_id: str, domain: str) -> list[dict[str, Any]]:
+        """Remove one domain from a tenant-owned, not-yet-approved shortlist."""
+        return self._request("DELETE",
+                             f"discovery/{quote(job_id, safe='')}/candidates/"
+                             f"{quote(domain, safe='')}")
+
+    def approve_discovery(self, job_id: str, domains: list[str]) -> dict[str, Any]:
+        """Start crawls for explicitly selected candidate domains."""
+        return self._request("POST", f"discovery/{quote(job_id, safe='')}/approve",
+                             json={"domains": domains})
+
+    def get_discovery_results(self, job_id: str) -> dict[str, Any]:
+        """Read the per-site report for a tenant-owned discovery job."""
+        return self._request("GET", f"discovery/{quote(job_id, safe='')}/results")
+
     def preview_discovery(self, topic: str, *, count: int | None = None,
                           seeds: list[str] | None = None, language: str | None = None,
                           per_domain: int | None = None) -> dict[str, Any]:
