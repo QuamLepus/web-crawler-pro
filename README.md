@@ -371,10 +371,12 @@ POST /v1/jobs/crawl  →  Scheduler (quota gate)  →  Celery: crawl_domain
      → on finish: data_sha256 stamped, crawl.completed webhook emitted
 ```
 
-Because the digest is written to the job record, a finished crawl can be published straight
-to the marketplace with `source_job_id`. Job status, crawl results, and the
-completion webhook also report `robots_blocked`, the number of queued URLs
-skipped because robots policy denied access or could not be retrieved.
+Because the digest is written to the job record, the owning tenant can publish a
+completed crawl to the marketplace with `source_job_id`. Publication rejects missing
+or foreign-tenant jobs and non-completed crawls; digest and crawl counters are read
+from that tenant-scoped job record. Job status, crawl results, and the completion
+webhook also report `robots_blocked`, the number of queued URLs skipped because
+robots policy denied access or could not be retrieved.
 
 Crawl-job cancellation is cooperative: an in-flight page is allowed to finish,
 but the worker stops before starting another page and preserves the cancelled

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from src.api.routers.jobs import CtxDep
+from src.api.routers.jobs import JOB_KEY, CtxDep
 from src.api.schemas import (BountyCreate, BountyOut, DatasetListingCreate,
                              DatasetListingOut, DeliveryManifest, ReviewCreate,
                              ReviewOut)
@@ -30,23 +31,37 @@ def _mkt(request: Request) -> MarketplaceService:
 async def create_listing(body: DatasetListingCreate, ctx: CtxDep,
                          request: Request) -> DatasetListingOut:
     mkt = _mkt(request)
-    # In production the source job's output object carries the digest; here we
-    # require it via metadata on the job record and fail clearly when absent.
-    sha = ""
-    rec: dict = {}
-    if body.source_job_id:
-        raw = mkt.r.hget(f"wcp:v1:job:{body.source_job_id}", "data_sha256")
-        sha = raw.decode() if isinstance(raw, bytes) else (raw or "")
-    if not sha:
-        raise HTTPException(422, "dataset must be hashed before listing "
-                                 "(publish via worker pipeline or set data_sha256)")
+    if not body.source_job_id:
+        raise HTTPException(422, "source_job_id is required to publish a dataset")
+    raw_source = mkt.r.hgetall(JOB_KEY.format(job_id=body.source_job_id))
+    source = {
+        (key.decode() if isinstance(key, bytes) else str(key)):
+        (value.decode() if isinstance(value, bytes) else str(value))
+        for key, value in raw_source.items()
+    }
+    if not source or source.get("tenant") != str(ctx["tenant"]):
+        # Deliberately make a foreign-tenant job indistinguishable from an
+        # absent job so callers cannot probe another tenant's crawl IDs.
+        raise HTTPException(404, "source crawl not found")
+    if source.get("state") != "completed":
+        raise HTTPException(422, "source crawl must be completed before listing")
+    sha = source.get("data_sha256", "")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", sha):
+        raise HTTPException(422, "source crawl has no valid content digest")
+    try:
+        record_count = int(source.get("items_collected", "0"))
+        token_count = int(source.get("tokens_generated", "0"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "source crawl counters are invalid") from exc
+    if record_count < 0 or token_count < 0:
+        raise HTTPException(422, "source crawl counters are invalid")
     try:
         lst = mkt.create_listing(
             ctx["tenant"], title=body.title, description=body.description,
             tags=body.tags, price_usd_cents=body.price_usd_cents,
             license=body.license, content_sha256=sha,
-            record_count=int(rec.get("items_collected", 0) or 0),
-            token_count=int(rec.get("tokens_generated", 0) or 0),
+            record_count=record_count,
+            token_count=token_count,
             storage_uri=f"s3://wcp-tenants/{ctx['tenant']}/{body.source_job_id}")
     except MarketplaceError as exc:
         raise HTTPException(422, str(exc))
