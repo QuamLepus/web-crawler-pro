@@ -248,6 +248,31 @@ def test_marketplace_tag_updates_normalize_and_refresh_search_indexes(client):
     assert marketplace.get_listing(listing.dataset_id).tags == ["new tag", "fresh"]
 
 
+def test_marketplace_search_scans_past_the_first_501_listings(client):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    oldest = marketplace.create_listing(
+        "seller", title="Rare marker collection",
+        description="A dataset deliberately placed beyond the original search cap.",
+        tags=["catalog"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="a" * 64)
+    newer_ids = []
+    for i in range(501):
+        listing = marketplace.create_listing(
+            "seller", title=f"Common collection {i}",
+            description="A recent dataset without the target terms.",
+            tags=["catalog"], price_usd_cents=0, license="CC-BY-4.0",
+            content_sha256=f"{i + 1:064x}")
+        newer_ids.append(listing.dataset_id)
+    marketplace.r.zadd("mkt:listings:new", {oldest.dataset_id: 0, **{
+        dataset_id: float(rank) for rank, dataset_id in enumerate(newer_ids, start=1)}})
+
+    results = marketplace.search_listings(query="rare marker", limit=1)
+
+    assert [listing.dataset_id for listing in results] == [oldest.dataset_id]
+
+
 def test_marketplace_purchase_fails_closed_without_strong_signing_secret(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
