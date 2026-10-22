@@ -387,16 +387,36 @@ class MarketplaceService:
         self.r.hset(f"mkt:bounty:{b.bounty_id}", "data", json.dumps(asdict(b)))
 
     def list_open_bounties(self, limit: int = 50) -> list[BountyOut]:
-        ids = self.r.zrevrange("mkt:bounties:open", 0, limit - 1)
         out = []
-        for i in ids:
-            b = self.get_bounty(i.decode() if isinstance(i, bytes) else i)
-            if b and b.status == "open":
+        expired_ids = []
+        start = 0
+        batch_size = max(limit, 50)
+        now = utcnow()
+        while len(out) < limit:
+            ids = self.r.zrevrange("mkt:bounties:open", start,
+                                   start + batch_size - 1)
+            if not ids:
+                break
+            start += len(ids)
+            for raw_id in ids:
+                bounty_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                b = self.get_bounty(bounty_id)
+                if not b or b.status != "open":
+                    expired_ids.append(bounty_id)
+                    continue
+                if datetime.fromisoformat(b.deadline) < now:
+                    self._set_bounty_status(b, "expired")
+                    expired_ids.append(bounty_id)
+                    continue
                 out.append(BountyOut(
                     bounty_id=b.bounty_id, poster_tenant=b.poster_tenant,
                     title=b.title, spec=b.spec, reward_usd_cents=b.reward_usd_cents,
                     deadline=datetime.fromisoformat(b.deadline), status=b.status,
                     submissions=b.submissions))
+                if len(out) >= limit:
+                    break
+        if expired_ids:
+            self.r.zrem("mkt:bounties:open", *expired_ids)
         return out
 
     @staticmethod
