@@ -164,26 +164,39 @@ class MarketplaceService:
     def search_listings(self, *, query: str = "", tag: str = "",
                         max_price_cents: int | None = None,
                         limit: int = 20) -> list[Listing]:
-        ids = [i.decode() if isinstance(i, bytes) else i
-               for i in self.r.zrevrange("mkt:listings:new", 0, 500)]
-        if tag:
-            tagged = {x.decode() if isinstance(x, bytes) else x
-                      for x in self.r.smembers(f"mkt:tag:{tag.lower()}")}
-            ids = [i for i in ids if i in tagged]
         out = []
         q = query.lower()
-        for i in ids:
-            lst = self.get_listing(i)
-            if not lst or lst.status != "published":
-                continue
-            if max_price_cents is not None and lst.price_usd_cents > max_price_cents:
-                continue
-            if q and q not in (lst.title + " " + lst.description + " " +
-                               " ".join(lst.tags)).lower():
-                continue
-            out.append(lst)
-            if len(out) >= limit:
+        normalized_tag = tag.strip().lower()
+        tagged = None
+        if normalized_tag:
+            tagged = {x.decode() if isinstance(x, bytes) else x
+                      for x in self.r.smembers(f"mkt:tag:{normalized_tag}")}
+
+        start = 0
+        batch_size = 100
+        while len(out) < limit:
+            batch = self.r.zrevrange("mkt:listings:new", start,
+                                     start + batch_size - 1)
+            if not batch:
                 break
+            start += len(batch)
+            for raw_id in batch:
+                dataset_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                if tagged is not None and dataset_id not in tagged:
+                    continue
+                listing = self.get_listing(dataset_id)
+                if not listing or listing.status != "published":
+                    continue
+                if normalized_tag and normalized_tag not in listing.tags:
+                    continue
+                if max_price_cents is not None and listing.price_usd_cents > max_price_cents:
+                    continue
+                if q and q not in (listing.title + " " + listing.description + " " +
+                                   " ".join(listing.tags)).lower():
+                    continue
+                out.append(listing)
+                if len(out) >= limit:
+                    break
         return out
 
     def build_preview(self, dataset_id: str, records: Iterable[dict],
