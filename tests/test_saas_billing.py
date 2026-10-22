@@ -263,6 +263,41 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(c
     assert hidden.status_code == 404
 
 
+def test_marketplace_bounty_submissions_require_owned_published_unique_listings(client):
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Collect public records",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+
+    def listing(owner, title, digest):
+        return marketplace.create_listing(
+            owner, title=title,
+            description="Dataset used to verify bounty submission ownership rules.",
+            tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+            content_sha256=digest * 64)
+
+    draft = listing("worker", "Draft dataset", "a")
+    marketplace.update_listing(draft.dataset_id, "worker", status="draft")
+    published = listing("other-worker", "Another worker's dataset", "b")
+    accepted = listing("worker", "Worker's public dataset", "c")
+
+    with pytest.raises(MarketplaceError, match="published listing"):
+        marketplace.submit_for_bounty("worker", bounty.bounty_id, draft.dataset_id)
+    with pytest.raises(MarketplaceError, match="listing owner"):
+        marketplace.submit_for_bounty("worker", bounty.bounty_id, published.dataset_id)
+
+    result = marketplace.submit_for_bounty("worker", bounty.bounty_id,
+                                           accepted.dataset_id)
+    assert result["queued_for_review"] is True
+    with pytest.raises(MarketplaceError, match="already submitted"):
+        marketplace.submit_for_bounty("worker", bounty.bounty_id,
+                                      accepted.dataset_id)
+    assert marketplace.get_bounty(bounty.bounty_id).submissions == 1
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
     from src.marketplace.service import MarketplaceService
 
