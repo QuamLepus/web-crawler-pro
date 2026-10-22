@@ -200,6 +200,23 @@ class Client:
         """Check spelling against the platform's own-index vocabulary."""
         return self._request("GET", "search-index/spell", params={"q": query})
 
+    def search_own_index(self, query: str, *, limit: int = 10,
+                         sources: list[str] | None = None,
+                         collapse_host: bool | None = None,
+                         rerank: Literal["none", "embedding", "cross-encoder"] | None = None,
+                         spell: bool | None = None) -> dict[str, Any]:
+        """Search the platform's prebuilt index; results may contain licensed snippets."""
+        body: dict[str, Any] = {"q": query, "limit": limit}
+        if sources is not None:
+            body["sources"] = sources
+        if collapse_host is not None:
+            body["collapse_host"] = collapse_host
+        if rerank is not None:
+            body["rerank"] = rerank
+        if spell is not None:
+            body["spell"] = spell
+        return self._request("POST", "search-index/query", json=body)
+
     def list_billing_plans(self) -> dict[str, Any]:
         """Read public plan and pricing information."""
         return self._request("GET", "billing/plans")

@@ -90,6 +90,36 @@ test('MCP own-index levels tool reads roadmap metadata without issuing a query',
   }
 });
 
+test('MCP own-index query forwards bounded controls and source filters', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'index-query-key', fetch: async (url, init) => {
+    request = { url, method: init.method, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ count: 1, results: [{ source: 'wikipedia', snippet: 'Solar energy.' }] }),
+      { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'index-query-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_search_index_query', arguments: {
+      q: 'solar energy', limit: 4, sources: ['wikipedia'],
+      collapse_host: false, rerank: 'none', spell: false,
+    } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /wikipedia/);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/search-index/query', method: 'POST',
+      body: { q: 'solar energy', limit: 4, sources: ['wikipedia'],
+        collapse_host: false, rerank: 'none', spell: false },
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test('MCP own-index stats tool reads sanitized availability metrics', async () => {
   let request;
   const api = new WebIntelligenceClient({ apiKey: 'index-key', fetch: async (url, init) => {
@@ -180,7 +210,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_marketplace_dataset_search', 'wio_marketplace_delivery_get', 'wio_provenance_manifest_export',
     'wio_provenance_record_get', 'wio_provenance_record_store', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
-    'wio_search', 'wio_search_index_levels', 'wio_search_index_spell', 'wio_search_index_stats',
+    'wio_search', 'wio_search_index_levels', 'wio_search_index_query', 'wio_search_index_spell', 'wio_search_index_stats',
     'wio_studio_analytics', 'wio_studio_query_delete', 'wio_studio_query_list',
     'wio_studio_query_save', 'wio_studio_snapshot_create', 'wio_studio_snapshot_delete',
     'wio_studio_snapshot_get', 'wio_studio_snapshot_list',
