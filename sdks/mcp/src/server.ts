@@ -395,6 +395,14 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_reviews_list", "List public reviews for a published dataset (or one owned by the authenticated tenant); buyer tenant IDs are omitted.", {
+    dataset_id: z.string().min(1).max(160),
+    limit: z.number().int().min(1).max(200).optional(),
+  }, async ({ dataset_id, limit }) => {
+    try { return result(await client.listMarketplaceReviews(dataset_id, limit)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_watch_create", "Create a recurring single-page change watch (minimum 15 minutes).", {
     url: z.string().url(), interval_minutes: z.number().int().min(15).max(10080).optional(),
   }, async ({ url, interval_minutes }) => {

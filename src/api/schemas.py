@@ -433,6 +433,16 @@ class ReviewOut(BaseModel):
     created_at: datetime
 
 
+class MarketplaceReviewPublicOut(BaseModel):
+    """Public review projection, deliberately omitting buyer tenant identity."""
+    review_id: str
+    dataset_id: str
+    rating: int
+    comment: str
+    verified_purchase: bool
+    created_at: datetime
+
+
 class BountyCreate(BaseModel):
     title: str = Field(min_length=5, max_length=140)
     spec: str = Field(min_length=20, max_length=8000)

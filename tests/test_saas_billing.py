@@ -220,6 +220,38 @@ def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, ap
     assert own_draft.dataset_id not in visible_ids
 
 
+def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    public = marketplace.create_listing(
+        "seller-public", title="Public review target",
+        description="A public dataset used to verify review privacy behavior.",
+        tags=["reviews"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="f" * 64)
+    draft = marketplace.create_listing(
+        "seller-private", title="Private review target",
+        description="An unpublished dataset hidden from other marketplace tenants.",
+        tags=["reviews"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="e" * 64)
+    marketplace.update_listing(draft.dataset_id, "seller-private", status="draft")
+    headers = _headers(api_key)
+
+    posted = client.post(f"/v1/marketplace/datasets/{public.dataset_id}/reviews",
+                         headers=headers, json={"rating": 5, "comment": "Useful data."})
+    assert posted.status_code == 201, posted.text
+    reviews = client.get(f"/v1/marketplace/datasets/{public.dataset_id}/reviews",
+                         headers=headers, params={"limit": 10})
+    assert reviews.status_code == 200, reviews.text
+    assert len(reviews.json()) == 1
+    assert reviews.json()[0]["rating"] == 5
+    assert "buyer_tenant" not in reviews.json()[0]
+
+    hidden = client.get(f"/v1/marketplace/datasets/{draft.dataset_id}/reviews",
+                        headers=headers)
+    assert hidden.status_code == 404
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
     from src.marketplace.service import MarketplaceService
 

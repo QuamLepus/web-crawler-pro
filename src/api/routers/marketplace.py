@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.routers.jobs import JOB_KEY, CtxDep
 from src.api.schemas import (BountyCreate, BountyOut, DatasetListingCreate,
-                             DatasetListingOut, DeliveryManifest, ReviewCreate,
-                             ReviewOut)
+                             DatasetListingOut, DeliveryManifest,
+                             MarketplaceReviewPublicOut, ReviewCreate, ReviewOut)
 from src.marketplace.service import MarketplaceError, MarketplaceService
 
 logger = logging.getLogger("wcp.api.marketplace")
@@ -133,10 +133,17 @@ async def add_review(dataset_id: str, body: ReviewCreate, ctx: CtxDep,
         raise HTTPException(400, str(exc))
 
 
-@router.get("/datasets/{dataset_id}/reviews", response_model=list[ReviewOut])
+@router.get("/datasets/{dataset_id}/reviews",
+            response_model=list[MarketplaceReviewPublicOut])
 async def get_reviews(dataset_id: str, ctx: CtxDep, request: Request,
-                      limit: int = Query(50, ge=1, le=200)) -> list[ReviewOut]:
-    return _mkt(request).list_reviews(dataset_id, limit=limit)
+                      limit: int = Query(50, ge=1, le=200)) -> list[MarketplaceReviewPublicOut]:
+    marketplace = _mkt(request)
+    listing = marketplace.get_listing(dataset_id)
+    if listing is None or (listing.status != "published" and
+                           listing.seller_tenant != ctx["tenant"]):
+        raise HTTPException(404, "dataset not found")
+    return [MarketplaceReviewPublicOut(**review.model_dump(exclude={"buyer_tenant"}))
+            for review in marketplace.list_reviews(dataset_id, limit=limit)]
 
 
 # ------------------------------ purchase / delivery ----------------------- #

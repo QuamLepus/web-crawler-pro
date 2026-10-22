@@ -207,7 +207,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_discovery_preview', 'wio_discovery_results', 'wio_discovery_status',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
     'wio_graph_relation_add', 'wio_marketplace_bounties_list', 'wio_marketplace_dataset_get',
-    'wio_marketplace_dataset_search', 'wio_marketplace_delivery_get', 'wio_provenance_manifest_export',
+    'wio_marketplace_dataset_search', 'wio_marketplace_delivery_get',
+    'wio_marketplace_reviews_list', 'wio_provenance_manifest_export',
     'wio_provenance_record_get', 'wio_provenance_record_store', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
     'wio_search', 'wio_search_index_levels', 'wio_search_index_query', 'wio_search_index_spell', 'wio_search_index_stats',
@@ -729,15 +730,20 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
     const delivery = await client.callTool({ name: 'wio_marketplace_delivery_get', arguments: {
       delivery_id: 'dlv_0123456789ab',
     } });
+    const reviews = await client.callTool({ name: 'wio_marketplace_reviews_list', arguments: {
+      dataset_id: 'dataset:1', limit: 12,
+    } });
     assert.equal(bounties.isError, undefined);
     assert.equal(search.isError, undefined);
     assert.equal(get.isError, undefined);
     assert.equal(delivery.isError, undefined);
+    assert.equal(reviews.isError, undefined);
     assert.deepEqual(calls, [
       { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12', method: 'GET' },
     ]);
   } finally {
     await client.close();
