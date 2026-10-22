@@ -267,6 +267,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `marketplace/datasets/${encodeURIComponent(datasetId)}`);
   }
 
+  listMarketplaceBounties(limit = 50): Promise<JsonObject[]> {
+    return this.request<JsonObject[]>("GET", `marketplace/bounties?limit=${limit}`);
+  }
+
   storeProvenanceRecord(record: JsonObject): Promise<JsonObject> {
     return this.request("POST", "provenance/records", record);
   }
