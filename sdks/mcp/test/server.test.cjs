@@ -59,6 +59,7 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
+    'wio_discovery_preview',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
     'wio_graph_relation_add', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
@@ -422,6 +423,36 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
     ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP discovery preview is a bounded dry-run and submits no crawl job', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'discovery-preview-key', fetch: async (url, init) => {
+    request = { url, method: init.method, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ topic: 'AI medical devices', total_found: 0,
+      candidates: [] }), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'discovery-preview-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_discovery_preview', arguments: {
+      topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+      language: 'en', per_domain: 2,
+    } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /total_found/);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/discovery/preview', method: 'POST',
+      body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+        language: 'en', per_domain: 2 },
+    });
   } finally {
     await client.close();
     await server.close();

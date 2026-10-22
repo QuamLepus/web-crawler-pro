@@ -68,6 +68,13 @@ export interface ResearchCreateOptions {
   seeds?: string[];
 }
 
+export interface DiscoveryPreviewOptions {
+  count?: number;
+  seeds?: string[];
+  language?: string;
+  perDomain?: number;
+}
+
 export interface WatchCreateOptions {
   url: string;
   intervalMinutes?: number;
@@ -229,6 +236,16 @@ export class WebIntelligenceClient {
 
   cancelJob(jobId: string): Promise<JsonObject> {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  previewDiscovery(topic: string, options: DiscoveryPreviewOptions = {}): Promise<JsonObject> {
+    return this.request("POST", "discovery/preview", {
+      topic,
+      ...(options.count === undefined ? {} : { count: options.count }),
+      ...(options.seeds === undefined ? {} : { seeds: options.seeds }),
+      ...(options.language === undefined ? {} : { language: options.language }),
+      ...(options.perDomain === undefined ? {} : { per_domain: options.perDomain }),
+    });
   }
 
   createResearch(options: ResearchCreateOptions): Promise<JsonObject> {
