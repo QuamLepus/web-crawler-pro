@@ -30,6 +30,11 @@ export interface SemanticSearchOptions {
   filter?: JsonObject;
 }
 
+export interface RagOptions {
+  topK?: number;
+  includeSources?: boolean;
+}
+
 export type CrawlJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type WebhookEvent = "crawl.completed" | "crawl.failed" | "crawl.cancelled" |
   "data.ready" | "export.ready" | "quota.warning" | "dataset.sold" |
@@ -146,6 +151,15 @@ export class WebIntelligenceClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  ragQuery(query: string, options: RagOptions = {}): Promise<JsonObject> {
+    const params = new URLSearchParams({ q: query });
+    if (options.topK !== undefined) params.set("top_k", String(options.topK));
+    if (options.includeSources !== undefined) {
+      params.set("include_sources", String(options.includeSources));
+    }
+    return this.request("GET", `search/rag?${params.toString()}`);
   }
 
   semanticSearch(query: string, options: SemanticSearchOptions = {}): Promise<JsonObject> {
