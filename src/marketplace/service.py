@@ -256,6 +256,8 @@ class MarketplaceService:
             raise MarketplaceError("dataset not available")
         if lst.seller_tenant == buyer:
             raise MarketplaceError("cannot purchase your own dataset")
+        if lst.price_usd_cents > 0:
+            raise MarketplaceError("paid marketplace settlement is not configured")
         fee = (lst.price_usd_cents * self.FEE_BPS) // 10_000
         pur = Purchase(purchase_id=f"pur_{uuid.uuid4().hex[:12]}",
                        dataset_id=dataset_id, buyer_tenant=buyer,

@@ -228,10 +228,20 @@ def test_marketplace_purchase_fails_closed_without_strong_signing_secret(
     listing = marketplace.create_listing(
         "seller", title="Signing test dataset",
         description="Dataset used to check fail-closed marketplace signatures.",
-        tags=["signing"], price_usd_cents=100, license="CC-BY-4.0",
+        tags=["signing"], price_usd_cents=0, license="CC-BY-4.0",
         content_sha256="a" * 64)
+    paid = marketplace.create_listing(
+        "seller", title="Paid test dataset",
+        description="Dataset used to verify unavailable paid checkout is refused.",
+        tags=["payment"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="b" * 64)
     headers = _headers(api_key)
     monkeypatch.delenv("MARKETPLACE_SIGNING_SECRET", raising=False)
+
+    unpaid_checkout = client.post(
+        f"/v1/marketplace/datasets/{paid.dataset_id}/purchase", headers=headers)
+    assert unpaid_checkout.status_code == 503
+    assert "settlement" in unpaid_checkout.json()["detail"]
 
     missing = client.post(
         f"/v1/marketplace/datasets/{listing.dataset_id}/purchase", headers=headers)
@@ -256,7 +266,7 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
     public = marketplace.create_listing(
         "seller-public", title="Public review target",
         description="A public dataset used to verify review privacy behavior.",
-        tags=["reviews"], price_usd_cents=100, license="CC-BY-4.0",
+        tags=["reviews"], price_usd_cents=0, license="CC-BY-4.0",
         content_sha256="f" * 64)
     draft = marketplace.create_listing(
         "seller-private", title="Private review target",
