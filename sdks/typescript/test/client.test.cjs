@@ -226,6 +226,49 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('webhook methods preserve tenant API contracts and array responses', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'webhook-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    if (url.endsWith('/webhooks') && init.method === 'POST') {
+      return new Response(JSON.stringify({ id: '012345abcdef', secret: 'whsec-test-only' }),
+                         { status: 201 });
+    }
+    if (url.endsWith('/webhooks/test')) {
+      return new Response(JSON.stringify({ queued_deliveries: ['dlv_test'] }), { status: 200 });
+    }
+    if (init.method === 'DELETE') {
+      return new Response(JSON.stringify({ deleted: '012345abcdef' }), { status: 200 });
+    }
+    return new Response(JSON.stringify([{ id: '012345abcdef' }]), { status: 200 });
+  } });
+  const created = await client.createWebhook({ url: 'https://hooks.example/receiver',
+    events: ['research.completed'], description: 'Research' });
+  const listed = await client.listWebhooks();
+  const tested = await client.testWebhook('012345abcdef', { event: 'research.completed',
+    data: { research_id: 'research_test' } });
+  const deliveries = await client.listWebhookDeliveries('012345abcdef', 12);
+  const deleted = await client.deleteWebhook('012345abcdef');
+  assert.equal(created.id, '012345abcdef');
+  assert.deepEqual(listed, [{ id: '012345abcdef' }]);
+  assert.deepEqual(tested, { queued_deliveries: ['dlv_test'] });
+  assert.deepEqual(deliveries, [{ id: '012345abcdef' }]);
+  assert.deepEqual(deleted, { deleted: '012345abcdef' });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/webhooks', method: 'POST',
+      body: { url: 'https://hooks.example/receiver', events: ['research.completed'],
+        description: 'Research' } },
+    { url: 'http://localhost:8000/api/v1/webhooks', method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/webhooks/test', method: 'POST',
+      body: { subscription_id: '012345abcdef', event: 'research.completed',
+        data: { research_id: 'research_test' } } },
+    { url: 'http://localhost:8000/api/v1/webhooks/012345abcdef/deliveries?limit=12',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/webhooks/012345abcdef', method: 'DELETE',
+      body: undefined },
+  ]);
+});
+
 test('Studio saved queries map fields, paginate, and handle 204 deletion', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'saved-query-key', fetch: async (url, init) => {

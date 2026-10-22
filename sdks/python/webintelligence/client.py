@@ -3,10 +3,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+
+
+WebhookEvent = Literal[
+    "crawl.completed", "crawl.failed", "crawl.cancelled", "data.ready",
+    "export.ready", "quota.warning", "dataset.sold", "discovery.completed",
+    "discovery.approved", "web.changed", "research.completed", "research.failed",
+    "research.cancelled",
+]
 
 
 class _UnsetType:
@@ -147,7 +155,7 @@ class Client:
         self.research = ResearchResource(self)
         self.workflows = WorkflowResource(self)
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
             response = self._http.request(method, path.lstrip("/"), **kwargs)
         except httpx.HTTPError as exc:
@@ -165,8 +173,8 @@ class Client:
                 detail = (error.get("message") if isinstance(error, dict) else None) or payload.get("detail") or detail
             raise WebIntelligenceError(str(detail), status_code=response.status_code,
                                        response=payload)
-        if not isinstance(payload, dict):
-            raise WebIntelligenceError("API returned a non-object JSON response",
+        if not isinstance(payload, (dict, list)):
+            raise WebIntelligenceError("API returned neither a JSON object nor array",
                                        status_code=response.status_code, response=payload)
         return payload
 
@@ -216,6 +224,39 @@ class Client:
         """List retained text snapshots, optionally limiting the count to 20."""
         params = {"limit": limit} if limit is not None else None
         return self._request("GET", f"watch/{watch_id}/snapshots", params=params)
+
+    def create_webhook(self, url: str, events: list[WebhookEvent], *,
+                       description: str = "") -> dict[str, Any]:
+        """Register a webhook; the returned signing secret is shown only once.
+
+        Store the returned secret securely. The SDK does not log or persist it.
+        """
+        return self._request("POST", "webhooks", json={
+            "url": url, "events": events, "description": description,
+        })
+
+    def list_webhooks(self) -> list[dict[str, Any]]:
+        """List webhook subscriptions for the authenticated tenant."""
+        return self._request("GET", "webhooks")
+
+    def delete_webhook(self, subscription_id: str) -> dict[str, Any]:
+        """Delete a webhook subscription belonging to the authenticated tenant."""
+        return self._request("DELETE", f"webhooks/{quote(subscription_id, safe='')}")
+
+    def test_webhook(self, subscription_id: str, *,
+                     event: WebhookEvent = "crawl.completed",
+                     data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Queue a signed test delivery for one tenant-owned subscription."""
+        body: dict[str, Any] = {"subscription_id": subscription_id, "event": event}
+        if data is not None:
+            body["data"] = data
+        return self._request("POST", "webhooks/test", json=body)
+
+    def list_webhook_deliveries(self, subscription_id: str, *,
+                                limit: int = 50) -> list[dict[str, Any]]:
+        """List recent delivery attempts (API limit is 1–200)."""
+        return self._request("GET", f"webhooks/{quote(subscription_id, safe='')}/deliveries",
+                             params={"limit": limit})
 
     def save_studio_query(self, name: str, q: str, *, limit: int = 25,
                           sources: list[str] | None = None,

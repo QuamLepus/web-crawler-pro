@@ -14,6 +14,18 @@ function failure(error: unknown) {
     isError: true };
 }
 
+const webhookEventSchema = z.enum([
+  "crawl.completed", "crawl.failed", "crawl.cancelled", "data.ready",
+  "export.ready", "quota.warning", "dataset.sold", "discovery.completed",
+  "discovery.approved", "web.changed", "research.completed", "research.failed",
+  "research.cancelled",
+]);
+
+const webhookTestDataSchema = z.record(z.unknown()).refine((data) => {
+  try { return Buffer.byteLength(JSON.stringify(data), "utf8") <= 65536; }
+  catch { return false; }
+}, "test data must be JSON and at most 64 KiB");
+
 const studioSnapshotRowSchema = z.object({
   rank: z.number().int().min(1).max(100),
   url: z.string().url().max(2048).refine((value) => /^https?:\/\//i.test(value),
@@ -231,6 +243,45 @@ export function buildServer(client: WebIntelligenceClient) {
     run_id: z.string().regex(/^wfrun_[a-f0-9]{20}$/),
   }, async ({ run_id }) => {
     try { return result(await client.cancelWorkflowRun(run_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_webhook_create", "Register an HTTPS webhook for selected events. The one-time signing secret is returned; store it securely.", {
+    url: z.string().url().max(2048).refine((value) => /^https:\/\//.test(value),
+      "webhook URL must use HTTPS"),
+    events: z.array(webhookEventSchema).min(1).max(13),
+    description: z.string().max(500).optional(),
+  }, async ({ url, events, description }) => {
+    try { return result(await client.createWebhook({ url, events, description })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_webhook_list", "List webhook subscriptions for the authenticated tenant (secrets are never included).", {}, async () => {
+    try { return result(await client.listWebhooks()); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_webhook_delete", "Delete a webhook subscription belonging to the authenticated tenant.", {
+    subscription_id: z.string().regex(/^[a-f0-9]{12}$/),
+  }, async ({ subscription_id }) => {
+    try { return result(await client.deleteWebhook(subscription_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_webhook_test", "Queue a signed test event for a tenant-owned webhook subscription.", {
+    subscription_id: z.string().regex(/^[a-f0-9]{12}$/),
+    event: webhookEventSchema.optional(),
+    data: webhookTestDataSchema.optional(),
+  }, async ({ subscription_id, event, data }) => {
+    try { return result(await client.testWebhook(subscription_id, { event, data })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_webhook_deliveries", "List recent webhook delivery attempts (maximum 200).", {
+    subscription_id: z.string().regex(/^[a-f0-9]{12}$/),
+    limit: z.number().int().min(1).max(200).optional(),
+  }, async ({ subscription_id, limit }) => {
+    try { return result(await client.listWebhookDeliveries(subscription_id, limit)); }
     catch (error) { return failure(error); }
   });
 
