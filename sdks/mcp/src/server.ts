@@ -178,6 +178,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_billing_invoice_estimate", "Read the API-calculated current-period invoice estimate for the authenticated tenant; it is not a Stripe-issued invoice and triggers no payment.", {}, async () => {
+    try { return result(await client.getBillingInvoiceEstimate()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_billing_plans", "Read public pricing plan information; this tool does not create a checkout session.", {}, async () => {
     try { return result(await client.listBillingPlans()); }
     catch (error) { return failure(error); }

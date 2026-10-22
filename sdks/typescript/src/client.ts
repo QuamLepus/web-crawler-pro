@@ -274,6 +274,10 @@ export class WebIntelligenceClient {
     return this.request("GET", "billing/usage");
   }
 
+  getBillingInvoiceEstimate(): Promise<JsonObject> {
+    return this.request("GET", "billing/invoice");
+  }
+
   searchMarketplaceDatasets(options: MarketplaceSearchOptions = {}): Promise<JsonObject[]> {
     const params = new URLSearchParams();
     if (options.q !== undefined) params.set("q", options.q);

@@ -208,6 +208,10 @@ class Client:
         """Read the authenticated tenant's current-period usage summary."""
         return self._request("GET", "billing/usage")
 
+    def get_billing_invoice_estimate(self) -> dict[str, Any]:
+        """Read the API's current-period estimate, not a Stripe-issued invoice."""
+        return self._request("GET", "billing/invoice")
+
     def search_marketplace_datasets(self, *, q: str = "", tag: str = "",
                                     max_price_cents: int | None = None,
                                     limit: int = 20) -> list[dict[str, Any]]:
