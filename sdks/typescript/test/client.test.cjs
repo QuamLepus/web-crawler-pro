@@ -238,6 +238,21 @@ test('own search-index levels method reads roadmap metadata', async () => {
   ]);
 });
 
+test('own search-index spell method URL-encodes bounded query text', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'spell-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ query: 'web inteligence', corrected_query: 'web intelligence',
+      corrections: [{ from: 'inteligence', to: 'intelligence' }], trained: true, terms: 100 }),
+    { status: 200 });
+  } });
+  const result = await client.correctSearchIndexQuery('web inteligence');
+  assert.equal(result.corrected_query, 'web intelligence');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/search-index/spell?q=web+inteligence', method: 'GET' },
+  ]);
+});
+
 test('billing methods read plans and current-tenant usage', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {

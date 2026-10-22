@@ -192,6 +192,10 @@ class Client:
         """Read the available levels for the platform's own search index."""
         return self._request("GET", "search-index/levels")
 
+    def correct_search_index_query(self, query: str) -> dict[str, Any]:
+        """Check spelling against the platform's own-index vocabulary."""
+        return self._request("GET", "search-index/spell", params={"q": query})
+
     def list_billing_plans(self) -> dict[str, Any]:
         """Read public plan and pricing information."""
         return self._request("GET", "billing/plans")

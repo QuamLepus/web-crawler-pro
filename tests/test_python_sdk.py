@@ -299,6 +299,25 @@ def test_own_search_index_levels_reads_roadmap_metadata():
     assert calls == [("GET", "/api/v1/search-index/levels")]
 
 
+def test_own_search_index_spell_corrects_query_with_encoded_text():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={
+            "query": "web inteligence", "corrected_query": "web intelligence",
+            "corrections": [{"from": "inteligence", "to": "intelligence"}],
+            "trained": True, "terms": 100,
+        })
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.correct_search_index_query("web inteligence")
+
+    assert result["corrected_query"] == "web intelligence"
+    assert calls == [("GET", "/api/v1/search-index/spell?q=web+inteligence")]
+
+
 def test_billing_methods_read_plans_and_current_tenant_usage():
     calls = []
 
