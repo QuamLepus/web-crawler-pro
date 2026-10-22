@@ -129,6 +129,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_search_index_levels", "Read the available build levels and costs for the platform's own search index; this does not search or modify index data.", {}, async () => {
+    try { return result(await client.getSearchIndexLevels()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_research_create", "Start an asynchronous, source-cited research job. Reports contain extractive citations, not independent fact-checking.", {
     topic: z.string().min(3).max(512),
     sources: z.number().int().min(1).max(20).optional(),

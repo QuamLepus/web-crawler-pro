@@ -226,6 +226,18 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('own search-index levels method reads roadmap metadata', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'index-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ levels: [{ level: 0, name: 'starter' }] }), { status: 200 });
+  } });
+  assert.deepEqual(await client.getSearchIndexLevels(), { levels: [{ level: 0, name: 'starter' }] });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/search-index/levels', method: 'GET' },
+  ]);
+});
+
 test('billing methods read plans and current-tenant usage', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
