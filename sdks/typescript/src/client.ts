@@ -328,6 +328,12 @@ export class WebIntelligenceClient {
     return this.request<JsonObject[]>("GET", `marketplace/bounties?limit=${limit}`);
   }
 
+  listMarketplaceBountySubmissions(bountyId: string, limit = 50, offset = 0): Promise<string[]> {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return this.request<string[]>("GET",
+      `marketplace/bounties/${encodeURIComponent(bountyId)}/submissions?${query}`);
+  }
+
   getMarketplaceDelivery(deliveryId: string): Promise<JsonObject> {
     return this.request("GET", `marketplace/deliveries/${encodeURIComponent(deliveryId)}`);
   }

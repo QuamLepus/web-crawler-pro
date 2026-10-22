@@ -533,6 +533,18 @@ class MarketplaceService:
             self.r.zrem("mkt:bounties:open", *expired_ids)
         return out
 
+    def list_bounty_submissions(self, poster: str, bounty_id: str, *,
+                                limit: int = 50, offset: int = 0) -> list[str]:
+        """List submitted dataset IDs for the bounty poster only."""
+        bounty = self.get_bounty(bounty_id)
+        if bounty is None:
+            raise MarketplaceError("bounty not found")
+        if bounty.poster_tenant != poster:
+            raise MarketplaceError("only the poster may inspect submissions")
+        ids = {item.decode() if isinstance(item, bytes) else item
+               for item in self.r.smembers(f"mkt:bounty:{bounty_id}:submissions")}
+        return sorted(ids)[offset:offset + limit]
+
     @staticmethod
     def hash_records(records: list[dict]) -> str:
         h = hashlib.sha256()

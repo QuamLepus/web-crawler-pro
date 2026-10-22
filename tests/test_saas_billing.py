@@ -515,6 +515,46 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     assert marketplace.get_bounty(expired.bounty_id).status == "expired"
 
 
+def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    poster = client.app.state.services.users.list_orgs()[0].id
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        poster, title="Curate public sources",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    submitted = []
+    for index in range(2):
+        listing = marketplace.create_listing(
+            f"worker-{index}", title=f"Submission {index}",
+            description="Published listing created for bounty submission listing.",
+            tags=["bounty"], price_usd_cents=0, license="CC-BY-4.0",
+            content_sha256=f"{index + 1:064x}")
+        marketplace.submit_for_bounty(
+            f"worker-{index}", bounty.bounty_id, listing.dataset_id)
+        submitted.append(listing.dataset_id)
+
+    headers = _headers(api_key)
+    listed = client.get(
+        f"/v1/marketplace/bounties/{bounty.bounty_id}/submissions",
+        headers=headers, params={"limit": 1, "offset": 1})
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == [sorted(submitted)[1]]
+
+    foreign_org = client.post("/auth/signup", json={
+        "org_name": "Another Organization", "email": "other@example.com",
+        "password": "another-safe-password-123!"}).json()
+    bearer = {"Authorization": f"Bearer {foreign_org['access_token']}"}
+    foreign_key = client.post("/keys", headers=bearer,
+                              json={"name": "other"}).json()["key"]
+    hidden = client.get(
+        f"/v1/marketplace/bounties/{bounty.bounty_id}/submissions",
+        headers=_headers(foreign_key))
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == "bounty not found"
+
+
 def test_open_bounty_listing_expires_deadlines_and_fills_result_limit(client):
     from src.marketplace.service import MarketplaceService
 

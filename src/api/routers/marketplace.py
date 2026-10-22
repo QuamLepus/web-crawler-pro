@@ -228,6 +228,22 @@ async def open_bounties(ctx: CtxDep, request: Request,
     return _mkt(request).list_open_bounties(limit=limit)
 
 
+@router.get("/bounties/{bounty_id}/submissions", response_model=list[str],
+            summary="List submissions for a bounty owned by the authenticated poster")
+async def list_bounty_submissions(
+        bounty_id: str, ctx: CtxDep, request: Request,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0, le=10_000)) -> list[str]:
+    try:
+        return _mkt(request).list_bounty_submissions(
+            ctx["tenant"], bounty_id, limit=limit, offset=offset)
+    except MarketplaceError as exc:
+        message = str(exc)
+        if "not found" in message or "poster" in message:
+            raise HTTPException(404, "bounty not found") from exc
+        raise HTTPException(400, message) from exc
+
+
 @router.post("/bounties/{bounty_id}/submissions", status_code=202)
 async def submit_bounty(bounty_id: str, dataset_id: str, ctx: CtxDep,
                         request: Request) -> dict:
