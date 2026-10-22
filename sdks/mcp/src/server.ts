@@ -369,6 +369,15 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_my_datasets_list", "List datasets published or managed by the authenticated seller, including drafts, with optional status and pagination filters.", {
+    status: z.enum(["draft", "published", "suspended", "archived"]).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(10000).optional(),
+  }, async ({ status, limit, offset }) => {
+    try { return result(await client.listMyMarketplaceDatasets({ status, limit, offset })); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_dataset_search", "Search published marketplace listings; this read-only tool never purchases a dataset.", {
     q: z.string().max(200).optional(),
     tag: z.string().max(64).optional(),

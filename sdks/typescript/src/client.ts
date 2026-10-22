@@ -296,6 +296,20 @@ export class WebIntelligenceClient {
     return this.request("GET", "billing/invoice");
   }
 
+  listMyMarketplaceDatasets(options: {
+    status?: "draft" | "published" | "suspended" | "archived";
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<JsonObject[]> {
+    const params = new URLSearchParams();
+    if (options.status !== undefined) params.set("status", options.status);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<JsonObject[]>("GET",
+      `marketplace/my/datasets${query ? `?${query}` : ""}`);
+  }
+
   searchMarketplaceDatasets(options: MarketplaceSearchOptions = {}): Promise<JsonObject[]> {
     const params = new URLSearchParams();
     if (options.q !== undefined) params.set("q", options.q);

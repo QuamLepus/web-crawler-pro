@@ -69,6 +69,19 @@ async def create_listing(body: DatasetListingCreate, ctx: CtxDep,
     return mkt.to_out(lst)
 
 
+@router.get("/my/datasets", response_model=list[DatasetListingOut],
+            summary="List the authenticated seller's marketplace inventory")
+async def my_datasets(ctx: CtxDep, request: Request,
+                      status: str | None = Query(
+                          None, pattern="^(draft|published|suspended|archived)$"),
+                      limit: int = Query(20, ge=1, le=100),
+                      offset: int = Query(0, ge=0, le=10_000)) -> list[DatasetListingOut]:
+    marketplace = _mkt(request)
+    listings = marketplace.list_seller_listings(
+        ctx["tenant"], status=status, limit=limit, offset=offset)
+    return [marketplace.to_out(listing) for listing in listings]
+
+
 @router.get("/datasets", response_model=list[DatasetListingOut],
             summary="Search published datasets")
 async def search_datasets(ctx: CtxDep, request: Request,

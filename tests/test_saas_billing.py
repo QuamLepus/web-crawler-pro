@@ -220,6 +220,39 @@ def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, ap
     assert own_draft.dataset_id not in visible_ids
 
 
+def test_marketplace_seller_inventory_is_scoped_and_filters_status(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    seller = client.app.state.services.users.list_orgs()[0].id
+    marketplace = MarketplaceService(client.app.state.services.redis)
+
+    def create(owner, title, digest):
+        return marketplace.create_listing(
+            owner, title=title,
+            description="Listing used to test seller inventory privacy and filters.",
+            tags=["inventory"], price_usd_cents=0, license="CC-BY-4.0",
+            content_sha256=digest * 64)
+
+    own_published = create(seller, "Seller published item", "a")
+    own_draft = create(seller, "Seller draft item", "b")
+    marketplace.update_listing(own_draft.dataset_id, seller, status="draft")
+    foreign_draft = create("another-seller", "Foreign draft item", "c")
+    marketplace.update_listing(foreign_draft.dataset_id, "another-seller", status="draft")
+
+    headers = _headers(api_key)
+    inventory = client.get("/v1/marketplace/my/datasets", headers=headers)
+    assert inventory.status_code == 200, inventory.text
+    ids = {item["dataset_id"] for item in inventory.json()}
+    assert ids == {own_published.dataset_id, own_draft.dataset_id}
+
+    drafts = client.get("/v1/marketplace/my/datasets", headers=headers,
+                        params={"status": "draft"})
+    assert {item["dataset_id"] for item in drafts.json()} == {own_draft.dataset_id}
+    invalid = client.get("/v1/marketplace/my/datasets", headers=headers,
+                         params={"status": "deleted"})
+    assert invalid.status_code == 422
+
+
 def test_marketplace_tag_updates_normalize_and_refresh_search_indexes(client):
     from src.marketplace.service import MarketplaceError, MarketplaceService
 

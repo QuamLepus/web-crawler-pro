@@ -229,6 +229,13 @@ class Client:
         """Read the API's current-period estimate, not a Stripe-issued invoice."""
         return self._request("GET", "billing/invoice")
 
+    def list_my_marketplace_datasets(self, *, status: str | None = None,
+                                     limit: int = 20,
+                                     offset: int = 0) -> list[dict[str, Any]]:
+        """List this tenant's own marketplace inventory, including unpublished listings."""
+        return self._request("GET", "marketplace/my/datasets", params={
+            "status": status, "limit": limit, "offset": offset})
+
     def search_marketplace_datasets(self, *, q: str = "", tag: str = "",
                                     max_price_cents: int | None = None,
                                     limit: int = 20) -> list[dict[str, Any]]:
