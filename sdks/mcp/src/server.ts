@@ -395,6 +395,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_purchases_list", "List recent dataset purchases belonging to the authenticated tenant; does not purchase a dataset.", {
+    limit: z.number().int().min(1).max(200).optional(),
+  }, async ({ limit }) => {
+    try { return result(await client.listMarketplacePurchases(limit)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_reviews_list", "List public reviews for a published dataset (or one owned by the authenticated tenant); buyer tenant IDs are omitted.", {
     dataset_id: z.string().min(1).max(160),
     limit: z.number().int().min(1).max(200).optional(),

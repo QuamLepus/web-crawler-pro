@@ -271,6 +271,20 @@ class MarketplaceService:
                     pur.purchase_id, buyer, dataset_id, lst.price_usd_cents, fee)
         return pur, manifest
 
+    def list_purchases(self, buyer: str, limit: int = 50) -> list[Purchase]:
+        """Return most recent purchases indexed to this buyer tenant only."""
+        purchase_ids = self.r.smembers(f"mkt:purchase-index:{buyer}")
+        out = []
+        for raw_id in purchase_ids:
+            purchase_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+            raw = self.r.hget(f"mkt:purchase:{purchase_id}", "data")
+            if raw:
+                purchase = Purchase(**json.loads(raw))
+                if purchase.buyer_tenant == buyer:
+                    out.append(purchase)
+        out.sort(key=lambda purchase: purchase.created_at, reverse=True)
+        return out[:limit]
+
     # --------------------- signed secure delivery ----------------------- #
     def issue_delivery(self, buyer: str, lst: Listing) -> DeliveryManifest:
         now = utcnow()

@@ -238,12 +238,19 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(c
     headers = _headers(api_key)
 
     review_url = f"/v1/marketplace/datasets/{public.dataset_id}/reviews"
+    marketplace.purchase("different-buyer", public.dataset_id)
     unpurchased = client.post(review_url, headers=headers,
                               json={"rating": 5, "comment": "Useful data."})
     assert unpurchased.status_code == 403
     purchase = client.post(
         f"/v1/marketplace/datasets/{public.dataset_id}/purchase", headers=headers)
     assert purchase.status_code == 200, purchase.text
+    history = client.get("/v1/marketplace/purchases", headers=headers,
+                         params={"limit": 10})
+    assert history.status_code == 200, history.text
+    assert len(history.json()) == 1
+    assert history.json()[0]["purchase_id"] == purchase.json()["purchase"]["purchase_id"]
+    assert "buyer_tenant" not in history.json()[0]
     posted = client.post(review_url, headers=headers,
                          json={"rating": 5, "comment": "Useful data."})
     assert posted.status_code == 201, posted.text

@@ -10,7 +10,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from src.api.routers.jobs import JOB_KEY, CtxDep
 from src.api.schemas import (BountyCreate, BountyOut, DatasetListingCreate,
                              DatasetListingOut, DeliveryManifest,
-                             MarketplaceReviewPublicOut, ReviewCreate, ReviewOut)
+                             MarketplacePurchaseOut, MarketplaceReviewPublicOut,
+                             ReviewCreate, ReviewOut)
 from src.marketplace.service import MarketplaceError, MarketplaceService
 
 logger = logging.getLogger("wcp.api.marketplace")
@@ -170,6 +171,13 @@ async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
         logger.debug("webhook emit failed", exc_info=True)
     return {"purchase": pur.__dict__, "delivery": manifest.model_dump(mode="json"),
             "verify": "check HMAC signature + sha256 of downloaded object"}
+
+
+@router.get("/purchases", response_model=list[MarketplacePurchaseOut],
+            summary="List purchases belonging to the authenticated tenant")
+async def list_purchases(ctx: CtxDep, request: Request,
+                         limit: int = Query(50, ge=1, le=200)) -> list[MarketplacePurchaseOut]:
+    return _mkt(request).list_purchases(ctx["tenant"], limit=limit)
 
 
 @router.get("/deliveries/{delivery_id}", response_model=DeliveryManifest)

@@ -397,6 +397,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
                                            max_price_cents=500, limit=5)
         client.get_marketplace_dataset("dataset:1")
         client.get_marketplace_delivery("dlv_0123456789ab")
+        client.list_marketplace_purchases(limit=12)
         client.list_marketplace_reviews("dataset:1", limit=12)
 
     assert calls == [
@@ -404,6 +405,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
         ("GET", "/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5"),
         ("GET", "/api/v1/marketplace/datasets/dataset%3A1"),
         ("GET", "/api/v1/marketplace/deliveries/dlv_0123456789ab"),
+        ("GET", "/api/v1/marketplace/purchases?limit=12"),
         ("GET", "/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12"),
     ]
 
