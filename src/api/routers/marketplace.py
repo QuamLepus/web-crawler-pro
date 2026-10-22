@@ -262,5 +262,6 @@ async def award_bounty(bounty_id: str, dataset_id: str, ctx: CtxDep,
         msg = str(exc)
         code = (404 if "not found" in msg else
                 403 if "poster" in msg else
-                409 if "bounty is" in msg or "bounty expired" in msg else 400)
+                409 if ("bounty is" in msg or "bounty expired" in msg or
+                        "no longer published" in msg) else 400)
         raise HTTPException(code, msg)

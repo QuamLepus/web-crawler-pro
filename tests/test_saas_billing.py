@@ -506,6 +506,17 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     with pytest.raises(MarketplaceError, match="bounty is awarded"):
         marketplace.award_bounty("poster", bounty.bounty_id, accepted.dataset_id)
 
+    withdrawn = listing("worker", "Withdrawn submission", "d")
+    pending = marketplace.create_bounty(
+        "poster", title="Awaiting dataset review",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    marketplace.submit_for_bounty("worker", pending.bounty_id, withdrawn.dataset_id)
+    marketplace.update_listing(withdrawn.dataset_id, "worker", status="draft")
+    with pytest.raises(MarketplaceError, match="no longer published"):
+        marketplace.award_bounty("poster", pending.bounty_id, withdrawn.dataset_id)
+    assert marketplace.get_bounty(pending.bounty_id).status == "open"
+
     expired = marketplace.create_bounty(
         "poster", title="Expired public records",
         spec="Collect and curate a set of public records from approved sources.",

@@ -489,6 +489,9 @@ class MarketplaceService:
                 for x in self.r.smembers(f"mkt:bounty:{bounty_id}:submissions")}
         if dataset_id not in subs:
             raise MarketplaceError("dataset was not submitted for this bounty")
+        listing = self.get_listing(dataset_id)
+        if listing is None or listing.status != "published":
+            raise MarketplaceError("submitted dataset is no longer published")
         self._set_bounty_status(b, "awarded", assigned_to=dataset_id)
         self.r.zrem("mkt:bounties:open", bounty_id)
         return {"bounty_id": bounty_id, "awarded_to_dataset": dataset_id,
