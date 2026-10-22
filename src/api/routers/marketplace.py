@@ -148,9 +148,10 @@ async def add_review(dataset_id: str, body: ReviewCreate, ctx: CtxDep,
                                         body.rating, body.comment)
     except MarketplaceError as exc:
         message = str(exc)
-        code = (403 if "purchase required" in message else
+        code = (404 if "not found" in message else
+                403 if "purchase required" in message else
                 409 if "already reviewed" in message else 400)
-        raise HTTPException(code, message)
+        raise HTTPException(code, "dataset not found" if code == 404 else message)
 
 
 @router.get("/datasets/{dataset_id}/reviews",

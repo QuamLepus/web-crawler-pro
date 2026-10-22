@@ -430,6 +430,11 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
     hidden = client.get(f"/v1/marketplace/datasets/{draft.dataset_id}/reviews",
                         headers=headers)
     assert hidden.status_code == 404
+    hidden_post = client.post(
+        f"/v1/marketplace/datasets/{draft.dataset_id}/reviews", headers=headers,
+        json={"rating": 5, "comment": "Useful data."})
+    assert hidden_post.status_code == 404
+    assert hidden_post.json()["detail"] == "dataset not found"
 
 
 def test_marketplace_review_uniqueness_backfills_preexisting_reviews(client):
