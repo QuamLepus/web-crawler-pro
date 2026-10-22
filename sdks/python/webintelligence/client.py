@@ -199,6 +199,10 @@ class Client:
         """Retrieve a published listing or one owned by this tenant."""
         return self._request("GET", f"marketplace/datasets/{quote(dataset_id, safe='')}")
 
+    def list_marketplace_bounties(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """List open public marketplace bounties; does not submit or award work."""
+        return self._request("GET", "marketplace/bounties", params={"limit": limit})
+
     def store_provenance_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Store caller-supplied provenance metadata for this tenant."""
         return self._request("POST", "provenance/records", json=record)

@@ -315,6 +315,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_bounties_list", "List open public marketplace bounties; this read-only tool does not submit or award work.", {
+    limit: z.number().int().min(1).max(200).optional(),
+  }, async ({ limit }) => {
+    try { return result(await client.listMarketplaceBounties(limit)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_dataset_search", "Search published marketplace listings; this read-only tool never purchases a dataset.", {
     q: z.string().max(200).optional(),
     tag: z.string().max(64).optional(),
