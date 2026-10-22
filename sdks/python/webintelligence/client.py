@@ -178,6 +178,16 @@ class Client:
                                        status_code=response.status_code, response=payload)
         return payload
 
+    def semantic_search(self, query: str, *, top_k: int | None = None,
+                        filter: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run tenant-scoped semantic search over indexed documents."""
+        body: dict[str, Any] = {"query": query}
+        if top_k is not None:
+            body["top_k"] = top_k
+        if filter is not None:
+            body["filter"] = filter
+        return self._request("POST", "search", json=body)
+
     def ask(self, question: str, *, max_pages: int = 50, max_seconds: int = 60,
             top_k: int = 8) -> dict[str, Any]:
         """Retrieve an answer from indexed content (does not start a crawl)."""

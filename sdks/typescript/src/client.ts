@@ -25,6 +25,11 @@ export interface AskOptions {
   topK?: number;
 }
 
+export interface SemanticSearchOptions {
+  topK?: number;
+  filter?: JsonObject;
+}
+
 export type CrawlJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type WebhookEvent = "crawl.completed" | "crawl.failed" | "crawl.cancelled" |
   "data.ready" | "export.ready" | "quota.warning" | "dataset.sold" |
@@ -141,6 +146,14 @@ export class WebIntelligenceClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  semanticSearch(query: string, options: SemanticSearchOptions = {}): Promise<JsonObject> {
+    return this.request("POST", "search", {
+      query,
+      ...(options.topK === undefined ? {} : { top_k: options.topK }),
+      ...(options.filter === undefined ? {} : { filter: options.filter }),
+    });
   }
 
   ask(question: string, options: AskOptions = {}): Promise<JsonObject> {
