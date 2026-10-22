@@ -299,6 +299,22 @@ def test_own_search_index_levels_reads_roadmap_metadata():
     assert calls == [("GET", "/api/v1/search-index/levels")]
 
 
+def test_own_search_index_stats_reads_sanitized_availability_metrics():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"available": True, "docs": 42,
+                                         "sources": {"curlie": 42}})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        stats = client.get_search_index_stats()
+
+    assert stats["available"] is True
+    assert calls == [("GET", "/api/v1/search-index/stats")]
+
+
 def test_own_search_index_spell_corrects_query_with_encoded_text():
     calls = []
 

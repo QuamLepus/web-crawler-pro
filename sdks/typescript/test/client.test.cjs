@@ -238,6 +238,20 @@ test('own search-index levels method reads roadmap metadata', async () => {
   ]);
 });
 
+test('own search-index stats method reads availability metrics', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'index-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ available: true, docs: 42, sources: { curlie: 42 } }),
+      { status: 200 });
+  } });
+  const stats = await client.getSearchIndexStats();
+  assert.equal(stats.available, true);
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/search-index/stats', method: 'GET' },
+  ]);
+});
+
 test('own search-index spell method URL-encodes bounded query text', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'spell-key', fetch: async (url, init) => {

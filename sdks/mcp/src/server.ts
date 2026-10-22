@@ -134,6 +134,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_search_index_stats", "Read public index build and availability metrics; the API omits internal filesystem paths and document content.", {}, async () => {
+    try { return result(await client.getSearchIndexStats()); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_search_index_spell", "Suggest spelling corrections using the platform's own search-index vocabulary; requires a built index and does not return document content.", {
     q: z.string().min(1).max(512),
   }, async ({ q }) => {

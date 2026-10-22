@@ -823,6 +823,8 @@ def test_search_index_endpoints(built_index):
         assert stats.status_code == 200, stats.text
         assert stats.json()["available"] is True
         assert stats.json()["docs"] == 6
+        assert "index_dir" not in stats.json()
+        assert "error" not in stats.json().get("extras", {})
 
         levels = client.get("/api/v1/search-index/levels", headers=headers)
         assert levels.status_code == 200

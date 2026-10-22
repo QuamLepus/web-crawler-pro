@@ -82,6 +82,9 @@ def _index(request: Request):
 async def stats(ctx: CtxDep, request: Request) -> dict:
     index = _index(request)
     payload = index.stats().to_dict()
+    # The physical service-side directory is an implementation detail and is
+    # shared across tenants; keep it out of the authenticated API response.
+    payload.pop("index_dir", None)
     payload["available"] = index.available
     payload["reranker"] = getattr(index.reranker, "name", "none") \
         if index.available else "none"
@@ -91,7 +94,8 @@ async def stats(ctx: CtxDep, request: Request) -> dict:
         with SearchIndexBuilder(index.index_dir.parent) as builder:
             payload["extras"] = builder.extras()
     except Exception as exc:  # noqa: BLE001 - stats must stay readable
-        payload["extras"] = {"error": str(exc)}
+        logger.warning("own-index extras unavailable (%s)", type(exc).__name__)
+        payload["extras"] = {"available": False}
     return payload
 
 
