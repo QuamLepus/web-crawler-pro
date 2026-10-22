@@ -103,6 +103,15 @@ export interface MarketplaceSearchOptions {
   limit?: number;
 }
 
+export type OwnSearchIndexSource = "curlie" | "wikipedia" | "commoncrawl";
+export interface OwnSearchIndexQueryOptions {
+  limit?: number;
+  sources?: OwnSearchIndexSource[];
+  collapseHost?: boolean;
+  rerank?: "none" | "embedding" | "cross-encoder";
+  spell?: boolean;
+}
+
 export interface StudioAnalyticsOptions {
   groupBy?: "source" | "host" | "lang" | "snapshot" | "day";
   metric?: "count" | "avg_authority" | "avg_quality" | "avg_body_chars";
@@ -264,6 +273,15 @@ export class WebIntelligenceClient {
   correctSearchIndexQuery(query: string): Promise<JsonObject> {
     const params = new URLSearchParams({ q: query });
     return this.request("GET", `search-index/spell?${params.toString()}`);
+  }
+
+  searchOwnIndex(query: string, options: OwnSearchIndexQueryOptions = {}): Promise<JsonObject> {
+    const body: JsonObject = { q: query, limit: options.limit ?? 10 };
+    if (options.sources !== undefined) body.sources = options.sources;
+    if (options.collapseHost !== undefined) body.collapse_host = options.collapseHost;
+    if (options.rerank !== undefined) body.rerank = options.rerank;
+    if (options.spell !== undefined) body.spell = options.spell;
+    return this.request("POST", "search-index/query", body);
   }
 
   listBillingPlans(): Promise<JsonObject> {

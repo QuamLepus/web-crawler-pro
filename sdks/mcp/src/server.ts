@@ -134,6 +134,21 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_search_index_query", "Search the platform's prebuilt public-source index (not tenant documents); results may include licensed snippets, so follow the source license and attribution terms.", {
+    q: z.string().min(1).max(2048),
+    limit: z.number().int().min(1).max(100).optional(),
+    sources: z.array(z.enum(["curlie", "wikipedia", "commoncrawl"])).max(3)
+      .refine((items) => new Set(items).size === items.length, "sources must be unique").optional(),
+    collapse_host: z.boolean().optional(),
+    rerank: z.enum(["none", "embedding", "cross-encoder"]).optional(),
+    spell: z.boolean().optional(),
+  }, async ({ q, limit, sources, collapse_host, rerank, spell }) => {
+    try { return result(await client.searchOwnIndex(q, {
+      limit, sources, collapseHost: collapse_host, rerank, spell,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_search_index_stats", "Read public index build and availability metrics; the API omits internal filesystem paths and document content.", {}, async () => {
     try { return result(await client.getSearchIndexStats()); }
     catch (error) { return failure(error); }

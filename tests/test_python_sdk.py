@@ -299,6 +299,28 @@ def test_own_search_index_levels_reads_roadmap_metadata():
     assert calls == [("GET", "/api/v1/search-index/levels")]
 
 
+def test_own_search_index_query_forwards_bounded_source_and_reranking_controls():
+    import json
+
+    calls = []
+
+    def handler(request):
+        calls.append({"method": request.method, "path": request.url.path,
+                      "body": json.loads(request.read())})
+        return httpx.Response(200, json={"count": 1,
+            "results": [{"source": "wikipedia", "snippet": "Solar energy."}]})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.search_own_index("solar energy", limit=4,
+            sources=["wikipedia"], collapse_host=False, rerank="none", spell=False)
+
+    assert result["count"] == 1
+    assert calls == [{"method": "POST", "path": "/api/v1/search-index/query",
+        "body": {"q": "solar energy", "limit": 4, "sources": ["wikipedia"],
+                  "collapse_host": False, "rerank": "none", "spell": False}}]
+
+
 def test_own_search_index_stats_reads_sanitized_availability_metrics():
     calls = []
 

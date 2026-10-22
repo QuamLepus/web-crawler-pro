@@ -238,6 +238,23 @@ test('own search-index levels method reads roadmap metadata', async () => {
   ]);
 });
 
+test('own search-index query forwards bounded source and reranking controls', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'index-query-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ count: 1,
+      results: [{ source: 'wikipedia', snippet: 'Solar energy.' }] }), { status: 200 });
+  } });
+  const result = await client.searchOwnIndex('solar energy', { limit: 4, sources: ['wikipedia'],
+    collapseHost: false, rerank: 'none', spell: false });
+  assert.equal(result.count, 1);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/search-index/query', method: 'POST',
+    body: { q: 'solar energy', limit: 4, sources: ['wikipedia'],
+      collapse_host: false, rerank: 'none', spell: false },
+  }]);
+});
+
 test('own search-index stats method reads availability metrics', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'index-key', fetch: async (url, init) => {
