@@ -134,6 +134,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_search_index_spell", "Suggest spelling corrections using the platform's own search-index vocabulary; requires a built index and does not return document content.", {
+    q: z.string().min(1).max(512),
+  }, async ({ q }) => {
+    try { return result(await client.correctSearchIndexQuery(q)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_research_create", "Start an asynchronous, source-cited research job. Reports contain extractive citations, not independent fact-checking.", {
     topic: z.string().min(3).max(512),
     sources: z.number().int().min(1).max(20).optional(),

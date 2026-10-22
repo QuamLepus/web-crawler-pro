@@ -257,6 +257,11 @@ export class WebIntelligenceClient {
     return this.request("GET", "search-index/levels");
   }
 
+  correctSearchIndexQuery(query: string): Promise<JsonObject> {
+    const params = new URLSearchParams({ q: query });
+    return this.request("GET", `search-index/spell?${params.toString()}`);
+  }
+
   listBillingPlans(): Promise<JsonObject> {
     return this.request("GET", "billing/plans");
   }
