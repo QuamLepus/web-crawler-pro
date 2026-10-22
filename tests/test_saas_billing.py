@@ -252,6 +252,13 @@ def test_marketplace_seller_inventory_is_scoped_and_filters_status(client, api_k
                          params={"status": "deleted"})
     assert invalid.status_code == 422
 
+    foreign_patch = client.patch(
+        f"/v1/marketplace/datasets/{foreign_draft.dataset_id}", headers=headers,
+        json={"title": "Attempted foreign edit"})
+    assert foreign_patch.status_code == 404
+    assert foreign_patch.json()["detail"] == "dataset not found"
+    assert marketplace.get_listing(foreign_draft.dataset_id).title == "Foreign draft item"
+
 
 def test_marketplace_listing_patch_rejects_invalid_values_and_unknown_fields(client, api_key):
     from src.marketplace.service import MarketplaceService

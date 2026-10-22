@@ -132,8 +132,10 @@ async def update_dataset(dataset_id: str, changes: DatasetListingUpdate,
             dataset_id, ctx["tenant"], **changes.model_dump(exclude_unset=True))
     except MarketplaceError as exc:
         msg = str(exc)
-        code = 404 if msg == "not found" else 403 if "forbidden" in msg else 422
-        raise HTTPException(code, msg)
+        if msg == "not found" or "forbidden" in msg:
+            # Hide the existence of another seller's private inventory.
+            raise HTTPException(404, "dataset not found") from exc
+        raise HTTPException(422, msg) from exc
     return mkt.to_out(lst)
 
 
