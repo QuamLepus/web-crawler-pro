@@ -443,6 +443,16 @@ class MarketplaceReviewPublicOut(BaseModel):
     created_at: datetime
 
 
+class MarketplacePurchaseOut(BaseModel):
+    """A buyer's own purchase record, excluding redundant buyer identity."""
+    purchase_id: str
+    dataset_id: str
+    seller_tenant: str
+    price_usd_cents: int
+    platform_fee_cents: int
+    created_at: datetime
+
+
 class BountyCreate(BaseModel):
     title: str = Field(min_length=5, max_length=140)
     spec: str = Field(min_length=20, max_length=8000)

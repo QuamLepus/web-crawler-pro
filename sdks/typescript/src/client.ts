@@ -318,6 +318,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `marketplace/deliveries/${encodeURIComponent(deliveryId)}`);
   }
 
+  listMarketplacePurchases(limit = 50): Promise<JsonObject[]> {
+    return this.request<JsonObject[]>("GET", `marketplace/purchases?limit=${limit}`);
+  }
+
   listMarketplaceReviews(datasetId: string, limit = 50): Promise<JsonObject[]> {
     return this.request<JsonObject[]>("GET",
       `marketplace/datasets/${encodeURIComponent(datasetId)}/reviews?limit=${limit}`);
