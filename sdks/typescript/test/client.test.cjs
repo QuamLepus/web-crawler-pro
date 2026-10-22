@@ -267,18 +267,23 @@ test('own search-index spell method URL-encodes bounded query text', async () =>
   ]);
 });
 
-test('billing methods read plans and current-tenant usage', async () => {
+test('billing methods read plans, usage, and current invoice estimate', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
     calls.push({ url, method: init.method });
-    return new Response(JSON.stringify(url.endsWith('/billing/plans')
-      ? { tiers: { starter: {} } } : { tenant: 'tenant-1', requests: 12 }), { status: 200 });
+    const payload = url.endsWith('/billing/plans') ? { tiers: { starter: {} } }
+      : url.endsWith('/billing/invoice') ? { tenant: 'tenant-1', period: '2026-10', total_cents: 900 }
+        : { tenant: 'tenant-1', requests: 12 };
+    return new Response(JSON.stringify(payload), { status: 200 });
   } });
+  const estimate = await client.getBillingInvoiceEstimate();
   const plans = await client.listBillingPlans();
   const usage = await client.getBillingUsage();
+  assert.deepEqual(estimate, { tenant: 'tenant-1', period: '2026-10', total_cents: 900 });
   assert.deepEqual(plans, { tiers: { starter: {} } });
   assert.deepEqual(usage, { tenant: 'tenant-1', requests: 12 });
   assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/billing/invoice', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/billing/plans', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/billing/usage', method: 'GET' },
   ]);

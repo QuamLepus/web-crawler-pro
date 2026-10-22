@@ -334,21 +334,28 @@ def test_own_search_index_spell_corrects_query_with_encoded_text():
     assert calls == [("GET", "/api/v1/search-index/spell?q=web+inteligence")]
 
 
-def test_billing_methods_read_plans_and_current_tenant_usage():
+def test_billing_methods_read_plans_usage_and_current_invoice_estimate():
     calls = []
 
     def handler(request):
         calls.append((request.method, request.url.raw_path.decode()))
-        payload = {"tiers": {"starter": {}}} if request.url.path.endswith("/billing/plans") \
-            else {"tenant": "tenant-1", "requests": 12}
+        if request.url.path.endswith("/billing/plans"):
+            payload = {"tiers": {"starter": {}}}
+        elif request.url.path.endswith("/billing/invoice"):
+            payload = {"tenant": "tenant-1", "period": "2026-10", "total_cents": 900}
+        else:
+            payload = {"tenant": "tenant-1", "requests": 12}
         return httpx.Response(200, json=payload)
 
     with Client("secret", base_url="https://api.example",
                 transport=httpx.MockTransport(handler)) as client:
+        assert client.get_billing_invoice_estimate() == {
+            "tenant": "tenant-1", "period": "2026-10", "total_cents": 900}
         assert client.list_billing_plans() == {"tiers": {"starter": {}}}
         assert client.get_billing_usage() == {"tenant": "tenant-1", "requests": 12}
 
     assert calls == [
+        ("GET", "/api/v1/billing/invoice"),
         ("GET", "/api/v1/billing/plans"),
         ("GET", "/api/v1/billing/usage"),
     ]
