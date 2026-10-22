@@ -159,7 +159,9 @@ async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
         pur, manifest = mkt.purchase(ctx["tenant"], dataset_id)
     except MarketplaceError as exc:
         msg = str(exc)
-        code = 404 if "not found" in msg else 409 if "own" in msg or "not available" in msg else 400
+        code = (503 if "signing" in msg else
+                404 if "not found" in msg else
+                409 if "own" in msg or "not available" in msg else 400)
         raise HTTPException(code, msg)
     # emit webhook to both parties
     try:

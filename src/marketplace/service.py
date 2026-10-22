@@ -33,12 +33,12 @@ _SIGNING_SECRET_ENV = "MARKETPLACE_SIGNING_SECRET"
 
 def _signing_key() -> bytes:
     secret = os.getenv(_SIGNING_SECRET_ENV, "")
+    key = secret.encode()
     if not secret:
-        # dev fallback — deterministic enough for tests, logged loudly
-        logger.warning("%s not set; using ephemeral dev signing key",
-                       _SIGNING_SECRET_ENV)
-        secret = "dev-insecure-marketplace-key"
-    return secret.encode()
+        raise MarketplaceError("marketplace delivery signing is not configured")
+    if len(key) < 32:
+        raise MarketplaceError("marketplace delivery signing secret must be at least 32 bytes")
+    return key
 
 
 @dataclass
