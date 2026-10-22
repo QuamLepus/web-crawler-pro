@@ -395,6 +395,35 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
     assert hidden.status_code == 404
 
 
+def test_marketplace_review_uniqueness_backfills_preexisting_reviews(client):
+    import json
+
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Legacy review target",
+        description="Dataset used to test review migration and uniqueness rules.",
+        tags=["review"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="d" * 64)
+    buyer = "existing-buyer"
+    marketplace.r.sadd(f"mkt:buyers:{listing.dataset_id}", buyer)
+    legacy = {
+        "review_id": "legacyreview1", "dataset_id": listing.dataset_id,
+        "buyer_tenant": buyer, "rating": 5, "comment": "Legacy review.",
+        "verified_purchase": True, "created_at": "2025-01-01T00:00:00+00:00",
+    }
+    marketplace.r.hset("mkt:review:legacyreview1", "data", json.dumps(legacy))
+    marketplace.r.rpush(f"mkt:reviews:{listing.dataset_id}", "legacyreview1")
+
+    with pytest.raises(MarketplaceError, match="already reviewed"):
+        marketplace.add_review(buyer, listing.dataset_id, 4, "Duplicate attempt.")
+
+    marker = marketplace.r.get(f"mkt:reviewer:{listing.dataset_id}:{buyer}")
+    assert marker in (b"legacyreview1", "legacyreview1")
+    assert marketplace.r.llen(f"mkt:reviews:{listing.dataset_id}") == 1
+
+
 def test_marketplace_bounty_submissions_require_owned_published_unique_listings(client):
     from src.marketplace.service import MarketplaceError, MarketplaceService
 
