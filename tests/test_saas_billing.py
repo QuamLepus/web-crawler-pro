@@ -176,6 +176,36 @@ def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, ap
     assert own_draft.dataset_id not in visible_ids
 
 
+def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    tenant = client.app.state.services.users.list_orgs()[0].id
+    marketplace = MarketplaceService(client.app.state.services.redis)
+
+    def listing(owner, title, digest):
+        return marketplace.create_listing(owner, title=title,
+            description="A corpus used to test preview access and availability.",
+            tags=["preview"], price_usd_cents=100, license="CC-BY-4.0",
+            content_sha256=digest * 64)
+
+    private_draft = listing("seller-private", "Private draft", "d")
+    marketplace.update_listing(private_draft.dataset_id, "seller-private", status="draft")
+    own_draft = listing(tenant, "Own draft", "e")
+    marketplace.update_listing(own_draft.dataset_id, tenant, status="draft")
+    headers = _headers(api_key)
+
+    hidden = client.get(
+        f"/v1/marketplace/datasets/{private_draft.dataset_id}/preview?rows=10",
+        headers=headers)
+    unavailable = client.get(
+        f"/v1/marketplace/datasets/{own_draft.dataset_id}/preview?rows=10",
+        headers=headers)
+    assert hidden.status_code == 404
+    assert unavailable.status_code == 503
+    assert unavailable.json()["detail"] == "dataset preview is unavailable"
+    assert "sample row" not in unavailable.text
+
+
 def test_dataset_publish_still_rejects_unhashed_jobs(client, api_key):
     r = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
                     json={"title": "No Digest",

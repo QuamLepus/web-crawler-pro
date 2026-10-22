@@ -79,16 +79,18 @@ async def get_dataset(dataset_id: str, ctx: CtxDep, request: Request):
 async def dataset_preview(dataset_id: str, ctx: CtxDep, request: Request,
                           rows: int = Query(50, ge=10, le=500)) -> list[dict]:
     mkt = _mkt(request)
-    if mkt.get_listing(dataset_id) is None:
+    listing = mkt.get_listing(dataset_id)
+    if listing is None or (listing.status != "published" and
+                           listing.seller_tenant != ctx["tenant"]):
+        # Match listing visibility; never disclose preview data for another
+        # tenant's draft, suspended or archived dataset.
         raise HTTPException(404, "dataset not found")
-    # pull sample from tenant object store when configured, else deterministic stub
     try:
         from src.pipeline.storage.json_exporter import load_sample
-
         records = load_sample(dataset_id, n=rows)
-    except Exception:
-        records = [{"content": f"sample row {i} of {dataset_id}",
-                    "url": "https://example.com"} for i in range(rows)]
+    except Exception as exc:  # noqa: BLE001 - unavailable samples must not be fabricated
+        logger.warning("marketplace preview unavailable (%s)", type(exc).__name__)
+        raise HTTPException(503, "dataset preview is unavailable") from exc
     return mkt.build_preview(dataset_id, records, rows=rows)
 
 
