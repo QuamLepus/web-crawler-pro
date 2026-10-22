@@ -347,10 +347,15 @@ class MarketplaceService:
         if datetime.fromisoformat(b.deadline) < utcnow():
             self._set_bounty_status(b, "expired")
             raise MarketplaceError("bounty expired")
-        if self.get_listing(dataset_id) is None:
+        listing = self.get_listing(dataset_id)
+        if listing is None or listing.status != "published":
             raise MarketplaceError("submission must reference a published listing")
-        self.r.sadd(f"mkt:bounty:{bounty_id}:submissions", dataset_id)
-        b.submissions += 1
+        if listing.seller_tenant != worker:
+            raise MarketplaceError("only the listing owner may submit it")
+        submissions_key = f"mkt:bounty:{bounty_id}:submissions"
+        if not self.r.sadd(submissions_key, dataset_id):
+            raise MarketplaceError("dataset already submitted for this bounty")
+        b.submissions = self.r.scard(submissions_key)
         self._set_bounty_status(b, b.status, submissions=b.submissions)
         return {"bounty_id": bounty_id, "dataset_id": dataset_id, "queued_for_review": True}
 
