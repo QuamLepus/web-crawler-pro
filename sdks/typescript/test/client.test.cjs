@@ -317,6 +317,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   await client.searchMarketplaceDatasets({ q: 'climate change', tag: 'energy',
     maxPriceCents: 500, limit: 5 });
   await client.getMarketplaceDataset('dataset:1');
+  await client.listMyMarketplaceDatasets({ status: 'draft', limit: 5, offset: 10 });
   await client.getMarketplaceDelivery('dlv_0123456789ab');
   await client.listMarketplacePurchases(12);
   await client.listMarketplaceReviews('dataset:1', 12);
@@ -324,6 +325,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
     { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/purchases?limit=12', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12', method: 'GET' },

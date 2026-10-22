@@ -199,6 +199,37 @@ class MarketplaceService:
                     break
         return out
 
+    def list_seller_listings(self, seller: str, *, status: str | None = None,
+                             limit: int = 20, offset: int = 0) -> list[Listing]:
+        """List only the authenticated seller's inventory, newest first."""
+        allowed_statuses = {"draft", "published", "suspended", "archived"}
+        if status is not None and status not in allowed_statuses:
+            raise MarketplaceError("invalid listing status")
+        out = []
+        matched = 0
+        start = 0
+        batch_size = 100
+        target = offset + limit
+        while matched < target:
+            ids = self.r.zrevrange("mkt:listings:new", start,
+                                   start + batch_size - 1)
+            if not ids:
+                break
+            start += len(ids)
+            for raw_id in ids:
+                dataset_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                listing = self.get_listing(dataset_id)
+                if not listing or listing.seller_tenant != seller:
+                    continue
+                if status is not None and listing.status != status:
+                    continue
+                if matched >= offset:
+                    out.append(listing)
+                matched += 1
+                if matched >= target:
+                    break
+        return out
+
     def build_preview(self, dataset_id: str, records: Iterable[dict],
                       rows: int = 50) -> list[dict]:
         """Truncated, PII-safe sample of the first ``rows`` records."""
