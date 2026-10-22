@@ -152,14 +152,14 @@ async def get_reviews(dataset_id: str, ctx: CtxDep, request: Request,
 
 # ------------------------------ purchase / delivery ----------------------- #
 @router.post("/datasets/{dataset_id}/purchase",
-             summary="Buy a dataset; returns signed delivery manifest")
+             summary="Acquire a free dataset; paid checkout is not yet configured")
 async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
     mkt = _mkt(request)
     try:
         pur, manifest = mkt.purchase(ctx["tenant"], dataset_id)
     except MarketplaceError as exc:
         msg = str(exc)
-        code = (503 if "signing" in msg else
+        code = (503 if "signing" in msg or "settlement" in msg else
                 404 if "not found" in msg else
                 409 if "own" in msg or "not available" in msg else 400)
         raise HTTPException(code, msg)
