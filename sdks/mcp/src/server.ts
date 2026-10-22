@@ -315,6 +315,25 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_dataset_search", "Search published marketplace listings; this read-only tool never purchases a dataset.", {
+    q: z.string().max(200).optional(),
+    tag: z.string().max(64).optional(),
+    max_price_cents: z.number().int().min(0).max(10_000_000).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  }, async ({ q, tag, max_price_cents, limit }) => {
+    try { return result(await client.searchMarketplaceDatasets({
+      q, tag, maxPriceCents: max_price_cents, limit,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_marketplace_dataset_get", "Retrieve a published marketplace listing or a draft owned by the authenticated tenant.", {
+    dataset_id: z.string().min(1).max(160),
+  }, async ({ dataset_id }) => {
+    try { return result(await client.getMarketplaceDataset(dataset_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_watch_create", "Create a recurring single-page change watch (minimum 15 minutes).", {
     url: z.string().url(), interval_minutes: z.number().int().min(15).max(10080).optional(),
   }, async ({ url, interval_minutes }) => {

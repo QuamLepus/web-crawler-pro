@@ -188,6 +188,17 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def search_marketplace_datasets(self, *, q: str = "", tag: str = "",
+                                    max_price_cents: int | None = None,
+                                    limit: int = 20) -> list[dict[str, Any]]:
+        """Search published public marketplace listings; does not purchase."""
+        return self._request("GET", "marketplace/datasets", params={
+            "q": q, "tag": tag, "max_price_cents": max_price_cents, "limit": limit})
+
+    def get_marketplace_dataset(self, dataset_id: str) -> dict[str, Any]:
+        """Retrieve a published listing or one owned by this tenant."""
+        return self._request("GET", f"marketplace/datasets/{quote(dataset_id, safe='')}")
+
     def store_provenance_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Store caller-supplied provenance metadata for this tenant."""
         return self._request("POST", "provenance/records", json=record)

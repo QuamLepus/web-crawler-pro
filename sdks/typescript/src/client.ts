@@ -96,6 +96,13 @@ export interface WorkflowCrawlStep {
   dependsOn?: string[];
 }
 
+export interface MarketplaceSearchOptions {
+  q?: string;
+  tag?: string;
+  maxPriceCents?: number;
+  limit?: number;
+}
+
 export interface StudioAnalyticsOptions {
   groupBy?: "source" | "host" | "lang" | "snapshot" | "day";
   metric?: "count" | "avg_authority" | "avg_quality" | "avg_body_chars";
@@ -244,6 +251,20 @@ export class WebIntelligenceClient {
 
   cancelJob(jobId: string): Promise<JsonObject> {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  searchMarketplaceDatasets(options: MarketplaceSearchOptions = {}): Promise<JsonObject[]> {
+    const params = new URLSearchParams();
+    if (options.q !== undefined) params.set("q", options.q);
+    if (options.tag !== undefined) params.set("tag", options.tag);
+    if (options.maxPriceCents !== undefined) params.set("max_price_cents", String(options.maxPriceCents));
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<JsonObject[]>("GET", `marketplace/datasets${query ? `?${query}` : ""}`);
+  }
+
+  getMarketplaceDataset(datasetId: string): Promise<JsonObject> {
+    return this.request("GET", `marketplace/datasets/${encodeURIComponent(datasetId)}`);
   }
 
   storeProvenanceRecord(record: JsonObject): Promise<JsonObject> {

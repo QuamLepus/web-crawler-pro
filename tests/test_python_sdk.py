@@ -285,6 +285,25 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_marketplace_methods_search_listings_and_encode_dataset_ids():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json=[{"dataset_id": "ds_public", "status": "published"}])
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.search_marketplace_datasets(q="climate change", tag="energy",
+                                           max_price_cents=500, limit=5)
+        client.get_marketplace_dataset("dataset:1")
+
+    assert calls == [
+        ("GET", "/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5"),
+        ("GET", "/api/v1/marketplace/datasets/dataset%3A1"),
+    ]
+
+
 def test_provenance_methods_store_retrieve_and_export_tenant_records():
     import json
 
