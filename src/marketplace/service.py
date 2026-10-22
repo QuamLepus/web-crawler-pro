@@ -365,6 +365,12 @@ class MarketplaceService:
             raise MarketplaceError("bounty not found")
         if b.poster_tenant != poster:
             raise MarketplaceError("only the poster may award a bounty")
+        if b.status != "open":
+            raise MarketplaceError(f"bounty is {b.status}")
+        if datetime.fromisoformat(b.deadline) < utcnow():
+            self._set_bounty_status(b, "expired")
+            self.r.zrem("mkt:bounties:open", bounty_id)
+            raise MarketplaceError("bounty expired")
         subs = {x.decode() if isinstance(x, bytes) else x
                 for x in self.r.smembers(f"mkt:bounty:{bounty_id}:submissions")}
         if dataset_id not in subs:
