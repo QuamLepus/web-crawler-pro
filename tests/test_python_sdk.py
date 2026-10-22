@@ -285,6 +285,31 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_discovery_preview_forwards_dry_run_options_and_defaults():
+    import json
+
+    calls = []
+
+    def handler(request):
+        calls.append({"method": request.method, "path": request.url.path,
+                      "body": json.loads(request.read())})
+        return httpx.Response(200, json={"topic": "clean energy", "candidates": []})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.preview_discovery("AI medical devices", count=7,
+                                 seeds=["https://example.org"], language="en", per_domain=2)
+        client.preview_discovery("clean energy")
+
+    assert calls == [
+        {"method": "POST", "path": "/api/v1/discovery/preview",
+         "body": {"topic": "AI medical devices", "count": 7,
+                  "seeds": ["https://example.org"], "language": "en", "per_domain": 2}},
+        {"method": "POST", "path": "/api/v1/discovery/preview",
+         "body": {"topic": "clean energy"}},
+    ]
+
+
 def test_knowledge_graph_methods_follow_api_contract():
     import json
 

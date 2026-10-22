@@ -188,6 +188,21 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def preview_discovery(self, topic: str, *, count: int | None = None,
+                          seeds: list[str] | None = None, language: str | None = None,
+                          per_domain: int | None = None) -> dict[str, Any]:
+        """Preview ranked discovery candidates without creating a crawl job."""
+        body: dict[str, Any] = {"topic": topic}
+        if count is not None:
+            body["count"] = count
+        if seeds is not None:
+            body["seeds"] = seeds
+        if language is not None:
+            body["language"] = language
+        if per_domain is not None:
+            body["per_domain"] = per_domain
+        return self._request("POST", "discovery/preview", json=body)
+
     def list_graph(self, *, limit: int = 100) -> dict[str, Any]:
         """List the authenticated tenant's bounded knowledge graph."""
         return self._request("GET", "graph", params={"limit": limit})

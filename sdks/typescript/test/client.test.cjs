@@ -226,6 +226,25 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('discovery preview forwards dry-run controls without creating a job', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'discovery-preview-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ topic: 'AI medical devices', total_found: 0,
+      candidates: [] }), { status: 200 });
+  } });
+  await client.previewDiscovery('AI medical devices', { count: 7,
+    seeds: ['https://example.org'], language: 'en', perDomain: 2 });
+  await client.previewDiscovery('clean energy');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/discovery/preview', method: 'POST',
+      body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+        language: 'en', per_domain: 2 } },
+    { url: 'http://localhost:8000/api/v1/discovery/preview', method: 'POST',
+      body: { topic: 'clean energy' } },
+  ]);
+});
+
 test('knowledge-graph methods map IDs, limits, and payload fields', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'graph-key', fetch: async (url, init) => {

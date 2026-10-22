@@ -155,6 +155,21 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_discovery_preview", "Query configured discovery providers for ranked candidates without starting a crawl or creating a job; provider unavailability can yield no candidates.", {
+    topic: z.string().min(2).max(400),
+    count: z.number().int().min(1).max(500).optional(),
+    seeds: z.array(z.string().url().refine((value) =>
+      ["http:", "https:"].includes(new URL(value).protocol),
+      "seed URLs must use HTTP or HTTPS")).max(50).optional(),
+    language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/).optional(),
+    per_domain: z.number().int().min(1).max(25).optional(),
+  }, async ({ topic, count, seeds, language, per_domain }) => {
+    try { return result(await client.previewDiscovery(topic, {
+      count, seeds, language, perDomain: per_domain,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_graph_list", "List up to 500 entities and relationships in the authenticated tenant's knowledge graph.", {
     limit: z.number().int().min(1).max(500).optional(),
   }, async ({ limit }) => {
