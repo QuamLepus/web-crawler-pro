@@ -125,11 +125,16 @@ def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
 
     monkeypatch.setattr(wt, "CRAWL_OUTPUT_DIR", str(tmp_path))
     job_r = fakeredis.FakeStrictRedis(server=fake_server, decode_responses=True)
+    tenant = client.app.state.services.users.list_orgs()[0].id
 
     payload = {
-        "url": "https://example.com/", "max_pages": 1, "tenant": "t1",
+        "url": "https://example.com/", "max_pages": 1, "tenant": tenant,
         "job_id": "job_mkt", "obey_robots": False,
     }
+    job_r.hset("wcp:v1:job:job_mkt", mapping={
+        "tenant": tenant, "state": "queued", "items_collected": 0,
+        "tokens_generated": 0,
+    })
     wt.run_crawl(payload, redis_client=job_r,
                  fetcher=lambda url: (SAMPLE_HTML, 200))
     assert job_r.hget("wcp:v1:job:job_mkt", "data_sha256")
@@ -142,6 +147,45 @@ def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
                           "source_job_id": "job_mkt"})
     assert r.status_code == 201, r.text
     assert r.json()["dataset_id"]
+
+
+def test_marketplace_publish_requires_own_completed_crawl_and_uses_its_counters(client, api_key):
+    tenant = client.app.state.services.users.list_orgs()[0].id
+    redis = client.app.state.services.redis
+    digest = "a" * 64
+    payload = {
+        "title": "Verified corpus",
+        "description": "A dataset backed by a completed crawl job with recorded counters.",
+        "price_usd_cents": 250,
+    }
+
+    redis.hset("wcp:v1:job:job_foreign", mapping={
+        "tenant": "another-tenant", "state": "completed", "data_sha256": digest,
+        "items_collected": 99, "tokens_generated": 777,
+    })
+    foreign = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
+                          json={**payload, "source_job_id": "job_foreign"})
+    assert foreign.status_code == 404
+
+    redis.hset("wcp:v1:job:job_running", mapping={
+        "tenant": tenant, "state": "running", "data_sha256": digest,
+        "items_collected": 3, "tokens_generated": 24,
+    })
+    running = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
+                          json={**payload, "source_job_id": "job_running"})
+    assert running.status_code == 422
+
+    redis.hset("wcp:v1:job:job_owned", mapping={
+        "tenant": tenant, "state": "completed", "data_sha256": digest,
+        "items_collected": 7, "tokens_generated": 31,
+    })
+    published = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
+                            json={**payload, "source_job_id": "job_owned"})
+    assert published.status_code == 201, published.text
+    from src.marketplace.service import MarketplaceService
+    listing = MarketplaceService(redis).get_listing(published.json()["dataset_id"])
+    assert listing.record_count == 7
+    assert listing.token_count == 31
 
 
 def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, api_key):
@@ -213,7 +257,7 @@ def test_dataset_publish_still_rejects_unhashed_jobs(client, api_key):
                                           "has no content digest at all."),
                           "price_usd_cents": 100,
                           "source_job_id": "job_never_ran"})
-    assert r.status_code == 422
+    assert r.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
