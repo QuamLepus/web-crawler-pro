@@ -188,6 +188,20 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def store_provenance_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Store caller-supplied provenance metadata for this tenant."""
+        return self._request("POST", "provenance/records", json=record)
+
+    def get_provenance_record(self, record_id: str) -> dict[str, Any]:
+        """Retrieve a tenant-owned provenance record."""
+        return self._request("GET", f"provenance/records/{quote(record_id, safe='')}")
+
+    def export_provenance_manifest(self, dataset_id: str, *,
+                                   limit: int = 1000) -> dict[str, Any]:
+        """Export a signed manifest; the API requires its signing key to be configured."""
+        return self._request("POST", f"provenance/manifest?limit={limit}",
+                             json={"dataset_id": dataset_id})
+
     def create_discovery(self, topic: str, *, count: int = 10,
                          seeds: list[str] | None = None, language: str = "en",
                          max_pages_per_site: int = 5,
