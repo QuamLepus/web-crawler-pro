@@ -257,6 +257,28 @@ test('discovery job methods keep crawling behind explicit approval', async () =>
   ]);
 });
 
+test('discovery review methods remove a candidate, approve explicit domains, and read results', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'discovery-review-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    const payload = url.endsWith('/results') ? { sites_total: 1 }
+      : url.includes('/candidates') ? [{ domain: 'example.org', rejected: true }]
+        : { job_id: 'disc_aaaaaaaaaaaa', state: 'crawling' };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  await client.dropDiscoveryCandidate('disc_aaaaaaaaaaaa', 'example.org');
+  await client.approveDiscovery('disc_aaaaaaaaaaaa', ['example.org']);
+  await client.getDiscoveryResults('disc_aaaaaaaaaaaa');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/candidates/example.org',
+      method: 'DELETE', body: undefined },
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/approve',
+      method: 'POST', body: { domains: ['example.org'] } },
+    { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/results',
+      method: 'GET', body: undefined },
+  ]);
+});
+
 test('discovery preview forwards dry-run controls without creating a job', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'discovery-preview-key', fetch: async (url, init) => {

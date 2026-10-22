@@ -324,6 +324,38 @@ def test_discovery_job_methods_keep_crawling_behind_approval():
     ]
 
 
+def test_discovery_review_methods_forward_explicit_approval_and_results():
+    import json
+
+    calls = []
+
+    def handler(request):
+        calls.append({"method": request.method, "path": request.url.raw_path.decode(),
+                      "body": json.loads(request.read()) if request.content else None})
+        if request.url.path.endswith("/results"):
+            payload = {"sites_total": 1}
+        elif "/candidates/" in request.url.path:
+            payload = [{"domain": "example.org", "rejected": True}]
+        else:
+            payload = {"job_id": "disc_aaaaaaaaaaaa", "state": "crawling"}
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.drop_discovery_candidate("disc_aaaaaaaaaaaa", "example.org")
+        client.approve_discovery("disc_aaaaaaaaaaaa", ["example.org"])
+        client.get_discovery_results("disc_aaaaaaaaaaaa")
+
+    assert calls == [
+        {"method": "DELETE",
+         "path": "/api/v1/discovery/disc_aaaaaaaaaaaa/candidates/example.org", "body": None},
+        {"method": "POST", "path": "/api/v1/discovery/disc_aaaaaaaaaaaa/approve",
+         "body": {"domains": ["example.org"]}},
+        {"method": "GET", "path": "/api/v1/discovery/disc_aaaaaaaaaaaa/results",
+         "body": None},
+    ]
+
+
 def test_discovery_preview_forwards_dry_run_options_and_defaults():
     import json
 

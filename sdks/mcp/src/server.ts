@@ -216,6 +216,31 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_discovery_candidate_drop", "Remove one domain from a tenant-owned shortlist before approval.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+    domain: z.string().min(1).max(253),
+  }, async ({ job_id, domain }) => {
+    try { return result(await client.dropDiscoveryCandidate(job_id, domain)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_approve", "Start crawls only for the explicitly supplied shortlisted domains. This triggers crawl jobs; robots.txt policy from discovery is preserved.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+    domains: z.array(z.string().min(1).max(253)).min(1).max(50)
+      .refine((domains) => new Set(domains.map((domain) => domain.toLowerCase())).size === domains.length,
+        "domains must be unique"),
+  }, async ({ job_id, domains }) => {
+    try { return result(await client.approveDiscovery(job_id, domains)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_discovery_results", "Read the aggregated report for a tenant-owned discovery job.", {
+    job_id: z.string().regex(/^disc_[a-f0-9]{12}$/),
+  }, async ({ job_id }) => {
+    try { return result(await client.getDiscoveryResults(job_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_graph_list", "List up to 500 entities and relationships in the authenticated tenant's knowledge graph.", {
     limit: z.number().int().min(1).max(500).optional(),
   }, async ({ limit }) => {
