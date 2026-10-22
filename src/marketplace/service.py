@@ -270,7 +270,7 @@ class MarketplaceService:
     def add_review(self, buyer: str, dataset_id: str, rating: int,
                    comment: str) -> ReviewOut:
         lst = self.get_listing(dataset_id)
-        if lst is None:
+        if lst is None or lst.status != "published":
             raise MarketplaceError("dataset not found")
         if lst.seller_tenant == buyer:
             raise MarketplaceError("sellers cannot review their own dataset")
