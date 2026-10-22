@@ -35,6 +35,20 @@ export interface RagOptions {
   includeSources?: boolean;
 }
 
+export interface GraphEntityOptions {
+  name: string;
+  entityType?: string;
+  aliases?: string[];
+  properties?: JsonObject;
+}
+
+export interface GraphRelationOptions {
+  sourceId: string;
+  targetId: string;
+  relation: string;
+  properties?: JsonObject;
+}
+
 export type CrawlJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type WebhookEvent = "crawl.completed" | "crawl.failed" | "crawl.cancelled" |
   "data.ready" | "export.ready" | "quota.warning" | "dataset.sold" |
@@ -151,6 +165,28 @@ export class WebIntelligenceClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  listGraph(limit = 100): Promise<JsonObject> {
+    return this.request("GET", `graph?limit=${limit}`);
+  }
+
+  upsertGraphEntity(options: GraphEntityOptions): Promise<JsonObject> {
+    return this.request("POST", "graph/entities", {
+      name: options.name, entity_type: options.entityType ?? "Entity",
+      aliases: options.aliases ?? [], properties: options.properties ?? {},
+    });
+  }
+
+  getGraphEntity(entityId: string): Promise<JsonObject> {
+    return this.request("GET", `graph/entities/${encodeURIComponent(entityId)}`);
+  }
+
+  addGraphRelation(options: GraphRelationOptions): Promise<JsonObject> {
+    return this.request("POST", "graph/relations", {
+      source_id: options.sourceId, target_id: options.targetId,
+      relation: options.relation, properties: options.properties ?? {},
+    });
   }
 
   ragQuery(query: string, options: RagOptions = {}): Promise<JsonObject> {

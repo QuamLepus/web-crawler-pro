@@ -226,6 +226,34 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('knowledge-graph methods map IDs, limits, and payload fields', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'graph-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ entity_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa' }),
+      { status: init.method === 'POST' && url.endsWith('/relations') ? 201 : 200 });
+  } });
+  await client.listGraph(12);
+  await client.upsertGraphEntity({ name: 'Open Knowledge', entityType: 'Project',
+    aliases: ['OK'], properties: { region: 'global' } });
+  await client.getGraphEntity('ent_aaaaaaaaaaaaaaaaaaaaaaaa');
+  await client.addGraphRelation({ sourceId: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+    targetId: 'ent_bbbbbbbbbbbbbbbbbbbbbbbb', relation: 'supports',
+    properties: { confidence: 0.9 } });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/graph?limit=12', method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/graph/entities', method: 'POST',
+      body: { name: 'Open Knowledge', entity_type: 'Project', aliases: ['OK'],
+        properties: { region: 'global' } } },
+    { url: 'http://localhost:8000/api/v1/graph/entities/ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/graph/relations', method: 'POST',
+      body: { source_id: 'ent_aaaaaaaaaaaaaaaaaaaaaaaa',
+        target_id: 'ent_bbbbbbbbbbbbbbbbbbbbbbbb', relation: 'supports',
+        properties: { confidence: 0.9 } } },
+  ]);
+});
+
 test('RAG query URL-encodes input and forwards optional source controls', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'rag-key', fetch: async (url, init) => {
