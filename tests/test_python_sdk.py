@@ -285,6 +285,32 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_provenance_methods_store_retrieve_and_export_tenant_records():
+    import json
+
+    calls = []
+    record = {"record_id": "record:one", "source_url": "https://example.org/data",
+              "fetched_at": "2026-10-23T00:00:00Z", "content_sha256": "a" * 64}
+
+    def handler(request):
+        calls.append({"method": request.method, "path": request.url.raw_path.decode(),
+                      "body": json.loads(request.read()) if request.content else None})
+        return httpx.Response(200, json={"record_id": "record:one", "stored": True})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.store_provenance_record(record)
+        client.get_provenance_record("record:one")
+        client.export_provenance_manifest("dataset-1", limit=9)
+
+    assert calls == [
+        {"method": "POST", "path": "/api/v1/provenance/records", "body": record},
+        {"method": "GET", "path": "/api/v1/provenance/records/record%3Aone", "body": None},
+        {"method": "POST", "path": "/api/v1/provenance/manifest?limit=9",
+         "body": {"dataset_id": "dataset-1"}},
+    ]
+
+
 def test_discovery_job_methods_keep_crawling_behind_approval():
     import json
 

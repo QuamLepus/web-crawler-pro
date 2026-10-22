@@ -226,6 +226,26 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('provenance methods store, retrieve, and export tenant records', async () => {
+  const calls = [];
+  const record = { record_id: 'record:one', source_url: 'https://example.org/data',
+    fetched_at: '2026-10-23T00:00:00Z', content_sha256: 'a'.repeat(64) };
+  const client = new WebIntelligenceClient({ apiKey: 'provenance-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ record_id: 'record:one', stored: true }), { status: 200 });
+  } });
+  await client.storeProvenanceRecord(record);
+  await client.getProvenanceRecord('record:one');
+  await client.exportProvenanceManifest('dataset-1', 9);
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/provenance/records', method: 'POST', body: record },
+    { url: 'http://localhost:8000/api/v1/provenance/records/record%3Aone',
+      method: 'GET', body: undefined },
+    { url: 'http://localhost:8000/api/v1/provenance/manifest?limit=9', method: 'POST',
+      body: { dataset_id: 'dataset-1' } },
+  ]);
+});
+
 test('discovery job methods keep crawling behind explicit approval', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'discovery-key', fetch: async (url, init) => {

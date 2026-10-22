@@ -246,6 +246,18 @@ export class WebIntelligenceClient {
     return this.request("POST", `jobs/${encodeURIComponent(jobId)}/cancel`);
   }
 
+  storeProvenanceRecord(record: JsonObject): Promise<JsonObject> {
+    return this.request("POST", "provenance/records", record);
+  }
+
+  getProvenanceRecord(recordId: string): Promise<JsonObject> {
+    return this.request("GET", `provenance/records/${encodeURIComponent(recordId)}`);
+  }
+
+  exportProvenanceManifest(datasetId: string, limit = 1000): Promise<JsonObject> {
+    return this.request("POST", `provenance/manifest?limit=${limit}`, { dataset_id: datasetId });
+  }
+
   createDiscovery(topic: string, options: DiscoveryCreateOptions = {}): Promise<JsonObject> {
     return this.request("POST", "discovery", {
       topic, count: options.count ?? 10, seeds: options.seeds ?? [],

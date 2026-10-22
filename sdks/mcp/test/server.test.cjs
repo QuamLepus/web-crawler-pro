@@ -63,7 +63,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
     'wio_discovery_candidates', 'wio_discovery_create', 'wio_discovery_list',
     'wio_discovery_preview', 'wio_discovery_results', 'wio_discovery_status',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
-    'wio_graph_relation_add', 'wio_rag',
+    'wio_graph_relation_add', 'wio_provenance_manifest_export',
+    'wio_provenance_record_get', 'wio_provenance_record_store', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
     'wio_search',
     'wio_studio_analytics', 'wio_studio_query_delete', 'wio_studio_query_list',
@@ -553,6 +554,44 @@ test('MCP discovery preview is a bounded dry-run and submits no crawl job', asyn
       body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
         language: 'en', per_domain: 2 },
     });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP provenance tools store, retrieve, and export caller metadata', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'provenance-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return new Response(JSON.stringify({ record_id: 'record:one', stored: true }), { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'provenance-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const stored = await client.callTool({ name: 'wio_provenance_record_store', arguments: {
+      record_id: 'record:one', source_url: 'https://example.org/data',
+      fetched_at: '2026-10-23T00:00:00Z', content_sha256: 'a'.repeat(64),
+    } });
+    const record = await client.callTool({ name: 'wio_provenance_record_get', arguments: {
+      record_id: 'record:one',
+    } });
+    const manifest = await client.callTool({ name: 'wio_provenance_manifest_export', arguments: {
+      dataset_id: 'dataset-1', limit: 9,
+    } });
+    for (const response of [stored, record, manifest]) assert.equal(response.isError, undefined);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/provenance/records', method: 'POST',
+        body: { record_id: 'record:one', source_url: 'https://example.org/data',
+          fetched_at: '2026-10-23T00:00:00Z', content_sha256: 'a'.repeat(64) } },
+      { url: 'http://localhost:8000/api/v1/provenance/records/record%3Aone',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/provenance/manifest?limit=9', method: 'POST',
+        body: { dataset_id: 'dataset-1' } },
+    ]);
   } finally {
     await client.close();
     await server.close();

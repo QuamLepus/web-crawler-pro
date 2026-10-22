@@ -84,6 +84,42 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_provenance_record_store", "Store caller-supplied provenance metadata for the authenticated tenant; this does not fetch a URL or verify permissions.", {
+    record_id: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
+    source_url: z.string().url().max(4096).refine((value) =>
+      ["http:", "https:"].includes(new URL(value).protocol),
+      "source_url must use HTTP or HTTPS"),
+    fetched_at: z.string().min(1).max(80),
+    http_status: z.number().int().min(100).max(599).optional(),
+    robots_verdict: z.string().max(64).optional(),
+    license: z.string().max(128).optional(),
+    content_sha256: z.string().regex(/^[a-fA-F0-9]{64}$/),
+    extraction_method: z.string().max(128).optional(),
+    transformations: z.array(z.string().max(512)).max(64).optional(),
+    extractor_version: z.string().max(128).optional(),
+    model_id: z.string().max(256).optional(),
+    prompt_hash: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+    confidence: z.number().finite().min(0).max(1).optional(),
+  }, async (record) => {
+    try { return result(await client.storeProvenanceRecord(record)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_provenance_record_get", "Retrieve a provenance record belonging to the authenticated tenant.", {
+    record_id: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
+  }, async ({ record_id }) => {
+    try { return result(await client.getProvenanceRecord(record_id)); }
+    catch (error) { return failure(error); }
+  });
+
+  server.tool("wio_provenance_manifest_export", "Export a signed manifest for the authenticated tenant's provenance records; the API must have a signing key configured.", {
+    dataset_id: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
+    limit: z.number().int().min(1).max(10000).optional(),
+  }, async ({ dataset_id, limit }) => {
+    try { return result(await client.exportProvenanceManifest(dataset_id, limit)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_search", "Run semantic search against the authenticated tenant's indexed documents; results include matching text and metadata.", {
     query: z.string().min(1).max(4096),
     top_k: z.number().int().min(1).max(100).optional(),
