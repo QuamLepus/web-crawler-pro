@@ -59,7 +59,8 @@ test('stdio MCP transport initializes, lists tools, and forwards an authenticate
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'wio_ask', 'wio_crawl_cancel', 'wio_crawl_create', 'wio_crawl_list', 'wio_crawl_status',
-    'wio_discovery_preview',
+    'wio_discovery_cancel', 'wio_discovery_candidates', 'wio_discovery_create',
+    'wio_discovery_list', 'wio_discovery_preview', 'wio_discovery_status',
     'wio_graph_entity_get', 'wio_graph_entity_upsert', 'wio_graph_list',
     'wio_graph_relation_add', 'wio_rag',
     'wio_research_cancel', 'wio_research_create', 'wio_research_list', 'wio_research_status',
@@ -422,6 +423,62 @@ test('MCP workflow list, get, and run-history tools forward pagination', async (
       { url: 'http://localhost:8000/api/v1/workflows?page=2&page_size=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/workflow_aaaaaaaaaaaaaaaaaaaa', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/workflows/runs?page=1&page_size=5', method: 'GET' },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('MCP discovery job tools queue only human-reviewed candidates and expose status', async () => {
+  const calls = [];
+  const api = new WebIntelligenceClient({ apiKey: 'discovery-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    const payload = url.includes('/candidates') ? [{ domain: 'example.org' }]
+      : { job_id: 'disc_aaaaaaaaaaaa', state: 'awaiting_approval' };
+    return new Response(JSON.stringify(payload), { status: init.method === 'POST'
+      && url.endsWith('/discovery') ? 202 : 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'discovery-tools-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const created = await client.callTool({ name: 'wio_discovery_create', arguments: {
+      topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+      language: 'en', max_pages_per_site: 3, per_domain: 2,
+    } });
+    const listed = await client.callTool({ name: 'wio_discovery_list', arguments: {
+      page: 2, page_size: 7,
+    } });
+    const status = await client.callTool({ name: 'wio_discovery_status', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa',
+    } });
+    const candidates = await client.callTool({ name: 'wio_discovery_candidates', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa', only_selected: true,
+    } });
+    const cancelled = await client.callTool({ name: 'wio_discovery_cancel', arguments: {
+      job_id: 'disc_aaaaaaaaaaaa',
+    } });
+    for (const response of [created, listed, status, candidates, cancelled]) {
+      assert.equal(response.isError, undefined);
+    }
+    assert.match(created.content[0].text, /awaiting_approval/);
+    assert.match(candidates.content[0].text, /example.org/);
+    assert.deepEqual(calls, [
+      { url: 'http://localhost:8000/api/v1/discovery', method: 'POST',
+        body: { topic: 'AI medical devices', count: 7, seeds: ['https://example.org'],
+          language: 'en', auto: false, max_pages_per_site: 3, per_domain: 2,
+          obey_robots: true } },
+      { url: 'http://localhost:8000/api/v1/discovery?page=2&page_size=7',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/candidates?only_selected=true',
+        method: 'GET', body: undefined },
+      { url: 'http://localhost:8000/api/v1/discovery/disc_aaaaaaaaaaaa/cancel',
+        method: 'POST', body: undefined },
     ]);
   } finally {
     await client.close();
