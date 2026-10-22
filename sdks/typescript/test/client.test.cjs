@@ -226,6 +226,22 @@ test('workflow update and deletion use encoded tenant endpoints and snake-case f
   assert.equal(calls[1].method, 'DELETE');
 });
 
+test('RAG query URL-encodes input and forwards optional source controls', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'rag-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ answer: 'A supported extractive answer',
+      engine: 'extractive', sources: [] }), { status: 200 });
+  } });
+  await client.ragQuery('solar panels & storage', { topK: 7, includeSources: false });
+  await client.ragQuery('clean energy');
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/search/rag?q=solar+panels+%26+storage&top_k=7&include_sources=false',
+      method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/search/rag?q=clean+energy', method: 'GET' },
+  ]);
+});
+
 test('semantic search forwards bounded query and optional metadata filters', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'search-key', fetch: async (url, init) => {

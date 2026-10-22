@@ -66,6 +66,17 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_rag", "Retrieve context from the authenticated tenant's index and synthesize an answer; uses extractive fallback when no LLM is configured and is not independent fact-checking.", {
+    q: z.string().min(3).max(4096),
+    top_k: z.number().int().min(1).max(20).optional(),
+    include_sources: z.boolean().optional(),
+  }, async ({ q, top_k, include_sources }) => {
+    try { return result(await client.ragQuery(q, {
+      topK: top_k, includeSources: include_sources,
+    })); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_search", "Run semantic search against the authenticated tenant's indexed documents; results include matching text and metadata.", {
     query: z.string().min(1).max(4096),
     top_k: z.number().int().min(1).max(100).optional(),

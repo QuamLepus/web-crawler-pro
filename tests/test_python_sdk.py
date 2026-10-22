@@ -285,6 +285,24 @@ def test_semantic_search_forwards_filters_and_preserves_api_defaults():
     ]
 
 
+def test_rag_query_encodes_query_and_forwards_optional_controls():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"answer": "Supported answer", "sources": []})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        client.rag_query("solar panels & storage", top_k=7, include_sources=False)
+        client.rag_query("clean energy")
+
+    assert calls == [
+        ("GET", "/api/v1/search/rag?q=solar+panels+%26+storage&top_k=7&include_sources=false"),
+        ("GET", "/api/v1/search/rag?q=clean+energy"),
+    ]
+
+
 def test_webhook_methods_handle_secret_creation_and_list_responses():
     import json
 

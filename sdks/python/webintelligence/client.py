@@ -188,6 +188,16 @@ class Client:
             body["filter"] = filter
         return self._request("POST", "search", json=body)
 
+    def rag_query(self, query: str, *, top_k: int | None = None,
+                  include_sources: bool | None = None) -> dict[str, Any]:
+        """Synthesize a tenant-scoped answer from retrieved indexed content."""
+        params: dict[str, Any] = {"q": query}
+        if top_k is not None:
+            params["top_k"] = top_k
+        if include_sources is not None:
+            params["include_sources"] = include_sources
+        return self._request("GET", "search/rag", params=params)
+
     def ask(self, question: str, *, max_pages: int = 50, max_seconds: int = 60,
             top_k: int = 8) -> dict[str, Any]:
         """Retrieve an answer from indexed content (does not start a crawl)."""
