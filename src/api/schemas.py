@@ -18,8 +18,22 @@ def utcnow() -> datetime:
 _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS = {
     "access_token", "token", "api_key", "apikey", "key", "password",
     "passwd", "secret", "auth", "authorization", "session", "sessionid",
-    "code", "signature", "sig", "email", "phone", "ssn",
+    "session_id", "code", "signature", "sig", "email", "phone", "ssn",
+    "jwt", "bearer", "cookie", "set_cookie", "credential", "credentials",
+    "user", "username", "user_id",
 }
+_BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES = (
+    "_token", "_secret", "_password", "_passwd", "_key", "_credential",
+    "_credentials", "_session", "_sessionid", "_session_id", "_cookie",
+    "_email", "_phone", "_ssn",
+)
+
+
+def _is_sensitive_bounty_target_query_key(key: str) -> bool:
+    normalized = key.casefold().replace("-", "_").replace(".", "_").strip("[]")
+    return (normalized in _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS or
+            any(normalized.endswith(suffix)
+                for suffix in _BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES))
 
 
 def normalize_public_bounty_target_urls(values: Any, *,
@@ -44,8 +58,8 @@ def normalize_public_bounty_target_urls(values: Any, *,
         try:
             parsed = urlsplit(value)
             port = parsed.port
-            query_keys = {key.lower().replace("-", "_")
-                          for key, _ in parse_qsl(parsed.query)}
+            query_keys = {key for key, _ in parse_qsl(
+                parsed.query, keep_blank_values=True)}
             valid = (valid and len(value) <= 2048
                      and not any(char.isspace() for char in value)
                      and parsed.scheme in {"http", "https"}
@@ -53,14 +67,15 @@ def normalize_public_bounty_target_urls(values: Any, *,
                      and (port is None or 1 <= port <= 65535)
                      and parsed.username is None and parsed.password is None
                      and not parsed.fragment
-                     and not (query_keys & _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS))
+                     and not any(_is_sensitive_bounty_target_query_key(key)
+                                 for key in query_keys))
         except ValueError:
             valid = False
         if not valid:
             if drop_invalid:
                 continue
             raise ValueError(
-                "target URLs must be HTTP(S), at most 2048 characters, and contain no credentials")
+                "target URLs must be HTTP(S), at most 2048 characters, and contain no credentials or sensitive query keys")
         if value not in seen:
             normalized.append(value)
             seen.add(value)
