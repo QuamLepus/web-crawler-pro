@@ -1286,6 +1286,47 @@ def test_open_bounties_support_bounded_offset_pagination(client, api_key):
                       params={"offset": 10001}).status_code == 422
 
 
+def test_marketplace_preview_redacts_common_identifiers_and_bounds_fields(client):
+    import json
+
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "preview-seller", title="Preview privacy checks",
+        description="A published listing for direct preview sanitization tests.",
+        tags=["preview"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="a" * 64)
+    record = {
+        "url": "https://example.org/public",
+        "title": "T" * 2000,
+        "text": ("Contact alice@example.com or +1 (202) 555-0100; "
+                 "SSN 123-45-6789; IP 192.0.2.55; "
+                 "accessToken=secret-value; sessionId=session-value."),
+        "customerEmail": "alice@example.com",
+        "request_ip": "192.0.2.55",
+        "sessionCookie": "cookie-value",
+        "raw_html": "<script>private</script>",
+        "metadata": {"clientSecret": "nested-secret", "label": "public"},
+        "images": [f"https://example.org/{i}" for i in range(30)],
+    }
+
+    preview = marketplace.build_preview(listing.dataset_id, [record], rows=50)
+    serialized = json.dumps(preview)
+
+    assert len(preview) == 1
+    assert "text" not in preview[0]
+    assert len(preview[0]["content"]) <= 281
+    assert len(preview[0]["title"]) == 1000
+    assert len(preview[0]["images"]) == 20
+    assert preview[0]["metadata"] == {"label": "public"}
+    for private_value in (
+            "alice@example.com", "202) 555-0100", "123-45-6789",
+            "192.0.2.55", "cookie-value", "nested-secret", "secret-value",
+            "session-value", "<script>private</script>"):
+        assert private_value not in serialized
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
