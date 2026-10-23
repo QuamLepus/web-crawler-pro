@@ -383,6 +383,30 @@ def test_billing_methods_read_plans_usage_and_current_invoice_estimate():
     ]
 
 
+def test_billing_checkout_posts_paid_plan_and_redirect_urls():
+    import json
+
+    calls = []
+    payload = {"session_id": "cs_test_123", "url": "https://checkout.stripe.example/session",
+               "plan": "pro"}
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(),
+                      json.loads(request.read())))
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.create_billing_checkout(
+            "pro", "https://app.example/complete", "https://app.example/cancel"
+        ) == payload
+
+    assert calls == [("POST", "/api/v1/billing/checkout", {
+        "plan": "pro", "success_url": "https://app.example/complete",
+        "cancel_url": "https://app.example/cancel",
+    })]
+
+
 def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     calls = []
 

@@ -307,6 +307,23 @@ test('billing methods read plans, usage, and current invoice estimate', async ()
   ]);
 });
 
+test('billing checkout posts paid plan and redirect URLs', async () => {
+  const calls = [];
+  const payload = { session_id: 'cs_test_123', url: 'https://checkout.stripe.example/session', plan: 'pro' };
+  const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const result = await client.createBillingCheckout(
+    'pro', 'https://app.example/complete', 'https://app.example/cancel');
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/billing/checkout', method: 'POST',
+    body: { plan: 'pro', success_url: 'https://app.example/complete',
+      cancel_url: 'https://app.example/cancel' },
+  }]);
+});
+
 test('marketplace methods search published datasets and encode dataset IDs', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {

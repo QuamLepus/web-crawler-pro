@@ -221,6 +221,18 @@ class Client:
         """Read public plan and pricing information."""
         return self._request("GET", "billing/plans")
 
+    def create_billing_checkout(self, plan: Literal["starter", "pro", "enterprise"],
+                                success_url: str, cancel_url: str) -> dict[str, Any]:
+        """Create a paid-plan Stripe Checkout session and return its URL.
+
+        A Stripe-enabled API deployment and configured price are required.
+        This method only creates the checkout session; subscription activation
+        follows the provider's verified webhook flow.
+        """
+        return self._request("POST", "billing/checkout", json={
+            "plan": plan, "success_url": success_url, "cancel_url": cancel_url,
+        })
+
     def get_billing_usage(self) -> dict[str, Any]:
         """Read the authenticated tenant's current-period usage summary."""
         return self._request("GET", "billing/usage")

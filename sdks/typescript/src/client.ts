@@ -19,6 +19,8 @@ export interface ClientOptions {
   fetch?: FetchLike;
 }
 
+export type PaidBillingPlan = "starter" | "pro" | "enterprise";
+
 export interface AskOptions {
   maxPages?: number;
   maxSeconds?: number;
@@ -348,6 +350,14 @@ export class WebIntelligenceClient {
 
   listBillingPlans(): Promise<JsonObject> {
     return this.request("GET", "billing/plans");
+  }
+
+  /** Create a paid-plan Stripe Checkout session; subscription activates via verified webhook. */
+  createBillingCheckout(plan: PaidBillingPlan, successUrl: string,
+                        cancelUrl: string): Promise<JsonObject> {
+    return this.request("POST", "billing/checkout", {
+      plan, success_url: successUrl, cancel_url: cancelUrl,
+    });
   }
 
   getBillingUsage(): Promise<JsonObject> {
