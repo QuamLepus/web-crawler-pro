@@ -488,7 +488,7 @@ class MarketplaceService:
 
     def list_purchases(self, buyer: str, limit: int = 50,
                        offset: int = 0) -> list[Purchase]:
-        """Return a page of recent purchases indexed to this buyer only."""
+        """Return a newest-first page with stable ordering for tied timestamps."""
         purchase_ids = self.r.smembers(f"mkt:purchase-index:{buyer}")
         out = []
         for raw_id in purchase_ids:
@@ -498,7 +498,8 @@ class MarketplaceService:
                 purchase = Purchase(**json.loads(raw))
                 if purchase.buyer_tenant == buyer:
                     out.append(purchase)
-        out.sort(key=lambda purchase: purchase.created_at, reverse=True)
+        out.sort(key=lambda purchase: (purchase.created_at, purchase.purchase_id),
+                 reverse=True)
         return out[offset:offset + limit]
 
     # --------------------- signed secure delivery ----------------------- #
