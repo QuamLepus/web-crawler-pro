@@ -526,6 +526,38 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     assert marketplace.get_bounty(expired.bounty_id).status == "expired"
 
 
+def test_submission_retries_if_listing_is_unpublished_mid_transaction(client):
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Submission listing race",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    listing = marketplace.create_listing(
+        "worker", title="Candidate", description="Public dataset for bounty submission.",
+        tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="d" * 64)
+    get_listing = marketplace.get_listing
+    changed = False
+
+    def unpublish_after_read(dataset_id):
+        nonlocal changed
+        current = get_listing(dataset_id)
+        if dataset_id == listing.dataset_id and not changed:
+            changed = True
+            marketplace.update_listing(dataset_id, "worker", status="draft")
+        return current
+
+    marketplace.get_listing = unpublish_after_read
+    with pytest.raises(MarketplaceError, match="published listing"):
+        marketplace.submit_for_bounty("worker", bounty.bounty_id,
+                                      listing.dataset_id)
+    assert marketplace.get_bounty(bounty.bounty_id).submissions == 0
+    assert marketplace.list_bounty_submissions(
+        "poster", bounty.bounty_id) == []
+
+
 def test_concurrent_duplicate_bounty_submissions_are_recorded_once(client):
     from concurrent.futures import ThreadPoolExecutor
 
@@ -557,6 +589,36 @@ def test_concurrent_duplicate_bounty_submissions_are_recorded_once(client):
     assert marketplace.get_bounty(bounty.bounty_id).submissions == 1
     assert marketplace.list_bounty_submissions(
         "poster", bounty.bounty_id) == [listing.dataset_id]
+
+
+def test_award_retries_if_listing_is_unpublished_mid_transaction(client):
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Award listing race",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    listing = marketplace.create_listing(
+        "worker", title="Candidate", description="Published bounty submission.",
+        tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="e" * 64)
+    marketplace.submit_for_bounty("worker", bounty.bounty_id, listing.dataset_id)
+    get_listing = marketplace.get_listing
+    changed = False
+
+    def unpublish_after_read(dataset_id):
+        nonlocal changed
+        current = get_listing(dataset_id)
+        if dataset_id == listing.dataset_id and not changed:
+            changed = True
+            marketplace.update_listing(dataset_id, "worker", status="draft")
+        return current
+
+    marketplace.get_listing = unpublish_after_read
+    with pytest.raises(MarketplaceError, match="no longer published"):
+        marketplace.award_bounty("poster", bounty.bounty_id, listing.dataset_id)
+    assert marketplace.get_bounty(bounty.bounty_id).status == "open"
 
 
 def test_concurrent_bounty_awards_assign_only_one_submission(client):
