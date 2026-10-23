@@ -341,6 +341,23 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   ]);
 });
 
+test('marketplace dataset update encodes ID and maps a partial typed patch', async () => {
+  const calls = [];
+  const payload = { dataset_id: 'dataset:1', status: 'published', price_usd_cents: 2500 };
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const result = await client.updateMarketplaceDataset('dataset:1', {
+    status: 'published', priceUsdCents: 2500,
+  });
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1',
+    method: 'PATCH', body: { status: 'published', price_usd_cents: 2500 },
+  }]);
+});
+
 test('marketplace review submission encodes dataset ID and posts review fields', async () => {
   const calls = [];
   const payload = { review_id: 'review_1', dataset_id: 'dataset:1', buyer_tenant: 'buyer',

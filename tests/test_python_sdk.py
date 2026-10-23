@@ -421,6 +421,28 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     ]
 
 
+def test_marketplace_dataset_update_patches_partial_snake_case_fields():
+    import json
+
+    calls = []
+    payload = {"dataset_id": "dataset:one", "status": "published",
+               "price_usd_cents": 2500}
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(),
+                      json.loads(request.read())))
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.update_marketplace_dataset(
+            "dataset:one", status="published", price_usd_cents=2500)
+
+    assert result == payload
+    assert calls == [("PATCH", "/api/v1/marketplace/datasets/dataset%3Aone",
+                      {"status": "published", "price_usd_cents": 2500})]
+
+
 def test_marketplace_review_submission_posts_encoded_id_and_review_fields():
     import json
 

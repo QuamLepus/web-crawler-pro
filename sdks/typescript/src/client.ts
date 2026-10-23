@@ -101,6 +101,15 @@ export interface MarketplaceBountyCreateOptions {
   targetUrls?: string[];
 }
 
+export interface MarketplaceDatasetUpdateOptions {
+  title?: string;
+  description?: string;
+  tags?: string[];
+  priceUsdCents?: number;
+  license?: string;
+  status?: "draft" | "published" | "suspended" | "archived";
+}
+
 export interface MarketplaceSearchOptions {
   q?: string;
   tag?: string;
@@ -376,6 +385,18 @@ export class WebIntelligenceClient {
 
   getMarketplaceDataset(datasetId: string): Promise<JsonObject> {
     return this.request("GET", `marketplace/datasets/${encodeURIComponent(datasetId)}`);
+  }
+
+  updateMarketplaceDataset(datasetId: string,
+                           changes: MarketplaceDatasetUpdateOptions): Promise<JsonObject> {
+    const body: JsonObject = {};
+    if (changes.title !== undefined) body.title = changes.title;
+    if (changes.description !== undefined) body.description = changes.description;
+    if (changes.tags !== undefined) body.tags = changes.tags;
+    if (changes.priceUsdCents !== undefined) body.price_usd_cents = changes.priceUsdCents;
+    if (changes.license !== undefined) body.license = changes.license;
+    if (changes.status !== undefined) body.status = changes.status;
+    return this.request("PATCH", `marketplace/datasets/${encodeURIComponent(datasetId)}`, body);
   }
 
   getMarketplaceDatasetPreview(datasetId: string, rows = 50): Promise<JsonObject[]> {
