@@ -264,9 +264,11 @@ class Client:
             f"marketplace/datasets/{quote(dataset_id, safe='')}/reviews",
             params={"limit": limit, "offset": offset})
 
-    def list_marketplace_bounties(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """List open public marketplace bounties; does not submit or award work."""
-        return self._request("GET", "marketplace/bounties", params={"limit": limit})
+    def list_marketplace_bounties(self, *, limit: int = 50,
+                                  offset: int = 0) -> list[dict[str, Any]]:
+        """List a page of open public bounties; does not submit or award work."""
+        return self._request("GET", "marketplace/bounties", params={
+            "limit": limit, "offset": offset})
 
     def list_marketplace_bounty_submissions(self, bounty_id: str, *,
                                             limit: int = 50,

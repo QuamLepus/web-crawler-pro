@@ -720,7 +720,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
   await client.connect(clientTransport);
   try {
     const bounties = await client.callTool({ name: 'wio_marketplace_bounties_list', arguments: {
-      limit: 7,
+      limit: 7, offset: 2,
     } });
     const submissions = await client.callTool({
       name: 'wio_marketplace_bounty_submissions_list', arguments: {
@@ -754,7 +754,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
     assert.equal(purchases.isError, undefined);
     assert.equal(reviews.isError, undefined);
     assert.deepEqual(calls, [
-      { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7&offset=2', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },

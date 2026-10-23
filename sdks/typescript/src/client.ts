@@ -324,8 +324,9 @@ export class WebIntelligenceClient {
     return this.request("GET", `marketplace/datasets/${encodeURIComponent(datasetId)}`);
   }
 
-  listMarketplaceBounties(limit = 50): Promise<JsonObject[]> {
-    return this.request<JsonObject[]>("GET", `marketplace/bounties?limit=${limit}`);
+  listMarketplaceBounties(limit = 50, offset = 0): Promise<JsonObject[]> {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return this.request<JsonObject[]>("GET", `marketplace/bounties?${query}`);
   }
 
   listMarketplaceBountySubmissions(bountyId: string, limit = 50, offset = 0): Promise<string[]> {

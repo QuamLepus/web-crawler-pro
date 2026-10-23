@@ -623,13 +623,16 @@ class MarketplaceService:
             setattr(b, k, v)
         self.r.hset(f"mkt:bounty:{b.bounty_id}", "data", json.dumps(asdict(b)))
 
-    def list_open_bounties(self, limit: int = 50) -> list[BountyOut]:
+    def list_open_bounties(self, limit: int = 50,
+                           offset: int = 0) -> list[BountyOut]:
         out = []
         expired_ids = []
         start = 0
+        target = offset + limit
         batch_size = max(limit, 50)
+        matched = 0
         now = utcnow()
-        while len(out) < limit:
+        while matched < target:
             ids = self.r.zrevrange("mkt:bounties:open", start,
                                    start + batch_size - 1)
             if not ids:
@@ -645,12 +648,16 @@ class MarketplaceService:
                     self._set_bounty_status(b, "expired")
                     expired_ids.append(bounty_id)
                     continue
-                out.append(BountyOut(
-                    bounty_id=b.bounty_id, poster_tenant=b.poster_tenant,
-                    title=b.title, spec=b.spec, reward_usd_cents=b.reward_usd_cents,
-                    deadline=datetime.fromisoformat(b.deadline), status=b.status,
-                    submissions=b.submissions, target_urls=b.target_urls))
-                if len(out) >= limit:
+                if matched >= offset:
+                    out.append(BountyOut(
+                        bounty_id=b.bounty_id, poster_tenant=b.poster_tenant,
+                        title=b.title, spec=b.spec,
+                        reward_usd_cents=b.reward_usd_cents,
+                        deadline=datetime.fromisoformat(b.deadline),
+                        status=b.status, submissions=b.submissions,
+                        target_urls=b.target_urls))
+                matched += 1
+                if matched >= target:
                     break
         if expired_ids:
             self.r.zrem("mkt:bounties:open", *expired_ids)
