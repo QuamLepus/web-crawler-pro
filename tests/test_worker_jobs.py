@@ -322,8 +322,9 @@ def test_worker_persists_marketplace_artifact_only_with_explicit_rights(
             assert received_job_id == job_id
             assert hashlib.sha256(payload).hexdigest() == digest
             return ArtifactMetadata(
-                uri="s3://bucket/marketplace/tenants/hash/jobs/job_artifact/dataset.jsonl",
-                object_key="marketplace/tenants/hash/jobs/job_artifact/dataset.jsonl",
+                uri="s3://bucket/marketplace/tenants/hash/jobs/job_artifact/digest/dataset.jsonl",
+                bucket="bucket",
+                object_key="marketplace/tenants/hash/jobs/job_artifact/digest/dataset.jsonl",
                 sha256=digest, size_bytes=len(payload), record_count=1,
                 expires_at="2026-11-22T00:00:00+00:00")
 

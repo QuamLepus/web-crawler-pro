@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 import re
 
@@ -56,13 +57,46 @@ async def create_listing(body: DatasetListingCreate, ctx: CtxDep,
         raise HTTPException(422, "source crawl counters are invalid") from exc
     if record_count < 0 or token_count < 0:
         raise HTTPException(422, "source crawl counters are invalid")
+
+    artifact_fields = {}
+    if source.get("artifact_status") == "available":
+        expiry_raw = source.get("artifact_expires_at", "")
+        try:
+            artifact_expires = datetime.fromisoformat(expiry_raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "source crawl artifact metadata is invalid") from exc
+        if artifact_expires.tzinfo is None:
+            raise HTTPException(422, "source crawl artifact expiry has no timezone")
+        if artifact_expires.astimezone(timezone.utc) > datetime.now(timezone.utc):
+            try:
+                artifact_size_bytes = int(source.get("artifact_size_bytes", "0"))
+                artifact_record_count = int(
+                    source.get("artifact_record_count", "0"))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "source crawl artifact metadata is invalid") from exc
+            artifact_bucket = source.get("artifact_bucket", "")
+            artifact_object_key = source.get("artifact_object_key", "")
+            if (not artifact_bucket or not artifact_object_key or
+                    source.get("artifact_uri") !=
+                    f"s3://{artifact_bucket}/{artifact_object_key}"):
+                raise HTTPException(422, "source crawl artifact metadata is invalid")
+            artifact_fields = {
+                "source_job_id": body.source_job_id,
+                "artifact_bucket": artifact_bucket,
+                "artifact_object_key": artifact_object_key,
+                "artifact_sha256": source.get("artifact_sha256", ""),
+                "artifact_size_bytes": artifact_size_bytes,
+                "artifact_record_count": artifact_record_count,
+                "artifact_format": source.get("artifact_format", ""),
+                "artifact_expires_at": expiry_raw,
+            }
     try:
         lst = mkt.create_listing(
             ctx["tenant"], title=body.title, description=body.description,
             tags=body.tags, price_usd_cents=body.price_usd_cents,
             license=body.license, content_sha256=sha,
             record_count=record_count,
-            token_count=token_count)
+            token_count=token_count, **artifact_fields)
     except MarketplaceError as exc:
         raise HTTPException(422, str(exc))
     mkt.copy_job_preview(body.source_job_id, lst.dataset_id, ctx["tenant"])
