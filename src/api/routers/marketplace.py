@@ -110,9 +110,8 @@ async def get_dataset(dataset_id: str, ctx: CtxDep, request: Request):
 async def dataset_preview(dataset_id: str, ctx: CtxDep, request: Request,
                           rows: int = Query(50, ge=10, le=500)) -> list[dict]:
     mkt = _mkt(request)
-    listing = mkt.get_listing(dataset_id)
-    if listing is None or (listing.status != "published" and
-                           listing.seller_tenant != ctx["tenant"]):
+    listing = mkt.get_listing_for_viewer(dataset_id, ctx["tenant"])
+    if listing is None:
         # Match listing visibility; never disclose preview data for another
         # tenant's draft, suspended or archived dataset.
         raise HTTPException(404, "dataset not found")
