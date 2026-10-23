@@ -13,6 +13,7 @@ Tasks:
 
 from __future__ import annotations
 
+import json
 import os
 from urllib.parse import urldefrag, urljoin, urlparse
 
@@ -375,6 +376,30 @@ def _store_item(item: dict) -> dict | None:
     return cleaned
 
 
+def _store_marketplace_preview(redis_client, job_id: str, tenant: str,
+                               collected: list[dict], digest: str) -> bool:
+    """Retain only a bounded, sanitized marketplace sample for 30 days."""
+    if redis_client is None or not job_id or not tenant or not collected:
+        return False
+    raw_tenant = redis_client.hget(f"wcp:v1:job:{job_id}", "tenant")
+    if isinstance(raw_tenant, bytes):
+        raw_tenant = raw_tenant.decode("utf-8", errors="replace")
+    if raw_tenant != tenant:
+        return False
+    from src.marketplace.preview import (JOB_PREVIEW_KEY,
+                                         PREVIEW_MAX_PAYLOAD_BYTES,
+                                         PREVIEW_RETENTION_SECONDS,
+                                         sanitize_preview_records)
+
+    records = sanitize_preview_records(collected)
+    payload = json.dumps(records, ensure_ascii=False, separators=(",", ":"))
+    if not records or len(payload.encode("utf-8")) > PREVIEW_MAX_PAYLOAD_BYTES:
+        return False
+    key = JOB_PREVIEW_KEY.format(job_id=job_id, digest=digest)
+    stored = redis_client.set(key, payload, ex=PREVIEW_RETENTION_SECONDS, nx=True)
+    return bool(stored) or int(redis_client.ttl(key)) > 0
+
+
 def _update_job(r, job_id: str, fields: dict) -> None:
     if not job_id or r is None:
         return
@@ -516,8 +541,17 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
     state = ("cancelled" if cancelled else
              ("failed" if (not collected and failures) else "completed"))
     digest = canonical_sha256(collected)
+    preview_available = False
+    if state == "completed":
+        try:
+            preview_available = _store_marketplace_preview(
+                r, job_id, tenant, collected, digest)
+        except Exception as exc:  # noqa: BLE001 - crawl completion is not blocked
+            logger.warning("could not retain marketplace preview (%s)",
+                           type(exc).__name__)
     result = {
         "job_id": job_id, "url": start_url, "state": state,
+        "preview_available": preview_available,
         "pages_done": pages_done,
         "robots_blocked": robots_blocked,
         "items": len(collected), "failures": failures[:10],
@@ -532,6 +566,7 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
         "state": state, "pages_done": pages_done,
         "robots_blocked": robots_blocked,
         "items_collected": len(collected), "data_sha256": digest,
+        "preview_available": int(preview_available),
         "error": "; ".join(failures)[:500],
     })
     event = {"failed": "crawl.failed", "cancelled": "crawl.cancelled"}.get(

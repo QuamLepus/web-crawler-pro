@@ -393,7 +393,7 @@ class DiscoveryService:
                 if self.r else {}
             site = self._decode(raw) if raw else {}
             state = site.get("state", "unknown")
-            if state == "succeeded":
+            if state in {"succeeded", "completed"}:
                 succeeded += 1
             elif state == "failed":
                 failed += 1

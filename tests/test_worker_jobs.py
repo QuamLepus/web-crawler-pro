@@ -82,6 +82,7 @@ def crawl_env(monkeypatch, tmp_path):
 def test_run_crawl_updates_job_record_and_digest(crawl_env):
     wt, r = crawl_env
     job_id = "job_crawltest"
+    r.hset(f"wcp:v1:job:{job_id}", mapping={"tenant": "t1", "state": "queued"})
 
     result = wt.run_crawl(
         {"url": "https://example.com/", "max_pages": 5, "tenant": "t1",
@@ -97,9 +98,17 @@ def test_run_crawl_updates_job_record_and_digest(crawl_env):
     assert JobState(rec["state"]) is JobState.completed
     assert rec["pages_done"] == "2"
     assert rec["items_collected"] == "2"
-    # The marketplace refuses to publish a listing without this digest, and
-    # nothing in the pipeline ever wrote it.
+    # Completed crawl metadata carries the digest required for publication.
     assert rec["data_sha256"] == result["data_sha256"]
+    assert result["preview_available"] is True
+    from src.marketplace.preview import JOB_PREVIEW_KEY, PREVIEW_RETENTION_SECONDS
+    preview_key = JOB_PREVIEW_KEY.format(job_id=job_id,
+                                         digest=result["data_sha256"])
+    preview_raw = r.get(preview_key)
+    assert preview_raw
+    import json
+    assert len(json.loads(preview_raw)) == 2
+    assert 0 < r.ttl(preview_key) <= PREVIEW_RETENTION_SECONDS
 
 
 def test_run_crawl_stays_on_the_start_domain(crawl_env):

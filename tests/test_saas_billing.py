@@ -116,11 +116,7 @@ def test_checkout_works_without_stripe_credentials(client, api_key,
 # --------------------------------------------------------------------------- #
 def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
                                                 monkeypatch, tmp_path):
-    """The marketplace needs `data_sha256` on the source job record.
-
-    Nothing ever wrote that field, so /v1/marketplace/datasets rejected every
-    listing with a 422 and the marketplace had no way to acquire inventory.
-    """
+    """Completed crawls can publish listings and expose a bounded real sample."""
     import workers.crawl_tasks as wt
 
     monkeypatch.setattr(wt, "CRAWL_OUTPUT_DIR", str(tmp_path))
@@ -138,6 +134,9 @@ def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
     wt.run_crawl(payload, redis_client=job_r,
                  fetcher=lambda url: (SAMPLE_HTML, 200))
     assert job_r.hget("wcp:v1:job:job_mkt", "data_sha256")
+    sample_digest = job_r.hget("wcp:v1:job:job_mkt", "data_sha256")
+    sample_key = f"wcp:v1:job:job_mkt:marketplace-preview:{sample_digest}"
+    assert job_r.ttl(sample_key) > 0
 
     r = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
                     json={"title": "Example Corpus",
@@ -146,7 +145,17 @@ def test_dataset_can_be_published_after_a_crawl(client, api_key, fake_server,
                           "price_usd_cents": 500, "tags": ["news"],
                           "source_job_id": "job_mkt"})
     assert r.status_code == 201, r.text
-    assert r.json()["dataset_id"]
+    dataset_id = r.json()["dataset_id"]
+    assert dataset_id
+    listing_ttl = client.app.state.services.redis.ttl(f"mkt:preview:{dataset_id}")
+    assert 0 < listing_ttl <= job_r.ttl(sample_key)
+    preview = client.get(
+        f"/v1/marketplace/datasets/{dataset_id}/preview?rows=10",
+        headers=_headers(api_key))
+    assert preview.status_code == 200, preview.text
+    assert len(preview.json()) == 1
+    assert "hello world" in preview.json()[0]["content"]
+    assert "text" not in preview.json()[0]
 
 
 def test_marketplace_publish_requires_own_completed_crawl_and_uses_its_counters(client, api_key):
@@ -1327,6 +1336,32 @@ def test_marketplace_preview_redacts_common_identifiers_and_bounds_fields(client
         assert private_value not in serialized
 
 
+def test_marketplace_preview_copy_checks_job_tenant_and_completion(client):
+    import json
+
+    from src.marketplace.preview import JOB_PREVIEW_KEY, LISTING_PREVIEW_KEY
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "listing-owner", title="Preview ownership check",
+        description="A public listing used to check preview source ownership.",
+        tags=["preview"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="9" * 64)
+    job_id = "job_preview_foreign"
+    marketplace.r.hset(f"wcp:v1:job:{job_id}", mapping={
+        "tenant": "other-tenant", "state": "completed",
+        "data_sha256": listing.content_sha256})
+    marketplace.r.setex(JOB_PREVIEW_KEY.format(
+        job_id=job_id, digest=listing.content_sha256), 3600,
+        json.dumps([{"text": "private foreign sample"}]))
+
+    assert not marketplace.copy_job_preview(
+        job_id, listing.dataset_id, "listing-owner")
+    assert marketplace.r.get(
+        LISTING_PREVIEW_KEY.format(dataset_id=listing.dataset_id)) is None
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
@@ -1357,19 +1392,38 @@ def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_row
     assert unavailable.json()["detail"] == "dataset preview is unavailable"
     assert "sample row" not in unavailable.text
 
+    import json
+    from src.marketplace.preview import (JOB_PREVIEW_KEY, LISTING_PREVIEW_KEY,
+                                         PREVIEW_RETENTION_SECONDS)
+
     public_listing = listing("preview-race-seller", "Public preview race", "f")
-    original_get_listing = MarketplaceService.get_listing
+    sample_job_id = "job_preview_race"
+    marketplace.r.hset(f"wcp:v1:job:{sample_job_id}", mapping={
+        "tenant": "preview-race-seller", "state": "completed",
+        "data_sha256": public_listing.content_sha256})
+    marketplace.r.setex(
+        JOB_PREVIEW_KEY.format(job_id=sample_job_id,
+                               digest=public_listing.content_sha256),
+        PREVIEW_RETENTION_SECONDS,
+        json.dumps([{"text": "real sample row"}]))
+    marketplace.r.setex(
+        LISTING_PREVIEW_KEY.format(dataset_id=public_listing.dataset_id),
+        PREVIEW_RETENTION_SECONDS,
+        json.dumps({"job_id": sample_job_id,
+                    "digest": public_listing.content_sha256}))
+    original_load_preview = MarketplaceService.load_preview_records
     changed = False
 
-    def unpublish_after_read(self, dataset_id):
+    def unpublish_after_preview_read(self, dataset_id, rows=50):
         nonlocal changed
-        current = original_get_listing(self, dataset_id)
+        records = original_load_preview(self, dataset_id, rows)
         if dataset_id == public_listing.dataset_id and not changed:
             changed = True
             self.update_listing(dataset_id, "preview-race-seller", status="draft")
-        return current
+        return records
 
-    monkeypatch.setattr(MarketplaceService, "get_listing", unpublish_after_read)
+    monkeypatch.setattr(MarketplaceService, "load_preview_records",
+                        unpublish_after_preview_read)
     raced = client.get(
         f"/v1/marketplace/datasets/{public_listing.dataset_id}/preview?rows=10",
         headers=headers)
