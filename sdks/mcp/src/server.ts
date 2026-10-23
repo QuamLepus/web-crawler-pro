@@ -417,6 +417,14 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_dataset_preview", "Read a bounded, sanitized sample of a marketplace dataset. This is not a dataset download; the API can return 503 when no recent retained crawl sample exists.", {
+    dataset_id: z.string().min(1).max(160),
+    rows: z.number().int().min(10).max(500).optional(),
+  }, async ({ dataset_id, rows }) => {
+    try { return result(await client.getMarketplaceDatasetPreview(dataset_id, rows)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_delivery_get", "Retrieve a non-expired dataset delivery manifest belonging to the authenticated tenant; this does not purchase or renew a delivery.", {
     delivery_id: z.string().regex(/^dlv_[a-f0-9]{12}$/),
   }, async ({ delivery_id }) => {

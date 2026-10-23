@@ -326,6 +326,12 @@ export class WebIntelligenceClient {
     return this.request("GET", `marketplace/datasets/${encodeURIComponent(datasetId)}`);
   }
 
+  getMarketplaceDatasetPreview(datasetId: string, rows = 50): Promise<JsonObject[]> {
+    const query = new URLSearchParams({ rows: String(rows) });
+    return this.request<JsonObject[]>("GET",
+      `marketplace/datasets/${encodeURIComponent(datasetId)}/preview?${query}`);
+  }
+
   getMarketplaceBounty(bountyId: string): Promise<JsonObject> {
     return this.request("GET", `marketplace/bounties/${encodeURIComponent(bountyId)}`);
   }

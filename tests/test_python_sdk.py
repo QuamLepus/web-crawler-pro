@@ -400,6 +400,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
         client.search_marketplace_datasets(q="climate change", tag="energy",
                                            max_price_cents=500, limit=5, offset=8)
         client.get_marketplace_dataset("dataset:1")
+        client.get_marketplace_dataset_preview("dataset:1", rows=20)
         client.list_my_marketplace_datasets(status="draft", limit=5, offset=10)
         client.get_marketplace_delivery("dlv_0123456789ab")
         client.list_marketplace_purchases(limit=12, offset=5)
@@ -412,6 +413,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
         ("GET", "/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3"),
         ("GET", "/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5&offset=8"),
         ("GET", "/api/v1/marketplace/datasets/dataset%3A1"),
+        ("GET", "/api/v1/marketplace/datasets/dataset%3A1/preview?rows=20"),
         ("GET", "/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10"),
         ("GET", "/api/v1/marketplace/deliveries/dlv_0123456789ab"),
         ("GET", "/api/v1/marketplace/purchases?limit=12&offset=5"),

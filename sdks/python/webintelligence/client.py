@@ -249,6 +249,17 @@ class Client:
         """Retrieve a published listing or one owned by this tenant."""
         return self._request("GET", f"marketplace/datasets/{quote(dataset_id, safe='')}")
 
+    def get_marketplace_dataset_preview(self, dataset_id: str, *,
+                                        rows: int = 50) -> list[dict[str, Any]]:
+        """Read a bounded, sanitized sample; this is not a dataset download.
+
+        Preview data can be unavailable when no recent crawl sample exists or
+        its 30-day retention has elapsed; the API returns 503 in that case.
+        """
+        return self._request(
+            "GET", f"marketplace/datasets/{quote(dataset_id, safe='')}/preview",
+            params={"rows": rows})
+
     def get_marketplace_delivery(self, delivery_id: str) -> dict[str, Any]:
         """Retrieve a non-expired delivery manifest belonging to this tenant."""
         return self._request("GET", f"marketplace/deliveries/{quote(delivery_id, safe='')}")
