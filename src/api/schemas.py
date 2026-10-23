@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -30,7 +31,8 @@ _BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES = (
 
 
 def _is_sensitive_bounty_target_query_key(key: str) -> bool:
-    normalized = key.casefold().replace("-", "_").replace(".", "_")
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    normalized = normalized.casefold().replace("-", "_").replace(".", "_")
     segments = (segment for segment in normalized.replace("]", "[").split("[")
                 if segment)
     return any(segment in _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS or
