@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const { WebIntelligenceClient, WebIntelligenceError } = require('../dist/client.js');
 
 test('ask sends auth and the documented request shape', async () => {
@@ -591,4 +592,26 @@ test('Studio analytics URL-encodes full-corpus filters', async () => {
   assert.equal(url.searchParams.get('source'), 'wiki & docs');
   assert.equal(url.searchParams.get('indexed_from'), '2026-01-01');
   assert.equal(url.searchParams.get('offset'), '10');
+});
+
+test('marketplace delivery download returns bytes and verifies the manifest digest', async () => {
+  const payload = Buffer.from('{"content":"marketplace row","url":"https://example.com"}\n');
+  const digest = createHash('sha256').update(payload).digest('hex');
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'download-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, headers: init.headers });
+    return new Response(payload, { status: 200, headers: {
+      'Content-Type': 'application/x-ndjson', 'X-Content-SHA256': digest,
+    } });
+  } });
+
+  const bytes = await client.downloadMarketplaceDelivery('dlv_0123456789ab', digest);
+  assert.deepEqual(Buffer.from(bytes), payload);
+  await assert.rejects(
+    client.downloadMarketplaceDelivery('dlv_0123456789ab', '0'.repeat(64)),
+    (error) => error instanceof WebIntelligenceError && /SHA-256/.test(error.message));
+  assert.equal(calls[0].url,
+    'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab/download');
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].headers['X-API-Key'], 'download-key');
 });

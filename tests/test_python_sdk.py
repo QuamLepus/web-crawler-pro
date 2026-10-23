@@ -685,3 +685,35 @@ def test_studio_analytics_and_snapshot_methods_follow_api_contract():
         {"method": "DELETE", "path": "/api/v1/studio/snapshots/snapshot_aaaaaaaaaaaaaaaaaaaa",
          "body": None},
     ]
+
+
+def test_marketplace_delivery_download_returns_bytes_and_verifies_manifest_digest():
+    import hashlib
+    import httpx
+    import pytest
+    from sdks.python.webintelligence import Client, WebIntelligenceError
+
+    payload = b'{"content":"marketplace row","url":"https://example.com"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(),
+                      request.headers.get("x-api-key")))
+        return httpx.Response(200, content=payload, headers={
+            "Content-Type": "application/x-ndjson",
+            "X-Content-SHA256": digest,
+        })
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.download_marketplace_delivery(
+            "dlv_0123456789ab", expected_sha256=digest) == payload
+        with pytest.raises(WebIntelligenceError, match="expected SHA-256"):
+            client.download_marketplace_delivery(
+                "dlv_0123456789ab", expected_sha256="0" * 64)
+
+    assert calls == [
+        ("GET", "/api/v1/marketplace/deliveries/dlv_0123456789ab/download", "secret"),
+        ("GET", "/api/v1/marketplace/deliveries/dlv_0123456789ab/download", "secret"),
+    ]

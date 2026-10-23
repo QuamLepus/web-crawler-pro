@@ -158,6 +158,53 @@ export class WebIntelligenceClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
+  private async requestBytes(path: string, expectedSha256?: string): Promise<Uint8Array> {
+    if (expectedSha256 !== undefined && !/^[a-f0-9]{64}$/i.test(expectedSha256)) {
+      throw new TypeError("expectedSha256 must be a 64-character hexadecimal digest");
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/api/v1/${path.replace(/^\/+/, "")}`, {
+        method: "GET",
+        headers: { "X-API-Key": this.apiKey, Accept: "application/x-ndjson" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        let payload: unknown;
+        try { payload = await response.json(); }
+        catch { payload = null; }
+        let message = response.statusText || `HTTP ${response.status}`;
+        if (payload && typeof payload === "object") {
+          const data = payload as Record<string, unknown>;
+          const error = data.error && typeof data.error === "object"
+            ? (data.error as Record<string, unknown>).message : undefined;
+          message = String(error ?? data.detail ?? message);
+        }
+        throw new WebIntelligenceError(message, response.status, payload);
+      }
+      const buffer = await response.arrayBuffer();
+      const expected = expectedSha256 ?? response.headers.get("X-Content-SHA256") ?? undefined;
+      if (expected) {
+        const digestBuffer = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+        const actual = Array.from(new Uint8Array(digestBuffer),
+          (byte) => byte.toString(16).padStart(2, "0")).join("");
+        if (actual !== expected.toLowerCase()) {
+          throw new WebIntelligenceError("download failed SHA-256 verification", response.status);
+        }
+      }
+      return new Uint8Array(buffer);
+    } catch (error) {
+      if (error instanceof WebIntelligenceError) throw error;
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new WebIntelligenceError("API request timed out");
+      }
+      throw new WebIntelligenceError(`API request failed: ${error instanceof Error ? error.message : "network error"}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async request<T = JsonObject>(method: string, path: string,
                                          body?: JsonObject): Promise<T> {
     const controller = new AbortController();
@@ -353,6 +400,13 @@ export class WebIntelligenceClient {
 
   getMarketplaceDelivery(deliveryId: string): Promise<JsonObject> {
     return this.request("GET", `marketplace/deliveries/${encodeURIComponent(deliveryId)}`);
+  }
+
+  downloadMarketplaceDelivery(deliveryId: string,
+                              expectedSha256?: string): Promise<Uint8Array> {
+    return this.requestBytes(
+      `marketplace/deliveries/${encodeURIComponent(deliveryId)}/download`,
+      expectedSha256);
   }
 
   listMarketplacePurchases(limit = 50, offset = 0): Promise<JsonObject[]> {

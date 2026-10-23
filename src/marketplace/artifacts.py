@@ -152,7 +152,18 @@ class MinioMarketplaceArtifactStore:
         response = None
         try:
             response = self.client.get_object(self.bucket, object_key)
-            payload = response.read(MAX_MARKETPLACE_ARTIFACT_BYTES + 1)
+            chunks: list[bytes] = []
+            total = 0
+            while total <= MAX_MARKETPLACE_ARTIFACT_BYTES:
+                chunk = response.read(min(64 * 1024,
+                                          MAX_MARKETPLACE_ARTIFACT_BYTES + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            if total > MAX_MARKETPLACE_ARTIFACT_BYTES:
+                raise ArtifactUnavailable("stored crawl artifact exceeds download limit")
+            payload = b"".join(chunks)
         except Exception as exc:
             raise ArtifactUnavailable("stored crawl artifact could not be read") from exc
         finally:

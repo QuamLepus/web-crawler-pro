@@ -288,3 +288,13 @@ def test_crawl_artifact_opt_in_requires_rights_confirmation_and_reaches_worker(
     status = client.get(f"/v1/jobs/{response.json()['job_id']}", headers=headers)
     assert status.status_code == 200
     assert status.json()["artifact_status"] == "pending"
+
+
+def test_download_digest_header_is_exposed_for_browser_sdk_clients(client):
+    response = client.get(
+        "/healthz",
+        headers={"Origin": "https://app.webcrawlerpro.example"},
+    )
+    assert response.status_code == 200
+    assert "x-content-sha256" in response.headers.get(
+        "access-control-expose-headers", "").lower()
