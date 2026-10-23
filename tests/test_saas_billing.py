@@ -528,6 +528,37 @@ def test_purchase_rechecks_listing_state_before_persisting(client, monkeypatch):
     assert marketplace.r.get(f"mkt:delivery:{generated[0].delivery_id}") is None
 
 
+def test_dataset_detail_rechecks_listing_visibility_before_returning(
+        client, api_key, monkeypatch):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Visibility race listing",
+        description="A public listing used to validate access rechecks during reads.",
+        tags=["visibility"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="3" * 64)
+    original_get_listing = MarketplaceService.get_listing
+    changed = False
+
+    def unpublish_after_read(self, dataset_id):
+        nonlocal changed
+        current = original_get_listing(self, dataset_id)
+        if dataset_id == listing.dataset_id and not changed:
+            changed = True
+            self.update_listing(dataset_id, "seller", status="draft")
+        return current
+
+    monkeypatch.setattr(MarketplaceService, "get_listing", unpublish_after_read)
+    response = client.get(
+        f"/v1/marketplace/datasets/{listing.dataset_id}",
+        headers=_headers(api_key))
+
+    assert changed is True
+    assert response.status_code == 404
+    assert response.json()["detail"] == "dataset not found"
+
+
 def test_review_read_rechecks_listing_visibility_before_returning(client, api_key,
                                                                   monkeypatch):
     from src.marketplace.service import MarketplaceService
