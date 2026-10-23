@@ -243,6 +243,8 @@ def test_marketplace_artifact_jsonl_is_deterministic_and_bounded():
 def test_marketplace_artifact_store_uploads_and_reads_back_exact_bytes():
     import hashlib
     import io
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
     from src.marketplace.artifacts import (ArtifactError,
                                            MinioMarketplaceArtifactStore,
                                            canonical_jsonl)
@@ -281,6 +283,7 @@ def test_marketplace_artifact_store_uploads_and_reads_back_exact_bytes():
     records = [{"url": "https://example.com", "content": "sample"}]
     payload, digest, count = canonical_jsonl(records)
     fake = FakeMinio()
+    fake.lifecycle = SimpleNamespace(rules=[SimpleNamespace(rule_id="existing-retention-rule")])
     store = MinioMarketplaceArtifactStore(client=fake, bucket="test-artifacts")
 
     result = store.put_verified("tenant-secret-id", "job_0123456789abcdef", payload, digest)
@@ -293,8 +296,24 @@ def test_marketplace_artifact_store_uploads_and_reads_back_exact_bytes():
     assert fake.objects[("test-artifacts", result.object_key)] == payload
     assert store.get_verified("tenant-secret-id", "job_0123456789abcdef",
                               result.object_key, digest, len(payload)) == payload
-    assert fake.lifecycle.rules[0].expiration.days == 30
-    assert fake.lifecycle.rules[0].rule_filter.prefix == "marketplace/tenants/"
+    retention_rules = [rule for rule in fake.lifecycle.rules
+                       if rule.rule_id == "wcp-marketplace-artifacts-expire-30d"]
+    assert len(retention_rules) == 1
+    assert retention_rules[0].expiration.days == 30
+    assert retention_rules[0].rule_filter.prefix == "marketplace/tenants/"
+    assert any(rule.rule_id == "existing-retention-rule"
+               for rule in fake.lifecycle.rules)
+    remaining = datetime.fromisoformat(result.expires_at) - datetime.now(timezone.utc)
+    assert timedelta(days=29, hours=23) < remaining <= timedelta(days=30)
+
+    # A fresh process reapplies its managed rule without duplicating it or
+    # deleting lifecycle rules owned by the bucket operator.
+    restarted_store = MinioMarketplaceArtifactStore(client=fake, bucket="test-artifacts")
+    restarted_store._ensure_bucket()
+    rule_ids = [rule.rule_id for rule in fake.lifecycle.rules]
+    assert rule_ids.count("wcp-marketplace-artifacts-expire-30d") == 1
+    assert "existing-retention-rule" in rule_ids
+
     with pytest.raises(ArtifactError, match="key"):
         store.get_verified("another-tenant", "job_0123456789abcdef",
                            result.object_key, digest, len(payload))

@@ -1634,6 +1634,7 @@ def test_purchased_artifact_download_is_buyer_scoped_and_integrity_checked(
         artifact_format="jsonl", artifact_expires_at=expires_at)
 
     corrupt = {"value": False}
+    artifact_reads = []
 
     class FakeArtifactStore:
         def __init__(self, bucket):
@@ -1641,6 +1642,7 @@ def test_purchased_artifact_download_is_buyer_scoped_and_integrity_checked(
 
         def get_verified(self, tenant, received_job_id, received_key,
                          expected_sha, expected_size):
+            artifact_reads.append((received_key, expected_sha, expected_size))
             assert tenant == seller
             assert received_job_id == job_id
             assert received_key == key
@@ -1668,6 +1670,24 @@ def test_purchased_artifact_download_is_buyer_scoped_and_integrity_checked(
     assert download.headers["x-content-sha256"] == digest
     assert download.headers["cache-control"] == "private, no-store"
     assert key not in download.text
+    assert len(artifact_reads) == 1
+
+    # Recheck the seller artifact's retention deadline at download time. If the
+    # pointer has expired since purchase, do not consult object storage.
+    import json
+    listing_key = f"mkt:listing:{listing.dataset_id}"
+    listing_record = redis.hget(listing_key, "data")
+    if isinstance(listing_record, bytes):
+        listing_record = listing_record.decode()
+    listing_data = json.loads(listing_record)
+    listing_data["artifact_expires_at"] = (
+        utcnow() - timedelta(seconds=1)).isoformat()
+    redis.hset(listing_key, "data", json.dumps(listing_data))
+    expired_download = client.get(manifest["uri"], headers=headers)
+    assert expired_download.status_code == 410
+    assert len(artifact_reads) == 1
+    listing_data["artifact_expires_at"] = expires_at
+    redis.hset(listing_key, "data", json.dumps(listing_data))
 
     second = client.post("/auth/signup", json={
         "org_name": "Other Buyer", "email": "other-buyer@example.com",
