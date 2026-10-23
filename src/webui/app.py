@@ -1044,6 +1044,8 @@ async def workflows_page(request: Request,
         })
     selected_workflow_id = (selected_workflow_id if selected_run_record else None)
     selected_run_id = selected_run_id if selected_run_record else None
+    run_range_start = (run_page - 1) * run_page_size + 1 if run_total else 0
+    run_range_end = min(run_page * run_page_size, run_total)
     history_filters = {}
     if run_q.strip():
         history_filters["run_q"] = run_q.strip()
@@ -1071,6 +1073,8 @@ async def workflows_page(request: Request,
                   run_page_count=run_page_count,
                   run_total=run_total,
                   run_page_size=run_page_size,
+                  run_range_start=run_range_start,
+                  run_range_end=run_range_end,
                   selected_workflow_id=selected_workflow_id or "",
                   selected_run_id=selected_run_id or "",
                   run_q=run_q.strip(),
