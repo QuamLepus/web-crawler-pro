@@ -357,6 +357,31 @@ test('marketplace review submission encodes dataset ID and posts review fields',
   }]);
 });
 
+test('marketplace bounty creation posts API fields and default or custom options', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ bounty_id: 'bty_1' }), { status: 201 });
+  } });
+  await client.createMarketplaceBounty('Climate data request',
+    'Collect public measurements and publish the resulting dataset.', 5000);
+  await client.createMarketplaceBounty('Regional data request',
+    'Collect regional observations and publish the resulting dataset.', 7500,
+    { deadlineDays: 45, targetUrls: ['https://example.org/data'] });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/marketplace/bounties', method: 'POST', body: {
+      title: 'Climate data request',
+      spec: 'Collect public measurements and publish the resulting dataset.',
+      reward_usd_cents: 5000, deadline_days: 30, target_urls: [],
+    } },
+    { url: 'http://localhost:8000/api/v1/marketplace/bounties', method: 'POST', body: {
+      title: 'Regional data request',
+      spec: 'Collect regional observations and publish the resulting dataset.',
+      reward_usd_cents: 7500, deadline_days: 45, target_urls: ['https://example.org/data'],
+    } },
+  ]);
+});
+
 test('marketplace bounty award encodes both IDs and returns the selected winner', async () => {
   const calls = [];
   const payload = { bounty_id: 'bty:1', awarded_to_dataset: 'dataset:1', reward_usd_cents: 5000 };

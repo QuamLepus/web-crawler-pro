@@ -96,6 +96,11 @@ export interface WorkflowCrawlStep {
   dependsOn?: string[];
 }
 
+export interface MarketplaceBountyCreateOptions {
+  deadlineDays?: number;
+  targetUrls?: string[];
+}
+
 export interface MarketplaceSearchOptions {
   q?: string;
   tag?: string;
@@ -390,6 +395,16 @@ export class WebIntelligenceClient {
   listMarketplaceBounties(limit = 50, offset = 0): Promise<JsonObject[]> {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<JsonObject[]>("GET", `marketplace/bounties?${query}`);
+  }
+
+  /** Create a dataset bounty. Recording the bounty does not transfer funds. */
+  createMarketplaceBounty(title: string, spec: string, rewardUsdCents: number,
+                          options: MarketplaceBountyCreateOptions = {}): Promise<JsonObject> {
+    return this.request("POST", "marketplace/bounties", {
+      title, spec, reward_usd_cents: rewardUsdCents,
+      deadline_days: options.deadlineDays ?? 30,
+      target_urls: options.targetUrls ?? [],
+    });
   }
 
   /** Submit this tenant's published dataset to an open bounty; does not award it. */

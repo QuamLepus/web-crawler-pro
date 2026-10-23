@@ -447,6 +447,37 @@ def test_marketplace_review_submission_posts_encoded_id_and_review_fields():
     }]
 
 
+def test_marketplace_bounty_creation_posts_snake_case_fields_and_defaults():
+    import json
+
+    calls = []
+    payload = {"bounty_id": "bty_1", "title": "Collect climate observations"}
+
+    def handler(request):
+        calls.append({"method": request.method,
+                      "path": request.url.raw_path.decode(),
+                      "body": json.loads(request.read())})
+        return httpx.Response(201, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.create_marketplace_bounty(
+            "Collect climate observations", "Find and publish verified local climate observations.",
+            5000, deadline_days=45, target_urls=["https://example.org/data"]
+        ) == payload
+
+    assert calls == [{
+        "method": "POST", "path": "/api/v1/marketplace/bounties",
+        "body": {
+            "title": "Collect climate observations",
+            "spec": "Find and publish verified local climate observations.",
+            "reward_usd_cents": 5000,
+            "deadline_days": 45,
+            "target_urls": ["https://example.org/data"],
+        },
+    }]
+
+
 def test_marketplace_bounty_award_posts_encoded_ids_and_dataset_query():
     calls = []
     payload = {"bounty_id": "bty:1", "awarded_to_dataset": "dataset:1",
