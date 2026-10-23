@@ -21,7 +21,7 @@
   </form>
   <p class="tiny muted mt-2">Minimum interval: 15 minutes. Scheduled execution requires the project's Celery worker and Beat services to be running.</p>
 </div>
-{% if error %}<div class="alert danger mb-3">{{ error }}</div>{% endif %}
+{% if error %}<div class="alert danger mb-3" role="alert">{{ error }}</div>{% endif %}
 <div class="grid g-main">
   <section class="card">
     <div class="card-head"><h2>Watched pages</h2><span class="badge">{{ watches|length }}</span></div>
@@ -38,15 +38,15 @@
   <section class="card">
     <div class="card-head"><h2>Change history</h2></div>
     {% if selected_watch %}
-      {% if events %}<div class="stack-sm card-pad">{% for event in events|reverse %}<article class="card card-pad"><div class="between"><b>{{ event.event_type }}</b><span class="tiny muted">{{ event.changed_at }}</span></div><p class="small mt-1">{{ event.summary }}</p>{% if event.title_changed %}<span class="badge">Title changed</span>{% endif %}{% if event.text_changed %}<details class="mt-2"><summary class="small">Changed text excerpt</summary><div class="grid g-2 mt-1"><div><span class="tiny muted">Before</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.old_text_excerpt }}</pre></div><div><span class="tiny muted">After</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.new_text_excerpt }}</pre></div></div></details>{% endif %}{% if event.price_mentions_before or event.price_mentions_after %}<p class="small mt-1">Price-like text: {{ event.price_mentions_before|join(', ') }} → {{ event.price_mentions_after|join(', ') }}</p>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty"><h3>No changes recorded</h3><p>Run a first crawl and wait for a later snapshot to compare.</p></div>{% endif %}
+      {% if events_error %}<div class="alert warn card-pad" role="alert">Could not load change history: {{ events_error }}</div>{% elif events %}<div class="stack-sm card-pad">{% for event in events|reverse %}<article class="card card-pad"><div class="between"><b>{{ event.event_type }}</b><span class="tiny muted">{{ event.changed_at }}</span></div><p class="small mt-1">{{ event.summary }}</p>{% if event.title_changed %}<span class="badge">Title changed</span>{% endif %}{% if event.text_changed %}<details class="mt-2"><summary class="small">Changed text excerpt</summary><div class="grid g-2 mt-1"><div><span class="tiny muted">Before</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.old_text_excerpt }}</pre></div><div><span class="tiny muted">After</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.new_text_excerpt }}</pre></div></div></details>{% endif %}{% if event.price_mentions_before or event.price_mentions_after %}<p class="small mt-1">Price-like text: {{ event.price_mentions_before|join(', ') }} → {{ event.price_mentions_after|join(', ') }}</p>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty"><h3>No changes recorded</h3><p>Run a first crawl and wait for a later snapshot to compare.</p></div>{% endif %}
     {% else %}<div class="empty"><h3>Select a watch</h3><p>Choose a page to inspect its history.</p></div>{% endif %}
   </section>
 </div>
 {% if selected_watch %}
 <section class="card mt-3">
-  <div class="card-head"><h2>Saved versions</h2><span class="badge">{{ snapshots|length }} / 20</span></div>
+  <div class="card-head"><h2>Saved versions</h2><span class="badge">{% if snapshots_error %}Unavailable{% else %}{{ snapshots|length }} / 20{% endif %}</span></div>
   <p class="small dim card-pad">Most recent first. Up to 20 snapshots are retained for 90 days; each stores at most 5,000 characters of extracted page text.</p>
-  {% if snapshots %}<div class="stack-sm card-pad">
+  {% if snapshots_error %}<div class="alert warn card-pad" role="alert">Could not load saved versions: {{ snapshots_error }}</div>{% elif snapshots %}<div class="stack-sm card-pad">
     {% for snapshot in snapshots %}
     <details class="card card-pad">
       <summary class="small">{{ 'Baseline' if snapshot.baseline else 'Version' }} · {{ snapshot.captured_at }}{% if snapshot.title %} · {{ snapshot.title }}{% endif %}</summary>

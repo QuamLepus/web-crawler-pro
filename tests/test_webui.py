@@ -1352,3 +1352,36 @@ def test_login_page_offers_sso_with_validated_workspace_route(client):
     valid = client.get("/login/sso", params={"tenant_id": "0123456789"}, follow_redirects=False)
     assert valid.status_code == 302
     assert valid.headers["location"] == "/api/auth/oidc/0123456789/login"
+
+
+def test_watch_history_reports_load_errors_instead_of_empty_states(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    watch_id = "watch_aaaaaaaaaaaaaaaaaaaa"
+
+    async def watches(self):
+        return Result(True, data={"items": [{
+            "watch_id": watch_id, "url": "https://example.org/status",
+            "interval_minutes": 60, "last_checked_at": None, "active": True,
+        }]})
+
+    async def watch_changes(self, requested_watch_id):
+        assert requested_watch_id == watch_id
+        return Result(False, error="change history service unavailable")
+
+    async def watch_snapshots(self, requested_watch_id):
+        assert requested_watch_id == watch_id
+        return Result(False, error="snapshot service unavailable")
+
+    monkeypatch.setattr(Api, "watches", watches)
+    monkeypatch.setattr(Api, "watch_changes", watch_changes)
+    monkeypatch.setattr(Api, "watch_snapshots", watch_snapshots)
+
+    page = signed_in.get("/app/watch", params={"watch_id": watch_id})
+    assert page.status_code == 200
+    assert "Could not load change history: change history service unavailable" in page.text
+    assert "Could not load saved versions: snapshot service unavailable" in page.text
+    assert "Unavailable" in page.text
+    assert 'class="alert warn card-pad" role="alert"' in page.text
+    assert "No changes recorded" not in page.text
+    assert "No snapshots saved" not in page.text
