@@ -537,6 +537,47 @@ class MarketplaceService:
             bounty.target_urls, drop_invalid=True)
         return bounty
 
+    def _expire_bounty_if_due(self, bounty_id: str) -> None:
+        key = f"mkt:bounty:{bounty_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(key)
+                    raw = pipe.hget(key, "data")
+                    if not raw:
+                        return
+                    bounty = Bounty(**json.loads(raw))
+                    if (bounty.status != "open" or
+                            datetime.fromisoformat(bounty.deadline) >= utcnow()):
+                        return
+                    bounty.status = "expired"
+                    pipe.multi()
+                    pipe.hset(key, "data", json.dumps(asdict(bounty)))
+                    pipe.zrem("mkt:bounties:open", bounty_id)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+
+    def get_bounty_for_viewer(self, bounty_id: str,
+                              viewer: str) -> Optional[BountyOut]:
+        bounty = self.get_bounty(bounty_id)
+        if bounty is None:
+            return None
+        self._expire_bounty_if_due(bounty_id)
+        bounty = self.get_bounty(bounty_id)
+        if bounty is None:
+            return None
+        if bounty.status != "open" and bounty.poster_tenant != viewer:
+            return None
+        return BountyOut(
+            bounty_id=bounty.bounty_id, poster_tenant=bounty.poster_tenant,
+            title=bounty.title, spec=bounty.spec,
+            reward_usd_cents=bounty.reward_usd_cents,
+            deadline=datetime.fromisoformat(bounty.deadline),
+            status=bounty.status, submissions=bounty.submissions,
+            target_urls=bounty.target_urls)
+
     def submit_for_bounty(self, worker: str, bounty_id: str,
                           dataset_id: str) -> dict:
         bounty_key = f"mkt:bounty:{bounty_id}"

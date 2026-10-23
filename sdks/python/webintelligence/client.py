@@ -266,6 +266,11 @@ class Client:
             f"marketplace/datasets/{quote(dataset_id, safe='')}/reviews",
             params={"limit": limit, "offset": offset})
 
+    def get_marketplace_bounty(self, bounty_id: str) -> dict[str, Any]:
+        """Read an open bounty or one owned by this tenant."""
+        return self._request(
+            "GET", f"marketplace/bounties/{quote(bounty_id, safe='')}")
+
     def list_marketplace_bounties(self, *, limit: int = 50,
                                   offset: int = 0) -> list[dict[str, Any]]:
         """List a page of open public bounties; does not submit or award work."""

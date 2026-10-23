@@ -885,6 +885,55 @@ def test_bounty_submission_errors_use_not_found_and_conflict_statuses(client, ap
     assert closed.status_code == 409
 
 
+def test_bounty_detail_is_public_when_open_and_poster_only_when_closed(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    poster = client.app.state.services.users.list_orgs()[0].id
+    public = marketplace.create_bounty(
+        "another-poster", title="Open public bounty details",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10,
+        target_urls=["https://example.org/source"])
+    closed_public = marketplace.create_bounty(
+        "another-poster", title="Closed private bounty details",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    marketplace._set_bounty_status(closed_public, "awarded")
+    own_closed = marketplace.create_bounty(
+        poster, title="Poster closed bounty details",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    marketplace._set_bounty_status(own_closed, "awarded")
+    own_expired = marketplace.create_bounty(
+        poster, title="Poster expired bounty details",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=0, target_urls=[])
+
+    headers = _headers(api_key)
+    public_response = client.get(
+        f"/v1/marketplace/bounties/{public.bounty_id}", headers=headers)
+    assert public_response.status_code == 200
+    assert public_response.json()["target_urls"] == ["https://example.org/source"]
+    assert client.get(
+        f"/v1/marketplace/bounties/{closed_public.bounty_id}",
+        headers=headers).status_code == 404
+
+    own_response = client.get(
+        f"/v1/marketplace/bounties/{own_closed.bounty_id}", headers=headers)
+    assert own_response.status_code == 200
+    assert own_response.json()["status"] == "awarded"
+    expired_response = client.get(
+        f"/v1/marketplace/bounties/{own_expired.bounty_id}", headers=headers)
+    assert expired_response.status_code == 200
+    assert expired_response.json()["status"] == "expired"
+    assert marketplace.r.zscore("mkt:bounties:open", own_expired.bounty_id) is None
+
+    missing = client.get("/v1/marketplace/bounties/missing-bounty",
+                         headers=headers)
+    assert missing.status_code == 404
+
+
 def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
     headers = _headers(api_key)
     base = {
