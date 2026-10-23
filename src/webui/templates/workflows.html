@@ -6,6 +6,7 @@
 .workflow-dependency-option{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.45rem;align-items:start}
 .workflow-dependency-option span{display:grid;min-width:0}
 .workflow-dependency-option small{overflow-wrap:anywhere}
+.workflow-dependency-editor [data-dependency-cycle-warning][hidden]{display:none}
 .workflow-dag-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:rgba(99,102,241,.035)}
 .workflow-dag{display:block;max-width:none}
 .workflow-dag-edge{fill:none;stroke:var(--text-3);stroke-width:2;opacity:.72}
@@ -139,7 +140,7 @@
       {% endif %}
       <details class="mt-2">
         <summary>Edit workflow definition</summary>
-        <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="stack">
+        <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="stack workflow-dependency-editor">
           <label>Name<input name="name" required maxlength="100" value="{{ workflow.name }}"></label>
           <label>Steps JSON — edit IDs, URLs, page limits, and robots policy
             <textarea name="steps_json" rows="12" required maxlength="12000" spellcheck="false">{{ workflow.steps|tojson(indent=2) }}</textarea>
@@ -151,7 +152,7 @@
             {% for step in workflow.steps %}
             {% set step_index = loop.index0 %}
             {% set step_id = step.step_id or ('step_' ~ loop.index) %}
-            <fieldset class="workflow-dependencies mt-2">
+            <fieldset class="workflow-dependencies mt-2" data-step-id="{{ step_id }}">
               <legend>Prerequisites for {{ step_id }}</legend>
               <div class="workflow-dependency-options">
                 {% for candidate in workflow.steps %}
@@ -166,6 +167,9 @@
             </fieldset>
             {% endfor %}
           </details>
+          <p class="alert warn" data-dependency-cycle-warning role="alert" tabindex="-1" hidden>
+            These prerequisites create a dependency cycle. Remove one or more selections before saving.
+          </p>
           <button class="btn btn-sm" type="submit">Save definition</button>
         </form>
       </details>
@@ -264,4 +268,53 @@
     {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
   {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  document.querySelectorAll('.workflow-dependency-editor').forEach((form) => {
+    const fieldsets = Array.from(form.querySelectorAll('[data-step-id]'));
+    const warning = form.querySelector('[data-dependency-cycle-warning]');
+    if (!fieldsets.length || !warning) return;
+
+    let changed = false;
+    const createsCycle = () => {
+      const dependencies = new Map(fieldsets.map((fieldset) => [
+        fieldset.dataset.stepId,
+        Array.from(fieldset.querySelectorAll('input[type="checkbox"]:checked'), (input) => input.value),
+      ]));
+      const visiting = new Set();
+      const visited = new Set();
+      const visit = (stepId) => {
+        if (visiting.has(stepId)) return true;
+        if (visited.has(stepId)) return false;
+        visiting.add(stepId);
+        for (const prerequisite of dependencies.get(stepId) || []) {
+          if (dependencies.has(prerequisite) && visit(prerequisite)) return true;
+        }
+        visiting.delete(stepId);
+        visited.add(stepId);
+        return false;
+      };
+      return Array.from(dependencies.keys()).some(visit);
+    };
+    const refreshWarning = () => {
+      warning.hidden = !(changed && createsCycle());
+    };
+
+    fieldsets.forEach((fieldset) => {
+      fieldset.addEventListener('change', () => {
+        changed = true;
+        refreshWarning();
+      });
+    });
+    form.addEventListener('submit', (event) => {
+      if (!changed || !createsCycle()) return;
+      event.preventDefault();
+      warning.hidden = false;
+      warning.focus();
+    });
+  });
+})();
+</script>
 {% endblock %}

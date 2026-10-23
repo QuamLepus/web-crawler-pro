@@ -1137,6 +1137,10 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert 'name="depends_on_3" value="research" checked' in page.text
     assert '<small class="muted">https://news.example</small>' in page.text
     assert 'name="depends_on_3" value="summary"' not in page.text
+    assert 'data-step-id="summary"' in page.text
+    assert 'data-dependency-cycle-warning role="alert"' in page.text
+    assert "These prerequisites create a dependency cycle." in page.text
+    assert "const createsCycle = () =>" in page.text
     assert 'data-viz="workflow-dag"' in page.text
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
