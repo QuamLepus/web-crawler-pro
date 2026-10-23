@@ -353,6 +353,23 @@ class Client:
         return self._request("GET", "marketplace/bounties", params={
             "limit": limit, "offset": offset})
 
+    def create_marketplace_bounty(self, title: str, spec: str,
+                                  reward_usd_cents: int, *,
+                                  deadline_days: int = 30,
+                                  target_urls: list[str] | None = None
+                                  ) -> dict[str, Any]:
+        """Post a bounty for datasets; creating it does not transfer funds.
+
+        The API requires a title (5–140 characters), specification (20–8,000
+        characters), reward of at least 100 cents, and public target URLs.
+        """
+        return self._request("POST", "marketplace/bounties", json={
+            "title": title, "spec": spec,
+            "reward_usd_cents": reward_usd_cents,
+            "deadline_days": deadline_days,
+            "target_urls": target_urls or [],
+        })
+
     def submit_marketplace_bounty(self, bounty_id: str,
                                   dataset_id: str) -> dict[str, Any]:
         """Submit this tenant's published dataset to an open bounty.
