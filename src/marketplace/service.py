@@ -375,6 +375,33 @@ class MarketplaceService:
                 out.append(ReviewOut(**json.loads(raw)))
         return out
 
+    def list_reviews_for_viewer(self, dataset_id: str, viewer: str, *,
+                                limit: int = 50,
+                                offset: int = 0) -> Optional[list[ReviewOut]]:
+        """Read reviews only if listing visibility still permits this viewer."""
+        listing_key = f"mkt:listing:{dataset_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(listing_key)
+                    raw_listing = pipe.hget(listing_key, "data")
+                    if not raw_listing:
+                        return None
+                    listing = Listing(**json.loads(raw_listing))
+                    if (listing.status != "published" and
+                            listing.seller_tenant != viewer):
+                        return None
+                    reviews = self.list_reviews(
+                        dataset_id, limit=limit, offset=offset)
+                    # An EXEC read validates the watched listing key after the
+                    # review rows are fetched; retry if visibility changed.
+                    pipe.multi()
+                    pipe.hget(listing_key, "data")
+                    pipe.execute()
+                    return reviews
+                except WatchError:
+                    continue
+
     def rating_summary(self, dataset_id: str) -> tuple[float, int]:
         raw = self.r.hgetall(f"mkt:rating:{dataset_id}")
         if not raw:
