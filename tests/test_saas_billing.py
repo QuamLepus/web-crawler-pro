@@ -1286,7 +1286,8 @@ def test_open_bounties_support_bounded_offset_pagination(client, api_key):
                       params={"offset": 10001}).status_code == 422
 
 
-def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
+def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(
+        client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
 
     tenant = client.app.state.services.users.list_orgs()[0].id
@@ -1314,6 +1315,26 @@ def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_row
     assert unavailable.status_code == 503
     assert unavailable.json()["detail"] == "dataset preview is unavailable"
     assert "sample row" not in unavailable.text
+
+    public_listing = listing("preview-race-seller", "Public preview race", "f")
+    original_get_listing = MarketplaceService.get_listing
+    changed = False
+
+    def unpublish_after_read(self, dataset_id):
+        nonlocal changed
+        current = original_get_listing(self, dataset_id)
+        if dataset_id == public_listing.dataset_id and not changed:
+            changed = True
+            self.update_listing(dataset_id, "preview-race-seller", status="draft")
+        return current
+
+    monkeypatch.setattr(MarketplaceService, "get_listing", unpublish_after_read)
+    raced = client.get(
+        f"/v1/marketplace/datasets/{public_listing.dataset_id}/preview?rows=10",
+        headers=headers)
+    assert changed is True
+    assert raced.status_code == 404
+    assert raced.json()["detail"] == "dataset not found"
 
 
 def test_dataset_publish_still_rejects_unhashed_jobs(client, api_key):
