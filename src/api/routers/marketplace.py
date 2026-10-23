@@ -87,10 +87,12 @@ async def my_datasets(ctx: CtxDep, request: Request,
 async def search_datasets(ctx: CtxDep, request: Request,
                           q: str = "", tag: str = "",
                           max_price_cents: int | None = Query(None, ge=0),
-                          limit: int = Query(20, ge=1, le=100)):
+                          limit: int = Query(20, ge=1, le=100),
+                          offset: int = Query(0, ge=0, le=10_000)):
     mkt = _mkt(request)
     found = mkt.search_listings(query=q, tag=tag,
-                                max_price_cents=max_price_cents, limit=limit)
+                                max_price_cents=max_price_cents,
+                                limit=limit, offset=offset)
     return [mkt.to_out(l) for l in found]
 
 

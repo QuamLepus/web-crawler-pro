@@ -238,10 +238,12 @@ class Client:
 
     def search_marketplace_datasets(self, *, q: str = "", tag: str = "",
                                     max_price_cents: int | None = None,
-                                    limit: int = 20) -> list[dict[str, Any]]:
-        """Search published public marketplace listings; does not purchase."""
+                                    limit: int = 20,
+                                    offset: int = 0) -> list[dict[str, Any]]:
+        """Search a page of published marketplace listings; does not purchase."""
         return self._request("GET", "marketplace/datasets", params={
-            "q": q, "tag": tag, "max_price_cents": max_price_cents, "limit": limit})
+            "q": q, "tag": tag, "max_price_cents": max_price_cents,
+            "limit": limit, "offset": offset})
 
     def get_marketplace_dataset(self, dataset_id: str) -> dict[str, Any]:
         """Retrieve a published listing or one owned by this tenant."""

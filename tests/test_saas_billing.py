@@ -318,6 +318,36 @@ def test_marketplace_tag_updates_normalize_and_refresh_search_indexes(client):
     assert marketplace.get_listing(listing.dataset_id).tags == ["new tag", "fresh"]
 
 
+def test_marketplace_search_supports_bounded_offset_pagination(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    for index in range(3):
+        marketplace.create_listing(
+            "seller", title=f"Paged search dataset {index}",
+            description="Published listing for marketplace search pagination.",
+            tags=["pages"], price_usd_cents=100, license="CC-BY-4.0",
+            content_sha256=str(index + 1) * 64)
+    marketplace.create_listing(
+        "seller", title="Unrelated dataset",
+        description="Published listing excluded by the pagination filter.",
+        tags=["other"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="4" * 64)
+
+    headers = _headers(api_key)
+    params = {"tag": "pages", "limit": 10}
+    all_items = client.get("/v1/marketplace/datasets", headers=headers,
+                           params=params).json()
+    page = client.get("/v1/marketplace/datasets", headers=headers,
+                      params={**params, "limit": 1, "offset": 1})
+    assert page.status_code == 200
+    assert [item["dataset_id"] for item in page.json()] == [
+        all_items[1]["dataset_id"]]
+    assert len(all_items) == 3
+    assert client.get("/v1/marketplace/datasets", headers=headers,
+                      params={"offset": 10001}).status_code == 422
+
+
 def test_marketplace_search_scans_past_the_first_501_listings(client):
     from src.marketplace.service import MarketplaceService
 
