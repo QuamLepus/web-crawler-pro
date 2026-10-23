@@ -251,7 +251,13 @@ async def submit_bounty(bounty_id: str, dataset_id: str, ctx: CtxDep,
     try:
         return _mkt(request).submit_for_bounty(ctx["tenant"], bounty_id, dataset_id)
     except MarketplaceError as exc:
-        raise HTTPException(400, str(exc))
+        message = str(exc)
+        code = (404 if message == "bounty not found" else
+                403 if "listing owner" in message else
+                409 if ("bounty is" in message or "bounty expired" in message or
+                        "already submitted" in message or
+                        "published listing" in message) else 400)
+        raise HTTPException(code, message) from exc
 
 
 @router.post("/bounties/{bounty_id}/award")
