@@ -557,6 +557,31 @@ def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
     assert valid.json()["target_urls"] == ["https://example.org/source?category=energy"]
 
 
+def test_legacy_bounty_targets_are_sanitized_before_public_listing(client):
+    import json
+
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Legacy target records",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    key = f"mkt:bounty:{bounty.bounty_id}"
+    stored = json.loads(marketplace.r.hget(key, "data"))
+    stored.pop("target_urls", None)
+    marketplace.r.hset(key, "data", json.dumps(stored))
+    marketplace.r.hset(key, "targets", json.dumps([
+        "https://example.org/private?access_token=redacted",
+        "https://example.org/source#private-fragment",
+        "https://example.org/public",
+    ]))
+
+    listed = marketplace.list_open_bounties(limit=10)
+    public_bounty = next(item for item in listed if item.bounty_id == bounty.bounty_id)
+    assert public_bounty.target_urls == ["https://example.org/public"]
+
+
 def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key):
     from src.marketplace.service import MarketplaceService
 
