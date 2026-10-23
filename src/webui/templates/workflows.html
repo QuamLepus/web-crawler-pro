@@ -2,7 +2,10 @@
 {% block head %}<style>
 .workflow-dependencies{border:1px solid var(--border);border-radius:var(--r);padding:.75rem 1rem}
 .workflow-dependencies legend{font-weight:600;padding:0 .25rem}
-.workflow-dependency-options{display:flex;flex-wrap:wrap;gap:.5rem 1rem}
+.workflow-dependency-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:.5rem 1rem}
+.workflow-dependency-option{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.45rem;align-items:start}
+.workflow-dependency-option span{display:grid;min-width:0}
+.workflow-dependency-option small{overflow-wrap:anywhere}
 .workflow-dag-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:rgba(99,102,241,.035)}
 .workflow-dag{display:block;max-width:none}
 .workflow-dag-edge{fill:none;stroke:var(--text-3);stroke-width:2;opacity:.72}
@@ -154,7 +157,9 @@
                 {% for candidate in workflow.steps %}
                 {% set candidate_id = candidate.step_id or ('step_' ~ loop.index) %}
                 {% if candidate_id != step_id %}
-                <label><input type="checkbox" name="depends_on_{{ step_index }}" value="{{ candidate_id }}" {% if candidate_id in (step.depends_on or []) %}checked{% endif %}> {{ candidate_id }}</label>
+                <label class="workflow-dependency-option"><input type="checkbox" name="depends_on_{{ step_index }}" value="{{ candidate_id }}" {% if candidate_id in (step.depends_on or []) %}checked{% endif %}>
+                  <span><strong>{{ candidate_id }}</strong><small class="muted">{{ candidate.url|truncate(56, true, '…') }}</small></span>
+                </label>
                 {% endif %}
                 {% endfor %}
               </div>

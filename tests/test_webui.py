@@ -1135,6 +1135,8 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert "Edit step dependencies without changing JSON" in page.text
     assert 'name="depends_on_3" value="news" checked' in page.text
     assert 'name="depends_on_3" value="research" checked' in page.text
+    assert '<small class="muted">https://news.example</small>' in page.text
+    assert 'name="depends_on_3" value="summary"' not in page.text
     assert 'data-viz="workflow-dag"' in page.text
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
