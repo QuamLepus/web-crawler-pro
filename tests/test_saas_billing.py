@@ -660,6 +660,28 @@ def test_concurrent_bounty_awards_assign_only_one_submission(client):
     }
 
 
+def test_bounty_submission_errors_use_not_found_and_conflict_statuses(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Closed bounty submission",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    marketplace._set_bounty_status(bounty, "awarded")
+    headers = _headers(api_key)
+
+    missing = client.post(
+        "/v1/marketplace/bounties/missing-bounty/submissions",
+        headers=headers, params={"dataset_id": "dataset-1"})
+    assert missing.status_code == 404
+
+    closed = client.post(
+        f"/v1/marketplace/bounties/{bounty.bounty_id}/submissions",
+        headers=headers, params={"dataset_id": "dataset-1"})
+    assert closed.status_code == 409
+
+
 def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
     headers = _headers(api_key)
     base = {
