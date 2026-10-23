@@ -526,6 +526,34 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     assert marketplace.get_bounty(expired.bounty_id).status == "expired"
 
 
+def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
+    headers = _headers(api_key)
+    base = {
+        "title": "Curate public sources",
+        "spec": "Collect and curate a set of public records from approved sources.",
+        "reward_usd_cents": 5000,
+    }
+    invalid_targets = [
+        ["javascript:alert(1)"],
+        ["https://user:secret@example.org/private"],
+        ["https://example.org:70000/invalid-port"],
+        ["https://example.org/path with spaces"],
+        ["https://example.org/" + "x" * 2048],
+        [f"https://example.org/{index}" for index in range(51)],
+    ]
+    for targets in invalid_targets:
+        response = client.post("/v1/marketplace/bounties", headers=headers,
+                               json={**base, "target_urls": targets})
+        assert response.status_code == 422, response.text
+
+    valid = client.post("/v1/marketplace/bounties", headers=headers, json={
+        **base, "target_urls": [" https://example.org/source ",
+                                "https://example.org/source"],
+    })
+    assert valid.status_code == 201, valid.text
+    assert valid.json()["target_urls"] == ["https://example.org/source"]
+
+
 def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key):
     from src.marketplace.service import MarketplaceService
 
