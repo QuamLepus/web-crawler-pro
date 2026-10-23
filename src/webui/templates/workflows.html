@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block head %}<style>
+.workflow-dependencies{border:1px solid var(--border);border-radius:var(--r);padding:.75rem 1rem}
+.workflow-dependencies legend{font-weight:600;padding:0 .25rem}
+.workflow-dependency-options{display:flex;flex-wrap:wrap;gap:.5rem 1rem}
 .workflow-dag-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:rgba(99,102,241,.035)}
 .workflow-dag{display:block;max-width:none}
 .workflow-dag-edge{fill:none;stroke:var(--text-3);stroke-width:2;opacity:.72}
@@ -135,9 +138,29 @@
         <summary>Edit workflow definition</summary>
         <form method="post" action="/app/workflows/{{ workflow.workflow_id }}/edit" class="stack">
           <label>Name<input name="name" required maxlength="100" value="{{ workflow.name }}"></label>
-          <label>Steps JSON — edit <code>step_id</code>, <code>depends_on</code>, URL, page limit, and robots policy
+          <label>Steps JSON — edit IDs, URLs, page limits, and robots policy
             <textarea name="steps_json" rows="12" required maxlength="12000" spellcheck="false">{{ workflow.steps|tojson(indent=2) }}</textarea>
           </label>
+          <details>
+            <summary>Edit step dependencies without changing JSON</summary>
+            <p class="muted small">For each step, select its prerequisites. Leave all unchecked to make it a root. The server validates cycles and unknown step IDs before saving.</p>
+            <input type="hidden" name="dependency_editor" value="1">
+            {% for step in workflow.steps %}
+            {% set step_index = loop.index0 %}
+            {% set step_id = step.step_id or ('step_' ~ loop.index) %}
+            <fieldset class="workflow-dependencies mt-2">
+              <legend>Prerequisites for {{ step_id }}</legend>
+              <div class="workflow-dependency-options">
+                {% for candidate in workflow.steps %}
+                {% set candidate_id = candidate.step_id or ('step_' ~ loop.index) %}
+                {% if candidate_id != step_id %}
+                <label><input type="checkbox" name="depends_on_{{ step_index }}" value="{{ candidate_id }}" {% if candidate_id in (step.depends_on or []) %}checked{% endif %}> {{ candidate_id }}</label>
+                {% endif %}
+                {% endfor %}
+              </div>
+            </fieldset>
+            {% endfor %}
+          </details>
           <button class="btn btn-sm" type="submit">Save definition</button>
         </form>
       </details>
