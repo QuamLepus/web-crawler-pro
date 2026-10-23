@@ -401,7 +401,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
         client.list_my_marketplace_datasets(status="draft", limit=5, offset=10)
         client.get_marketplace_delivery("dlv_0123456789ab")
         client.list_marketplace_purchases(limit=12, offset=5)
-        client.list_marketplace_reviews("dataset:1", limit=12)
+        client.list_marketplace_reviews("dataset:1", limit=12, offset=4)
 
     assert calls == [
         ("GET", "/api/v1/marketplace/bounties?limit=7"),
@@ -411,7 +411,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
         ("GET", "/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10"),
         ("GET", "/api/v1/marketplace/deliveries/dlv_0123456789ab"),
         ("GET", "/api/v1/marketplace/purchases?limit=12&offset=5"),
-        ("GET", "/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12"),
+        ("GET", "/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12&offset=4"),
     ]
 
 

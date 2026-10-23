@@ -157,14 +157,18 @@ async def add_review(dataset_id: str, body: ReviewCreate, ctx: CtxDep,
 @router.get("/datasets/{dataset_id}/reviews",
             response_model=list[MarketplaceReviewPublicOut])
 async def get_reviews(dataset_id: str, ctx: CtxDep, request: Request,
-                      limit: int = Query(50, ge=1, le=200)) -> list[MarketplaceReviewPublicOut]:
+                      limit: int = Query(50, ge=1, le=200),
+                      offset: int = Query(0, ge=0, le=10_000)) -> list[MarketplaceReviewPublicOut]:
     marketplace = _mkt(request)
     listing = marketplace.get_listing(dataset_id)
     if listing is None or (listing.status != "published" and
                            listing.seller_tenant != ctx["tenant"]):
         raise HTTPException(404, "dataset not found")
-    return [MarketplaceReviewPublicOut(**review.model_dump(exclude={"buyer_tenant"}))
-            for review in marketplace.list_reviews(dataset_id, limit=limit)]
+    return [
+        MarketplaceReviewPublicOut(**review.model_dump(exclude={"buyer_tenant"}))
+        for review in marketplace.list_reviews(
+            dataset_id, limit=limit, offset=offset)
+    ]
 
 
 # ------------------------------ purchase / delivery ----------------------- #

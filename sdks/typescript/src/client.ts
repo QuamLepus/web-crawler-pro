@@ -343,9 +343,10 @@ export class WebIntelligenceClient {
     return this.request<JsonObject[]>("GET", `marketplace/purchases?${query}`);
   }
 
-  listMarketplaceReviews(datasetId: string, limit = 50): Promise<JsonObject[]> {
+  listMarketplaceReviews(datasetId: string, limit = 50, offset = 0): Promise<JsonObject[]> {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<JsonObject[]>("GET",
-      `marketplace/datasets/${encodeURIComponent(datasetId)}/reviews?limit=${limit}`);
+      `marketplace/datasets/${encodeURIComponent(datasetId)}/reviews?${query}`);
   }
 
   storeProvenanceRecord(record: JsonObject): Promise<JsonObject> {
