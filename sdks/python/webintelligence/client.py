@@ -249,6 +249,17 @@ class Client:
         """Retrieve a published listing or one owned by this tenant."""
         return self._request("GET", f"marketplace/datasets/{quote(dataset_id, safe='')}")
 
+    def update_marketplace_dataset(self, dataset_id: str,
+                                  **changes: Any) -> dict[str, Any]:
+        """Update fields on a listing owned by this tenant.
+
+        Use the API's snake-case field names (for example ``price_usd_cents``
+        and ``status``). The API rejects an empty update and invalid fields.
+        """
+        return self._request(
+            "PATCH", f"marketplace/datasets/{quote(dataset_id, safe='')}",
+            json=changes)
+
     def get_marketplace_dataset_preview(self, dataset_id: str, *,
                                         rows: int = 50) -> list[dict[str, Any]]:
         """Read a bounded, sanitized sample; this is not a dataset download.
