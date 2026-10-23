@@ -504,6 +504,12 @@ def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in):
             description="A published listing used to verify marketplace controls.",
             tags=["catalogue"], price_usd_cents=price, license="CC-BY-4.0",
             content_sha256=("b" if price == 0 else "c") * 64)
+    own_tenant = signed_in.app.state.services.users.list_orgs()[0].id
+    marketplace.create_listing(
+        own_tenant, title="My free listing",
+        description="A listing owned by this account should not show a purchase control.",
+        tags=["catalogue"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="d" * 64)
 
     res = signed_in.get("/app/marketplace")
     text = res.text
@@ -515,6 +521,11 @@ def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in):
     assert "SHA-256" in text or "source job" in text.lower()
     assert "Get signed manifest" in text
     assert "Paid unavailable" in text
+    assert "Your listing" in text
+    from bs4 import BeautifulSoup
+    own_row = next(row for row in BeautifulSoup(text, "html.parser").select(".cat-row")
+                   if "My free listing" in row.get_text())
+    assert own_row.select_one("form[action$='/purchase']") is None
     assert "dataset bytes are not transferred" in text.lower()
     assert "delivery is queued immediately" not in text.lower()
     assert "platform fee is applied at purchase" not in text.lower()
