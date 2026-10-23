@@ -788,6 +788,57 @@ def test_award_retries_if_listing_is_unpublished_mid_transaction(client):
     assert marketplace.get_bounty(bounty.bounty_id).status == "open"
 
 
+def test_cancel_and_award_race_yields_one_terminal_bounty_state(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Concurrent cancel or award",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    listing = marketplace.create_listing(
+        "worker", title="Award candidate", description="Published bounty submission.",
+        tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="5" * 64)
+    marketplace.submit_for_bounty("worker", bounty.bounty_id, listing.dataset_id)
+
+    def cancel():
+        try:
+            return marketplace.cancel_bounty("poster", bounty.bounty_id)
+        except MarketplaceError as exc:
+            return exc
+
+    def award():
+        try:
+            return marketplace.award_bounty(
+                "poster", bounty.bounty_id, listing.dataset_id)
+        except MarketplaceError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cancel_future = executor.submit(cancel)
+        award_future = executor.submit(award)
+        cancel_result = cancel_future.result()
+        award_result = award_future.result()
+
+    final = marketplace.get_bounty(bounty.bounty_id)
+    assert (isinstance(cancel_result, dict) +
+            isinstance(award_result, dict)) == 1
+    if final.status == "cancelled":
+        assert isinstance(cancel_result, dict)
+        assert isinstance(award_result, MarketplaceError)
+        assert "bounty is cancelled" in str(award_result)
+        assert final.assigned_to is None
+    else:
+        assert final.status == "awarded"
+        assert isinstance(award_result, dict)
+        assert isinstance(cancel_result, MarketplaceError)
+        assert "bounty is awarded" in str(cancel_result)
+        assert final.assigned_to == listing.dataset_id
+
+
 def test_concurrent_bounty_awards_assign_only_one_submission(client):
     from concurrent.futures import ThreadPoolExecutor
 
@@ -911,6 +962,10 @@ def test_bounty_poster_can_cancel_open_bounty(client, api_key):
         "bounty_id": owned.bounty_id, "status": "cancelled"}
     assert marketplace.get_bounty(owned.bounty_id).status == "cancelled"
     assert marketplace.r.zscore("mkt:bounties:open", owned.bounty_id) is None
+    rejected_submission = client.post(
+        f"/v1/marketplace/bounties/{owned.bounty_id}/submissions",
+        headers=headers, params={"dataset_id": "dataset-after-cancel"})
+    assert rejected_submission.status_code == 409
     open_ids = {item["bounty_id"] for item in client.get(
         "/v1/marketplace/bounties", headers=headers,
         params={"limit": 100}).json()}
