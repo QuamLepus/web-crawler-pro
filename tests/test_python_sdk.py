@@ -383,6 +383,29 @@ def test_billing_methods_read_plans_usage_and_current_invoice_estimate():
     ]
 
 
+def test_sso_read_methods_use_tenant_endpoints_and_bounded_audit_limit():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(200, json={"enabled": True,
+                                         "client_secret_configured": True,
+                                         "items": []})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        config = client.get_sso_oidc_config()
+        audit = client.list_sso_audit_events(limit=17)
+
+    assert config["client_secret_configured"] is True
+    assert "client_secret" not in config
+    assert audit["items"] == []
+    assert calls == [
+        ("GET", "/api/v1/sso/oidc"),
+        ("GET", "/api/v1/sso/audit?limit=17"),
+    ]
+
+
 def test_billing_checkout_posts_paid_plan_and_redirect_urls():
     import json
 

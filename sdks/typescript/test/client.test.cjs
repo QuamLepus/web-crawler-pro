@@ -307,6 +307,22 @@ test('billing methods read plans, usage, and current invoice estimate', async ()
   ]);
 });
 
+test('SSO read methods return public config and request bounded audit events', async () => {
+  const calls = [];
+  const publicConfig = { enabled: true, client_secret_configured: true };
+  const client = new WebIntelligenceClient({ apiKey: 'sso-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify(url.endsWith('/sso/oidc')
+      ? publicConfig : { items: [], limit: 17 }), { status: 200 });
+  } });
+  assert.deepEqual(await client.getSsoOidcConfig(), publicConfig);
+  assert.deepEqual(await client.listSsoAuditEvents(17), { items: [], limit: 17 });
+  assert.deepEqual(calls, [
+    { url: 'http://localhost:8000/api/v1/sso/oidc', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/sso/audit?limit=17', method: 'GET' },
+  ]);
+});
+
 test('billing checkout posts paid plan and redirect URLs', async () => {
   const calls = [];
   const payload = { session_id: 'cs_test_123', url: 'https://checkout.stripe.example/session', plan: 'pro' };

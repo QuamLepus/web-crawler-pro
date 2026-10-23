@@ -241,6 +241,14 @@ class Client:
         """Read the API's current-period estimate, not a Stripe-issued invoice."""
         return self._request("GET", "billing/invoice")
 
+    def get_sso_oidc_config(self) -> dict[str, Any]:
+        """Read this tenant's public OIDC configuration; never returns its secret."""
+        return self._request("GET", "sso/oidc")
+
+    def list_sso_audit_events(self, *, limit: int = 100) -> dict[str, Any]:
+        """Read recent tenant SSO audit events (owner/admin API authorization applies)."""
+        return self._request("GET", "sso/audit", params={"limit": limit})
+
     def list_my_marketplace_datasets(self, *, status: str | None = None,
                                      limit: int = 20,
                                      offset: int = 0) -> list[dict[str, Any]]:

@@ -368,6 +368,17 @@ export class WebIntelligenceClient {
     return this.request("GET", "billing/invoice");
   }
 
+  /** Read public OIDC configuration; the API never returns the client secret. */
+  getSsoOidcConfig(): Promise<JsonObject> {
+    return this.request("GET", "sso/oidc");
+  }
+
+  /** Read recent tenant SSO audit events; owner/admin API authorization applies. */
+  listSsoAuditEvents(limit = 100): Promise<JsonObject> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    return this.request("GET", `sso/audit?${query}`);
+  }
+
   listMyMarketplaceDatasets(options: {
     status?: "draft" | "published" | "suspended" | "archived";
     limit?: number;
