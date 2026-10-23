@@ -415,10 +415,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_marketplace_purchases_list", "List recent dataset purchases belonging to the authenticated tenant; does not purchase a dataset.", {
+  server.tool("wio_marketplace_purchases_list", "List a page of recent dataset purchases belonging to the authenticated tenant; does not purchase a dataset.", {
     limit: z.number().int().min(1).max(200).optional(),
-  }, async ({ limit }) => {
-    try { return result(await client.listMarketplacePurchases(limit)); }
+    offset: z.number().int().min(0).max(10000).optional(),
+  }, async ({ limit, offset }) => {
+    try { return result(await client.listMarketplacePurchases(limit, offset)); }
     catch (error) { return failure(error); }
   });
 

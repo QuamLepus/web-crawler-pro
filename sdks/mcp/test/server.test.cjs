@@ -740,7 +740,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
       delivery_id: 'dlv_0123456789ab',
     } });
     const purchases = await client.callTool({ name: 'wio_marketplace_purchases_list', arguments: {
-      limit: 12,
+      limit: 12, offset: 4,
     } });
     const reviews = await client.callTool({ name: 'wio_marketplace_reviews_list', arguments: {
       dataset_id: 'dataset:1', limit: 12,
@@ -760,7 +760,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
       { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },
-      { url: 'http://localhost:8000/api/v1/marketplace/purchases?limit=12', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/marketplace/purchases?limit=12&offset=4', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12', method: 'GET' },
     ]);
   } finally {

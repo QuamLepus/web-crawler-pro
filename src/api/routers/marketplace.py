@@ -195,8 +195,10 @@ async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
 @router.get("/purchases", response_model=list[MarketplacePurchaseOut],
             summary="List purchases belonging to the authenticated tenant")
 async def list_purchases(ctx: CtxDep, request: Request,
-                         limit: int = Query(50, ge=1, le=200)) -> list[MarketplacePurchaseOut]:
-    return _mkt(request).list_purchases(ctx["tenant"], limit=limit)
+                         limit: int = Query(50, ge=1, le=200),
+                         offset: int = Query(0, ge=0, le=10_000)) -> list[MarketplacePurchaseOut]:
+    return _mkt(request).list_purchases(ctx["tenant"], limit=limit,
+                                        offset=offset)
 
 
 @router.get("/deliveries/{delivery_id}", response_model=DeliveryManifest)

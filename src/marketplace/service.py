@@ -432,8 +432,9 @@ class MarketplaceService:
                 except WatchError:
                     continue
 
-    def list_purchases(self, buyer: str, limit: int = 50) -> list[Purchase]:
-        """Return most recent purchases indexed to this buyer tenant only."""
+    def list_purchases(self, buyer: str, limit: int = 50,
+                       offset: int = 0) -> list[Purchase]:
+        """Return a page of recent purchases indexed to this buyer only."""
         purchase_ids = self.r.smembers(f"mkt:purchase-index:{buyer}")
         out = []
         for raw_id in purchase_ids:
@@ -444,7 +445,7 @@ class MarketplaceService:
                 if purchase.buyer_tenant == buyer:
                     out.append(purchase)
         out.sort(key=lambda purchase: purchase.created_at, reverse=True)
-        return out[:limit]
+        return out[offset:offset + limit]
 
     # --------------------- signed secure delivery ----------------------- #
     def issue_delivery(self, buyer: str, lst: Listing, *,

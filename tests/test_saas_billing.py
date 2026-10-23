@@ -379,6 +379,38 @@ def test_marketplace_purchase_fails_closed_without_strong_signing_secret(
     assert "short-secret" not in weak.text
 
 
+def test_marketplace_purchase_history_supports_offset_pagination(
+        client, api_key, monkeypatch):
+    from src.marketplace.service import MarketplaceService
+
+    monkeypatch.setenv("MARKETPLACE_SIGNING_SECRET",
+                       "marketplace-test-signing-secret-0003")
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    headers = _headers(api_key)
+    purchase_ids = []
+    for index in range(3):
+        listing = marketplace.create_listing(
+            "seller", title=f"History dataset {index}",
+            description="A free dataset used for purchase-history pagination.",
+            tags=["history"], price_usd_cents=0, license="CC-BY-4.0",
+            content_sha256=str(index + 1) * 64)
+        response = client.post(
+            f"/v1/marketplace/datasets/{listing.dataset_id}/purchase",
+            headers=headers)
+        assert response.status_code == 200, response.text
+        purchase_ids.append(response.json()["purchase"]["purchase_id"])
+
+    first_page = client.get("/v1/marketplace/purchases", headers=headers,
+                            params={"limit": 2, "offset": 0})
+    second_page = client.get("/v1/marketplace/purchases", headers=headers,
+                             params={"limit": 2, "offset": 2})
+    assert first_page.status_code == second_page.status_code == 200
+    assert [item["purchase_id"] for item in first_page.json()] == purchase_ids[::-1][:2]
+    assert [item["purchase_id"] for item in second_page.json()] == purchase_ids[::-1][2:]
+    assert client.get("/v1/marketplace/purchases", headers=headers,
+                      params={"offset": 10001}).status_code == 422
+
+
 def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
