@@ -237,9 +237,14 @@ class Client:
         """Read the authenticated tenant's current-period usage summary."""
         return self._request("GET", "billing/usage")
 
-    def get_billing_invoice_estimate(self) -> dict[str, Any]:
-        """Read the API's current-period estimate, not a Stripe-issued invoice."""
-        return self._request("GET", "billing/invoice")
+    def get_billing_invoice_estimate(self, *, period: str | None = None) -> dict[str, Any]:
+        """Read the API's period estimate, not a Stripe-issued invoice.
+
+        Omit ``period`` for the current period; pass a period such as
+        ``"2026-10"`` to request a historical estimate.
+        """
+        params = {"period": period} if period is not None else {}
+        return self._request("GET", "billing/invoice", params=params)
 
     def get_sso_oidc_config(self) -> dict[str, Any]:
         """Read this tenant's public OIDC configuration; never returns its secret."""

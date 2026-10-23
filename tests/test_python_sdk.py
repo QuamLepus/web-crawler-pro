@@ -383,6 +383,21 @@ def test_billing_methods_read_plans_usage_and_current_invoice_estimate():
     ]
 
 
+def test_billing_invoice_estimate_forwards_requested_historical_period():
+    calls = []
+    payload = {"tenant": "tenant-1", "period": "2026-09", "total_cents": 750}
+
+    def handler(request):
+        calls.append((request.method, request.url.path, request.url.query.decode()))
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.get_billing_invoice_estimate(period="2026-09") == payload
+
+    assert calls == [("GET", "/api/v1/billing/invoice", "period=2026-09")]
+
+
 def test_sso_read_methods_use_tenant_endpoints_and_bounded_audit_limit():
     calls = []
 

@@ -307,6 +307,20 @@ test('billing methods read plans, usage, and current invoice estimate', async ()
   ]);
 });
 
+test('billing invoice estimate can request a historical period', async () => {
+  const calls = [];
+  const client = new WebIntelligenceClient({ apiKey: 'billing-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method });
+    return new Response(JSON.stringify({ tenant: 'tenant-1', period: '2026-09', total_cents: 750 }),
+      { status: 200 });
+  } });
+  const estimate = await client.getBillingInvoiceEstimate('2026-09');
+  assert.deepEqual(estimate, { tenant: 'tenant-1', period: '2026-09', total_cents: 750 });
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/billing/invoice?period=2026-09', method: 'GET',
+  }]);
+});
+
 test('SSO read methods return public config and request bounded audit events', async () => {
   const calls = [];
   const publicConfig = { enabled: true, client_secret_configured: true };
