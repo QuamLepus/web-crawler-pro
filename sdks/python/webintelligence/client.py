@@ -354,6 +354,17 @@ class Client:
             "POST", f"marketplace/bounties/{quote(bounty_id, safe='')}/submissions",
             params={"dataset_id": dataset_id})
 
+    def award_marketplace_bounty(self, bounty_id: str,
+                                 dataset_id: str) -> dict[str, Any]:
+        """Select a submitted, still-published dataset as this poster's winner.
+
+        The API permits only the poster to award an open, unexpired bounty to a
+        submitted dataset. This records the award but does not transfer funds.
+        """
+        return self._request(
+            "POST", f"marketplace/bounties/{quote(bounty_id, safe='')}/award",
+            params={"dataset_id": dataset_id})
+
     def list_marketplace_bounty_submissions(self, bounty_id: str, *,
                                             limit: int = 50,
                                             offset: int = 0) -> list[str]:

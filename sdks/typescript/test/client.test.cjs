@@ -341,6 +341,21 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   ]);
 });
 
+test('marketplace bounty award encodes both IDs and returns the selected winner', async () => {
+  const calls = [];
+  const payload = { bounty_id: 'bty:1', awarded_to_dataset: 'dataset:1', reward_usd_cents: 5000 };
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body });
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const result = await client.awardMarketplaceBounty('bty:1', 'dataset:1');
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/marketplace/bounties/bty%3A1/award?dataset_id=dataset%3A1',
+    method: 'POST', body: undefined,
+  }]);
+});
+
 test('marketplace bounty submission encodes both IDs and returns the accepted result', async () => {
   const calls = [];
   const payload = { bounty_id: 'bty:1', dataset_id: 'dataset:1', submission_recorded: true };

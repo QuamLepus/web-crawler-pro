@@ -421,6 +421,23 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     ]
 
 
+def test_marketplace_bounty_award_posts_encoded_ids_and_dataset_query():
+    calls = []
+    payload = {"bounty_id": "bty:1", "awarded_to_dataset": "dataset:1",
+               "reward_usd_cents": 5000}
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(), request.read()))
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.award_marketplace_bounty("bty:1", "dataset:1") == payload
+
+    assert calls == [(
+        "POST", "/api/v1/marketplace/bounties/bty%3A1/award?dataset_id=dataset%3A1", b"")]
+
+
 def test_marketplace_bounty_submission_posts_encoded_ids_and_dataset_query():
     calls = []
     payload = {"bounty_id": "bty:1", "dataset_id": "dataset:1",
