@@ -15,7 +15,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import secrets
 import time
 import uuid
@@ -28,64 +27,11 @@ from redis.exceptions import WatchError
 from src.api.schemas import (BountyOut, DatasetListingOut, DeliveryManifest,
                              ReviewOut, normalize_public_bounty_target_urls,
                              utcnow)
+from src.marketplace.preview import (JOB_PREVIEW_KEY, LISTING_PREVIEW_KEY,
+                                     PREVIEW_RETENTION_SECONDS,
+                                     sanitize_preview_records)
 
 logger = logging.getLogger("wcp.marketplace")
-
-_PREVIEW_EMAIL_RE = re.compile(
-    r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-_PREVIEW_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-_PREVIEW_PHONE_RE = re.compile(r"(?<![\w])\+?(?:\d[\s().-]*){9,14}\d(?!\w)")
-_PREVIEW_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-_PREVIEW_CREDENTIAL_RE = re.compile(
-    r"(?i)\b((?:[a-z0-9]*(?:token|secret|password|passwd|authorization|cookie|"
-    r"session(?:id)?|jwt|email|phone|mobile|ssn|ipaddress))|"
-    r"api[_-]?key|client[_-]?key|private[_-]?key|auth)\s*=\s*([^&#\s]+)")
-_PREVIEW_PRIVATE_FIELDS = {
-    "ip", "ipaddress", "html", "cookie", "cookies", "authorization",
-    "password", "secret", "token", "apikey", "credential", "credentials",
-    "ssn", "socialsecuritynumber", "email", "phone", "mobile", "telephone",
-    "jwt", "bearer", "key",
-}
-_PREVIEW_MAX_FIELDS = 40
-_PREVIEW_MAX_LIST_ITEMS = 20
-_PREVIEW_MAX_VALUE_CHARS = 1000
-_PREVIEW_MAX_DEPTH = 4
-
-
-def _preview_private_field(name: Any) -> bool:
-    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(name))
-    tokens = re.findall(r"[a-z0-9]+", separated.casefold())
-    return any(token in _PREVIEW_PRIVATE_FIELDS for token in tokens)
-
-
-def _redact_preview_text(value: str) -> str:
-    value = _PREVIEW_EMAIL_RE.sub("[REDACTED_EMAIL]", value)
-    value = _PREVIEW_SSN_RE.sub("[REDACTED_SSN]", value)
-    value = _PREVIEW_PHONE_RE.sub("[REDACTED_PHONE]", value)
-    value = _PREVIEW_IPV4_RE.sub("[REDACTED_IP]", value)
-    return _PREVIEW_CREDENTIAL_RE.sub(r"\1=[REDACTED]", value)
-
-
-def _sanitize_preview_value(value: Any, depth: int = 0) -> Any:
-    if depth > _PREVIEW_MAX_DEPTH:
-        return "[TRUNCATED]"
-    if isinstance(value, dict):
-        safe = {}
-        for index, (key, item) in enumerate(value.items()):
-            if index >= _PREVIEW_MAX_FIELDS:
-                break
-            if not _preview_private_field(key):
-                safe[str(key)[:100]] = _sanitize_preview_value(item, depth + 1)
-        return safe
-    if isinstance(value, (list, tuple)):
-        return [_sanitize_preview_value(item, depth + 1)
-                for item in value[:_PREVIEW_MAX_LIST_ITEMS]]
-    if isinstance(value, str):
-        return _redact_preview_text(value)[:_PREVIEW_MAX_VALUE_CHARS]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return _redact_preview_text(str(value))[:_PREVIEW_MAX_VALUE_CHARS]
-
 
 DELIVERY_TTL_DAYS = 7
 _SIGNING_SECRET_ENV = "MARKETPLACE_SIGNING_SECRET"
@@ -352,6 +298,81 @@ class MarketplaceService:
                     break
         return out
 
+    def copy_job_preview(self, job_id: str, dataset_id: str,
+                         tenant: str) -> bool:
+        """Reference a tenant-owned sample while preserving its original TTL."""
+        try:
+            listing = self.get_listing(dataset_id)
+            if listing is None or listing.seller_tenant != tenant:
+                return False
+            job_key = f"wcp:v1:job:{job_id}"
+            raw_job = self.r.hgetall(job_key)
+            job = {(key.decode() if isinstance(key, bytes) else str(key)):
+                   (value.decode() if isinstance(value, bytes) else str(value))
+                   for key, value in raw_job.items()}
+            digest = job.get("data_sha256", "")
+            if (job.get("tenant") != tenant or job.get("state") != "completed" or
+                    digest != listing.content_sha256):
+                return False
+            source_key = JOB_PREVIEW_KEY.format(job_id=job_id, digest=digest)
+            ttl = int(self.r.ttl(source_key))
+            if ttl <= 0:
+                return False
+            raw = self.r.get(source_key)
+            if not raw:
+                return False
+            records = json.loads(raw)
+            if not isinstance(records, list):
+                return False
+            safe = sanitize_preview_records(records)
+            if not safe:
+                return False
+            pointer = json.dumps({"job_id": job_id, "digest": digest},
+                                 separators=(",", ":"))
+            self.r.setex(LISTING_PREVIEW_KEY.format(dataset_id=dataset_id),
+                         min(ttl, PREVIEW_RETENTION_SECONDS), pointer)
+            return True
+        except Exception as exc:  # noqa: BLE001 - publishing does not depend on previews
+            logger.warning("marketplace preview copy unavailable (%s)",
+                           type(exc).__name__)
+            return False
+
+    def load_preview_records(self, dataset_id: str,
+                             rows: int = 50) -> list[dict] | None:
+        raw_pointer = self.r.get(
+            LISTING_PREVIEW_KEY.format(dataset_id=dataset_id))
+        if not raw_pointer:
+            return None
+        try:
+            pointer = json.loads(raw_pointer)
+            job_id = pointer.get("job_id") if isinstance(pointer, dict) else None
+            digest = pointer.get("digest") if isinstance(pointer, dict) else None
+            if (not isinstance(job_id, str) or not job_id or
+                    not isinstance(digest, str) or not digest):
+                return None
+            listing = self.get_listing(dataset_id)
+            if listing is None or listing.content_sha256 != digest:
+                return None
+            job_key = f"wcp:v1:job:{job_id}"
+            raw_job = self.r.hgetall(job_key)
+            job = {(key.decode() if isinstance(key, bytes) else str(key)):
+                   (value.decode() if isinstance(value, bytes) else str(value))
+                   for key, value in raw_job.items()}
+            if job.get("tenant") != listing.seller_tenant:
+                return None
+            source_key = JOB_PREVIEW_KEY.format(job_id=job_id, digest=digest)
+            if int(self.r.ttl(source_key)) <= 0:
+                return None
+            raw_records = self.r.get(source_key)
+            if not raw_records:
+                return None
+            records = json.loads(raw_records)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(records, list) or not records:
+            return None
+        return sanitize_preview_records(records, rows=rows)
+
     def build_preview(self, dataset_id: str, records: Iterable[dict],
                       rows: int = 50) -> list[dict]:
         """Build a bounded preview with common direct identifiers redacted.
@@ -362,27 +383,7 @@ class MarketplaceService:
         lst = self.get_listing(dataset_id)
         if lst is None:
             raise MarketplaceError("not found")
-        row_limit = max(0, min(int(rows), 500))
-        preview = []
-        for i, rec in enumerate(records):
-            if i >= row_limit:
-                break
-            if not isinstance(rec, dict):
-                continue
-            raw_text = rec.get("content")
-            if raw_text is None:
-                raw_text = rec.get("text", "")
-            safe_text = _sanitize_preview_value(raw_text)
-            if not isinstance(safe_text, str):
-                safe_text = json.dumps(safe_text, ensure_ascii=False, default=str)
-            safe = _sanitize_preview_value(rec)
-            if not isinstance(safe, dict):
-                continue
-            safe.pop("content", None)
-            safe.pop("text", None)
-            safe["content"] = safe_text[:280] + ("…" if len(safe_text) > 280 else "")
-            preview.append(safe)
-        return preview
+        return sanitize_preview_records(records, rows=rows)
 
     # ------------------------------ ratings ----------------------------- #
     def add_review(self, buyer: str, dataset_id: str, rating: int,

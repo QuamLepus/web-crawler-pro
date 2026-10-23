@@ -66,6 +66,7 @@ async def create_listing(body: DatasetListingCreate, ctx: CtxDep,
             storage_uri=f"s3://wcp-tenants/{ctx['tenant']}/{body.source_job_id}")
     except MarketplaceError as exc:
         raise HTTPException(422, str(exc))
+    mkt.copy_job_preview(body.source_job_id, lst.dataset_id, ctx["tenant"])
     return mkt.to_out(lst)
 
 
@@ -116,13 +117,15 @@ async def dataset_preview(dataset_id: str, ctx: CtxDep, request: Request,
         # Match listing visibility; never disclose preview data for another
         # tenant's draft, suspended or archived dataset.
         raise HTTPException(404, "dataset not found")
-    try:
-        from src.pipeline.storage.json_exporter import load_sample
-        records = load_sample(dataset_id, n=rows)
-    except Exception as exc:  # noqa: BLE001 - unavailable samples must not be fabricated
-        logger.warning("marketplace preview unavailable (%s)", type(exc).__name__)
-        raise HTTPException(503, "dataset preview is unavailable") from exc
-    return mkt.build_preview(dataset_id, records, rows=rows)
+    records = mkt.load_preview_records(dataset_id, rows=rows)
+    if records is None:
+        # Samples are retained only when a completed crawl stored an eligible
+        # bounded preview. Never synthesize rows when there is no real sample.
+        raise HTTPException(503, "dataset preview is unavailable")
+    preview = mkt.build_preview(dataset_id, records, rows=rows)
+    if mkt.get_listing_for_viewer(dataset_id, ctx["tenant"]) is None:
+        raise HTTPException(404, "dataset not found")
+    return preview
 
 
 @router.patch("/datasets/{dataset_id}", response_model=DatasetListingOut)
