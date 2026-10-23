@@ -59,7 +59,9 @@
 {% if error %}<div class="alert warn">{{ error }}</div>{% endif %}
 <section class="card">
   <h2>Saved workflows</h2>
-  {% if workflows %}
+  {% if error %}
+  <div class="empty"><h3>Saved workflows unavailable</h3><p>Refresh after the service recovers to try again.</p></div>
+  {% elif workflows %}
   <div class="stack">
     {% for workflow in workflows %}
     <article class="card subtle">
@@ -265,7 +267,8 @@
     </table>
   </div>
   {% else %}
-    {% if run_filter_active %}<p class="muted">No workflow runs match these filters.</p>
+    {% if history_error %}<p class="muted">Run history is unavailable; refresh after the service recovers.</p>
+    {% elif run_filter_active %}<p class="muted">No workflow runs match these filters.</p>
     {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
   {% endif %}
 </section>
