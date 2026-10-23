@@ -498,6 +498,31 @@ def test_purchase_rechecks_listing_state_before_persisting(client, monkeypatch):
     assert marketplace.r.get(f"mkt:delivery:{generated[0].delivery_id}") is None
 
 
+def test_marketplace_review_reads_support_bounded_offset_pagination(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Review pagination target",
+        description="Published data for paginating public marketplace reviews.",
+        tags=["review"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="6" * 64)
+    for index in range(3):
+        buyer = f"review-buyer-{index}"
+        marketplace.r.sadd(f"mkt:buyers:{listing.dataset_id}", buyer)
+        marketplace.add_review(buyer, listing.dataset_id, 5,
+                               f"Review page item {index}.")
+
+    url = f"/v1/marketplace/datasets/{listing.dataset_id}/reviews"
+    page = client.get(url, headers=_headers(api_key),
+                      params={"limit": 1, "offset": 1})
+    assert page.status_code == 200, page.text
+    assert [review["comment"] for review in page.json()] == [
+        "Review page item 1."]
+    assert client.get(url, headers=_headers(api_key),
+                      params={"offset": 10001}).status_code == 422
+
+
 def test_marketplace_review_uniqueness_backfills_preexisting_reviews(client):
     import json
 

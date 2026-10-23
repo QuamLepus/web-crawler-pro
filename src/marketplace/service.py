@@ -359,8 +359,10 @@ class MarketplaceService:
                 except WatchError:
                     continue
 
-    def list_reviews(self, dataset_id: str, limit: int = 50) -> list[ReviewOut]:
-        rids = self.r.lrange(f"mkt:reviews:{dataset_id}", 0, limit - 1)
+    def list_reviews(self, dataset_id: str, limit: int = 50,
+                     offset: int = 0) -> list[ReviewOut]:
+        rids = self.r.lrange(f"mkt:reviews:{dataset_id}", offset,
+                             offset + limit - 1)
         out = []
         for rid in rids:
             rid_s = rid.decode() if isinstance(rid, bytes) else rid

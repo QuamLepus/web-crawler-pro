@@ -321,7 +321,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   await client.listMyMarketplaceDatasets({ status: 'draft', limit: 5, offset: 10 });
   await client.getMarketplaceDelivery('dlv_0123456789ab');
   await client.listMarketplacePurchases(12, 5);
-  await client.listMarketplaceReviews('dataset:1', 12);
+  await client.listMarketplaceReviews('dataset:1', 12, 4);
   assert.deepEqual(calls, [
     { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3', method: 'GET' },
@@ -330,7 +330,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
     { url: 'http://localhost:8000/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/purchases?limit=12&offset=5', method: 'GET' },
-    { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews?limit=12&offset=4', method: 'GET' },
   ]);
 });
 

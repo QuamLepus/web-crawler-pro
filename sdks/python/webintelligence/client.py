@@ -257,11 +257,12 @@ class Client:
         return self._request("GET", "marketplace/purchases", params={
             "limit": limit, "offset": offset})
 
-    def list_marketplace_reviews(self, dataset_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
-        """Read public reviews for a visible dataset; buyer tenant IDs are omitted."""
+    def list_marketplace_reviews(self, dataset_id: str, *, limit: int = 50,
+                                 offset: int = 0) -> list[dict[str, Any]]:
+        """Read a page of public reviews; buyer tenant IDs are omitted."""
         return self._request("GET",
             f"marketplace/datasets/{quote(dataset_id, safe='')}/reviews",
-            params={"limit": limit})
+            params={"limit": limit, "offset": offset})
 
     def list_marketplace_bounties(self, *, limit: int = 50) -> list[dict[str, Any]]:
         """List open public marketplace bounties; does not submit or award work."""
