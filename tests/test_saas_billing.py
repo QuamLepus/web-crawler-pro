@@ -441,6 +441,33 @@ def test_marketplace_purchase_history_supports_offset_pagination(
                       params={"offset": 10001}).status_code == 422
 
 
+def test_purchase_history_ties_have_stable_page_order(client):
+    import json
+
+    from src.marketplace.service import MarketplaceService, Purchase
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    buyer = "same-time-buyer"
+    created_at = "2026-10-23T00:00:00+00:00"
+    for purchase_id in ("pur_000000000001", "pur_000000000002"):
+        purchase = Purchase(
+            purchase_id=purchase_id, dataset_id="dataset-tie",
+            buyer_tenant=buyer, seller_tenant="seller",
+            price_usd_cents=0, platform_fee_cents=0,
+            created_at=created_at)
+        marketplace.r.hset(
+            f"mkt:purchase:{purchase_id}", "data", json.dumps(purchase.__dict__))
+        marketplace.r.sadd(f"mkt:purchase-index:{buyer}", purchase_id)
+
+    expected = ["pur_000000000002", "pur_000000000001"]
+    first_read = marketplace.list_purchases(buyer, limit=2)
+    second_read = marketplace.list_purchases(buyer, limit=2)
+    assert [purchase.purchase_id for purchase in first_read] == expected
+    assert [purchase.purchase_id for purchase in second_read] == expected
+    assert [purchase.purchase_id for purchase in
+            marketplace.list_purchases(buyer, limit=1, offset=1)] == [expected[1]]
+
+
 def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
         client, api_key, monkeypatch):
     from src.marketplace.service import MarketplaceService
