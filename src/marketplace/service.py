@@ -392,29 +392,45 @@ class MarketplaceService:
 
     # ------------------------------ purchases --------------------------- #
     def purchase(self, buyer: str, dataset_id: str) -> tuple[Purchase, DeliveryManifest]:
-        lst = self.get_listing(dataset_id)
-        if lst is None:
-            raise MarketplaceError("dataset not found")
-        if lst.status != "published":
-            raise MarketplaceError("dataset not available")
-        if lst.seller_tenant == buyer:
-            raise MarketplaceError("cannot purchase your own dataset")
-        if lst.price_usd_cents > 0:
-            raise MarketplaceError("paid marketplace settlement is not configured")
-        fee = (lst.price_usd_cents * self.FEE_BPS) // 10_000
-        pur = Purchase(purchase_id=f"pur_{uuid.uuid4().hex[:12]}",
-                       dataset_id=dataset_id, buyer_tenant=buyer,
-                       seller_tenant=lst.seller_tenant,
-                       price_usd_cents=lst.price_usd_cents, platform_fee_cents=fee)
-        manifest = self.issue_delivery(buyer, lst)
-        pipe = self.r.pipeline()
-        pipe.hset(f"mkt:purchase:{pur.purchase_id}", mapping={"data": json.dumps(asdict(pur))})
-        pipe.sadd(f"mkt:purchase-index:{buyer}", pur.purchase_id)
-        pipe.sadd(f"mkt:buyers:{dataset_id}", buyer)
-        pipe.execute()
-        logger.info("purchase %s: %s bought %s (%d cents, fee %d)",
-                    pur.purchase_id, buyer, dataset_id, lst.price_usd_cents, fee)
-        return pur, manifest
+        listing_key = f"mkt:listing:{dataset_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(listing_key)
+                    raw_listing = pipe.hget(listing_key, "data")
+                    if not raw_listing:
+                        raise MarketplaceError("dataset not found")
+                    listing = Listing(**json.loads(raw_listing))
+                    if listing.status != "published":
+                        raise MarketplaceError("dataset not available")
+                    if listing.seller_tenant == buyer:
+                        raise MarketplaceError("cannot purchase your own dataset")
+                    if listing.price_usd_cents > 0:
+                        raise MarketplaceError(
+                            "paid marketplace settlement is not configured")
+                    fee = (listing.price_usd_cents * self.FEE_BPS) // 10_000
+                    purchase = Purchase(
+                        purchase_id=f"pur_{uuid.uuid4().hex[:12]}",
+                        dataset_id=dataset_id, buyer_tenant=buyer,
+                        seller_tenant=listing.seller_tenant,
+                        price_usd_cents=listing.price_usd_cents,
+                        platform_fee_cents=fee)
+                    manifest = self.issue_delivery(buyer, listing, persist=False)
+                    pipe.multi()
+                    pipe.hset(f"mkt:purchase:{purchase.purchase_id}",
+                              mapping={"data": json.dumps(asdict(purchase))})
+                    pipe.sadd(f"mkt:purchase-index:{buyer}", purchase.purchase_id)
+                    pipe.sadd(f"mkt:buyers:{dataset_id}", buyer)
+                    pipe.setex(f"mkt:delivery:{manifest.delivery_id}",
+                               DELIVERY_TTL_DAYS * 86400,
+                               json.dumps(manifest.model_dump(mode="json")))
+                    pipe.execute()
+                    logger.info("purchase %s: %s bought %s (%d cents, fee %d)",
+                                purchase.purchase_id, buyer, dataset_id,
+                                listing.price_usd_cents, fee)
+                    return purchase, manifest
+                except WatchError:
+                    continue
 
     def list_purchases(self, buyer: str, limit: int = 50) -> list[Purchase]:
         """Return most recent purchases indexed to this buyer tenant only."""
@@ -431,7 +447,8 @@ class MarketplaceService:
         return out[:limit]
 
     # --------------------- signed secure delivery ----------------------- #
-    def issue_delivery(self, buyer: str, lst: Listing) -> DeliveryManifest:
+    def issue_delivery(self, buyer: str, lst: Listing, *,
+                       persist: bool = True) -> DeliveryManifest:
         now = utcnow()
         m = DeliveryManifest(
             delivery_id=f"dlv_{uuid.uuid4().hex[:12]}",
@@ -442,8 +459,10 @@ class MarketplaceService:
             expires_at=now + timedelta(days=DELIVERY_TTL_DAYS),
             signature="")
         m.signature = self._sign(m)
-        self.r.setex(f"mkt:delivery:{m.delivery_id}", DELIVERY_TTL_DAYS * 86400,
-                     json.dumps(m.model_dump(mode="json")))
+        if persist:
+            self.r.setex(f"mkt:delivery:{m.delivery_id}",
+                         DELIVERY_TTL_DAYS * 86400,
+                         json.dumps(m.model_dump(mode="json")))
         return m
 
     @staticmethod
