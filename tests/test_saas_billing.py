@@ -660,6 +660,42 @@ def test_concurrent_bounty_awards_assign_only_one_submission(client):
     }
 
 
+def test_concurrent_listing_edits_preserve_fields_and_tag_indexes(client):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Original inventory", description="A published dataset for edit races.",
+        tags=["original"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="f" * 64)
+    start = Barrier(2)
+
+    def update_title():
+        start.wait()
+        return marketplace.update_listing(
+            listing.dataset_id, "seller", title="Updated inventory")
+
+    def update_tags():
+        start.wait()
+        return marketplace.update_listing(
+            listing.dataset_id, "seller", tags=["revised"])
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(update_title), executor.submit(update_tags)]
+        for future in futures:
+            future.result()
+
+    updated = marketplace.get_listing(listing.dataset_id)
+    assert updated.title == "Updated inventory"
+    assert updated.tags == ["revised"]
+    for tag in ("original", "revised"):
+        indexed = marketplace.r.sismember(f"mkt:tag:{tag}", listing.dataset_id)
+        assert bool(indexed) is (tag in updated.tags)
+
+
 def test_bounty_submission_errors_use_not_found_and_conflict_statuses(client, api_key):
     from src.marketplace.service import MarketplaceService
 
