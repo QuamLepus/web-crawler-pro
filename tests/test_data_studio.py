@@ -127,6 +127,18 @@ def test_full_corpus_analytics_uses_safe_filters_and_paginated_aggregates(tmp_pa
         "group_by": "host", "metric": "avg_authority", "limit": 20, "offset": 140})
     assert last_page.status_code == 200
     assert len(last_page.json()["rows"]) == 10
+    beyond_last_page = client.get("/api/v1/studio/analytics", headers=headers, params={
+        "group_by": "host", "limit": 20, "offset": 5000})
+    assert beyond_last_page.status_code == 200
+    assert beyond_last_page.json()["matched_documents"] == 150
+    assert beyond_last_page.json()["group_count"] == 150
+    assert beyond_last_page.json()["rows"] == []
+    no_matches = client.get("/api/v1/studio/analytics", headers=headers, params={
+        "group_by": "host", "source": "missing"})
+    assert no_matches.status_code == 200
+    assert no_matches.json()["matched_documents"] == 0
+    assert no_matches.json()["group_count"] == 0
+    assert no_matches.json()["rows"] == []
     filtered = client.get("/api/v1/studio/analytics", headers=headers, params={
         "group_by": "host", "source": "wiki", "lang": "en", "limit": 100})
     assert filtered.status_code == 200
