@@ -106,7 +106,8 @@ async def get_dataset(dataset_id: str, ctx: CtxDep, request: Request):
     return mkt.to_out(lst)
 
 
-@router.get("/datasets/{dataset_id}/preview", summary="Sample rows (PII-safe)")
+@router.get("/datasets/{dataset_id}/preview",
+            summary="Sample rows with common identifiers redacted")
 async def dataset_preview(dataset_id: str, ctx: CtxDep, request: Request,
                           rows: int = Query(50, ge=10, le=500)) -> list[dict]:
     mkt = _mkt(request)
