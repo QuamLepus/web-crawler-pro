@@ -474,10 +474,11 @@ class MarketplaceService:
                           dataset_id: str) -> dict:
         bounty_key = f"mkt:bounty:{bounty_id}"
         submissions_key = f"{bounty_key}:submissions"
+        listing_key = f"mkt:listing:{dataset_id}"
         with self.r.pipeline() as pipe:
             while True:
                 try:
-                    pipe.watch(bounty_key, submissions_key)
+                    pipe.watch(bounty_key, submissions_key, listing_key)
                     raw = pipe.hget(bounty_key, "data")
                     if not raw:
                         raise MarketplaceError("bounty not found")
@@ -514,10 +515,11 @@ class MarketplaceService:
     def award_bounty(self, poster: str, bounty_id: str, dataset_id: str) -> dict:
         bounty_key = f"mkt:bounty:{bounty_id}"
         submissions_key = f"{bounty_key}:submissions"
+        listing_key = f"mkt:listing:{dataset_id}"
         with self.r.pipeline() as pipe:
             while True:
                 try:
-                    pipe.watch(bounty_key, submissions_key)
+                    pipe.watch(bounty_key, submissions_key, listing_key)
                     raw = pipe.hget(bounty_key, "data")
                     if not raw:
                         raise MarketplaceError("bounty not found")
