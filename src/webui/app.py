@@ -1134,6 +1134,10 @@ async def workflow_edit(request: Request, workflow_id: str,
         steps, error = _parse_workflow_steps(steps_json)
         if error:
             return _redirect("/app/workflows", error, "warn")
+        form = await request.form()
+        if form.get("dependency_editor") == "1":
+            for index, step in enumerate(steps):
+                step["depends_on"] = form.getlist(f"depends_on_{index}")
         changes["steps"] = steps
     if not changes:
         return _redirect("/app/workflows", "Enter a name or step JSON to update.", "warn")

@@ -997,6 +997,45 @@ def test_workflow_console_creates_and_edits_dependency_graphs(signed_in, monkeyp
                         {"name": "Branched v2", "steps": steps})
 
 
+def test_workflow_edit_applies_dependency_checkbox_edges(signed_in, monkeypatch):
+    import json
+
+    from src.webui.client import Api, Result
+
+    calls = []
+
+    async def update(self, workflow_id, **body):
+        calls.append((workflow_id, body))
+        return Result(True, data={"workflow_id": workflow_id})
+
+    monkeypatch.setattr(Api, "workflow_update", update)
+    steps = [
+        {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+        {"step_id": "branch", "depends_on": ["seed"],
+         "url": "https://branch.example"},
+        {"step_id": "summary", "depends_on": ["branch"],
+         "url": "https://summary.example"},
+    ]
+    response = signed_in.post(
+        "/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/edit",
+        data={
+            "name": "Branched",
+            "steps_json": json.dumps(steps),
+            "dependency_editor": "1",
+            "depends_on_2": ["seed", "branch"],
+        }, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert calls == [("workflow_aaaaaaaaaaaaaaaaaaaa", {
+        "name": "Branched", "steps": [
+            {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+            {"step_id": "branch", "depends_on": [],
+             "url": "https://branch.example"},
+            {"step_id": "summary", "depends_on": ["seed", "branch"],
+             "url": "https://summary.example"},
+        ]})]
+
+
 def test_workflow_dag_preview_orders_nodes_to_reduce_crossings():
     from src.webui.app import _workflow_dag_preview
 
@@ -1066,6 +1105,9 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert "dependency DAG" in page.text
     assert "depends on seed" in page.text
     assert '"depends_on": [' in page.text
+    assert "Edit step dependencies without changing JSON" in page.text
+    assert 'name="depends_on_3" value="news" checked' in page.text
+    assert 'name="depends_on_3" value="research" checked' in page.text
     assert 'data-viz="workflow-dag"' in page.text
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
