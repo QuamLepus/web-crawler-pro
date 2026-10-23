@@ -1140,6 +1140,8 @@ def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
         ["https://example.org/resource?access_token=private"],
         ["https://example.org/resource?access_token"],
         ["https://example.org/resource?client_secret=private"],
+        ["https://example.org/resource?clientSecret=private"],
+        ["https://example.org/resource?accessToken=private"],
         ["https://example.org/resource?client.secret=private"],
         ["https://example.org/resource?access_token%5B0%5D=private"],
         ["https://example.org/resource?filter%5Btoken%5D=private"],
