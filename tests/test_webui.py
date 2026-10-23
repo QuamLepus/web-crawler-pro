@@ -1190,20 +1190,20 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
 
     first = signed_in.get("/app/workflows")
     assert first.status_code == 200
-    assert "41 runs · page 1 of 3" in first.text
+    assert "Showing runs 1–20 of 41 · page 1 of 3" in first.text
     assert "/app/workflows?run_page=2" in first.text
     assert "Older runs" in first.text
 
     second = signed_in.get("/app/workflows", params={"run_page": 2})
     assert second.status_code == 200
     assert "Historical batch 2" in second.text
-    assert "41 runs · page 2 of 3" in second.text
+    assert "Showing runs 21–40 of 41 · page 2 of 3" in second.text
     assert "/app/workflows?run_page=1" in second.text
     assert "/app/workflows?run_page=3" in second.text
 
     beyond_history = signed_in.get("/app/workflows", params={"run_page": 999})
     assert beyond_history.status_code == 200
-    assert "41 runs · page 3 of 3" in beyond_history.text
+    assert "Showing runs 41–41 of 41 · page 3 of 3" in beyond_history.text
     assert "Historical batch 3" in beyond_history.text
 
     filtered_page = signed_in.get("/app/workflows", params={
@@ -1213,7 +1213,7 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
     assert filtered_page.status_code == 200
     assert 'name="run_q" maxlength="100" value="Alpha"' in filtered_page.text
     assert 'name="run_status" aria-label="Filter runs by status"' in filtered_page.text
-    assert "41 matching runs" in filtered_page.text
+    assert "Showing runs 1–20 of 41 matching · page 1 of 3" in filtered_page.text
     assert "run_q=Alpha&amp;run_status=failed&amp;run_from=2026-05-01&amp;run_to=2026-05-03" \
         in filtered_page.text
     assert calls[-1] == (1, {"q": "Alpha", "status": "failed",
