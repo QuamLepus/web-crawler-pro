@@ -1307,22 +1307,24 @@ async def watch_page(request: Request, watch_id: str = Query("", max_length=64))
         return redirect
     watches_result = await api.watches()
     items = watches_result.get("items", []) if watches_result.ok else []
+    selected_watch_item = next(
+        (watch for watch in items if watch.get("watch_id") == watch_id), None
+    )
+    selected_watch_missing = bool(watch_id and watches_result.ok and not selected_watch_item)
     events = []
     snapshots = []
     events_error = ""
     snapshots_error = ""
-    if watch_id:
+    if watch_id and selected_watch_item:
         event_result = await api.watch_changes(watch_id)
         events = event_result.get("items", []) if event_result.ok else []
         events_error = event_result.error if not event_result.ok else ""
         snapshot_result = await api.watch_snapshots(watch_id)
         snapshots = snapshot_result.get("items", []) if snapshot_result.ok else []
         snapshots_error = snapshot_result.error if not snapshot_result.ok else ""
-    selected_watch_item = next(
-        (watch for watch in items if watch.get("watch_id") == watch_id), None
-    )
     return render(request, "watch.html", page="watch", me=me, watches=items,
                   selected_watch=watch_id, selected_watch_item=selected_watch_item,
+                  selected_watch_missing=selected_watch_missing,
                   events=events, snapshots=snapshots,
                   events_error=events_error, snapshots_error=snapshots_error,
                   error=(watches_result.error if not watches_result.ok else ""),
