@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -490,11 +490,20 @@ class BountyCreate(BaseModel):
             try:
                 parsed = urlsplit(value)
                 port = parsed.port
+                sensitive_keys = {
+                    "access_token", "token", "api_key", "apikey", "key",
+                    "password", "passwd", "secret", "auth", "authorization",
+                    "session", "sessionid", "code", "signature", "sig",
+                    "email", "phone", "ssn",
+                }
+                query_keys = {key.lower().replace("-", "_")
+                              for key, _ in parse_qsl(parsed.query)}
                 valid = (len(value) <= 2048 and not any(char.isspace() for char in value)
                          and parsed.scheme in {"http", "https"}
                          and bool(parsed.hostname)
                          and (port is None or 1 <= port <= 65535)
-                         and parsed.username is None and parsed.password is None)
+                         and parsed.username is None and parsed.password is None
+                         and not parsed.fragment and not (query_keys & sensitive_keys))
             except ValueError:
                 valid = False
             if not valid:
