@@ -341,6 +341,38 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   ]);
 });
 
+test('marketplace bounty submission encodes both IDs and returns the accepted result', async () => {
+  const calls = [];
+  const payload = { bounty_id: 'bty:1', dataset_id: 'dataset:1', submission_recorded: true };
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body });
+    return new Response(JSON.stringify(payload), { status: 202 });
+  } });
+  const result = await client.submitMarketplaceBounty('bty:1', 'dataset:1');
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/marketplace/bounties/bty%3A1/submissions?dataset_id=dataset%3A1',
+    method: 'POST', body: undefined,
+  }]);
+});
+
+test('free marketplace purchase posts an encoded dataset ID', async () => {
+  const calls = [];
+  const payload = { purchase: { purchase_id: 'purchase_1' },
+    delivery: { delivery_id: 'delivery_1', uri: '' },
+    verify: 'check the HMAC signature; dataset bytes are not available for download' };
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body });
+    return new Response(JSON.stringify(payload), { status: 200 });
+  } });
+  const result = await client.purchaseFreeMarketplaceDataset('dataset:1');
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/purchase',
+    method: 'POST', body: undefined,
+  }]);
+});
+
 test('provenance methods store, retrieve, and export tenant records', async () => {
   const calls = [];
   const record = { record_id: 'record:one', source_url: 'https://example.org/data',

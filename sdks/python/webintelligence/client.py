@@ -304,6 +304,16 @@ class Client:
                                        status_code=response.status_code)
         return content
 
+    def purchase_free_marketplace_dataset(self, dataset_id: str) -> dict[str, Any]:
+        """Purchase an available free dataset and return its delivery manifest.
+
+        Paid settlement is not implemented; the API returns 503 for paid
+        listings. The delivery may contain signed metadata without downloadable
+        bytes if the seller did not retain a verified artifact.
+        """
+        return self._request(
+            "POST", f"marketplace/datasets/{quote(dataset_id, safe='')}/purchase")
+
     def list_marketplace_purchases(self, *, limit: int = 50,
                                    offset: int = 0) -> list[dict[str, Any]]:
         """List a page of recent purchases belonging to this tenant."""
@@ -332,6 +342,17 @@ class Client:
         """List a page of open public bounties; does not submit or award work."""
         return self._request("GET", "marketplace/bounties", params={
             "limit": limit, "offset": offset})
+
+    def submit_marketplace_bounty(self, bounty_id: str,
+                                  dataset_id: str) -> dict[str, Any]:
+        """Submit this tenant's published dataset to an open bounty.
+
+        The API rejects closed, expired, or duplicate submissions and datasets
+        not published by this tenant. Submission does not award the bounty.
+        """
+        return self._request(
+            "POST", f"marketplace/bounties/{quote(bounty_id, safe='')}/submissions",
+            params={"dataset_id": dataset_id})
 
     def list_marketplace_bounty_submissions(self, bounty_id: str, *,
                                             limit: int = 50,
