@@ -536,6 +536,9 @@ def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
     invalid_targets = [
         ["javascript:alert(1)"],
         ["https://user:secret@example.org/private"],
+        ["https://example.org/resource?access_token=private"],
+        ["https://example.org/resource?email=person%40example.org"],
+        ["https://example.org/resource#private-fragment"],
         ["https://example.org:70000/invalid-port"],
         ["https://example.org/path with spaces"],
         ["https://example.org/" + "x" * 2048],
@@ -547,11 +550,11 @@ def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
         assert response.status_code == 422, response.text
 
     valid = client.post("/v1/marketplace/bounties", headers=headers, json={
-        **base, "target_urls": [" https://example.org/source ",
-                                "https://example.org/source"],
+        **base, "target_urls": [" https://example.org/source?category=energy ",
+                                "https://example.org/source?category=energy"],
     })
     assert valid.status_code == 201, valid.text
-    assert valid.json()["target_urls"] == ["https://example.org/source"]
+    assert valid.json()["target_urls"] == ["https://example.org/source?category=energy"]
 
 
 def test_bounty_submission_reads_are_poster_scoped_and_paginated(client, api_key):
