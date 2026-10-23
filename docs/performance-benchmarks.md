@@ -72,5 +72,31 @@ DocStore-only numbers, not API or production-capacity results. In particular,
 the 500k p95 uses only five measured iterations and is a rough summary, not a
 tail-latency estimate. The larger run shows sub-second aggregates at half a
 million synthetic rows in this sandbox, but is not enough evidence to promise
-production latency or justify an optimization without workload-specific
-measurements.
+production latency.
+
+### SQLite aggregate query retest (2026-10-23)
+
+A same-sandbox before/after run of the harness motivated and evaluated a query
+change: the aggregate values, matched-document count, and group count now come
+from one grouped CTE rather than separate full-table count/group-count scans.
+The endpoint still scans the matching SQLite rows and remains single-process;
+this is not a claim about production or concurrent workloads. Each value below
+is p50 / p95 milliseconds from 10 iterations at 50k rows and 5 at 500k rows.
+The pre-change and post-change runs used the same Python 3.11.2 and Linux
+6.1.158+ x86_64 / glibc 2.36 sandbox, but timing noise remains possible.
+
+| Documents | Profile | Pre-change p50 / p95 | Post-change p50 / p95 |
+|---:|---|---:|---:|
+| 50,000 | Source document count | 27.193 / 30.180 | 14.596 / 15.368 |
+| 50,000 | Host mean authority | 38.615 / 39.766 | 29.117 / 30.306 |
+| 50,000 | Filtered host mean quality (source=wiki) | 24.828 / 25.292 | 15.922 / 23.971 |
+| 500,000 | Source document count | 343.131 / 366.034 | 186.284 / 189.949 |
+| 500,000 | Host mean authority | 411.713 / 418.245 | 335.557 / 363.511 |
+| 500,000 | Filtered host mean quality (source=wiki) | 277.536 / 290.344 | 165.715 / 173.888 |
+
+The post-change temporary database sizes were unchanged at 23,107,544 / 168,188,664
+bytes; synthetic builds took 0.941 / 15.592 s. The optimization preserves
+aggregate counts even on empty result pages; tests cover offsets beyond the last
+group and filters matching no documents. The small iteration counts and
+synthetic, warm-cache corpus mean these results should guide further measurement,
+not be treated as an SLO or production capacity estimate.

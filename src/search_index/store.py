@@ -292,16 +292,25 @@ class DocStore:
         conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30.0)
         try:
             conn.execute("BEGIN")
-            matched = int(conn.execute(
-                "SELECT COUNT(*) FROM docs" + where, params).fetchone()[0])
-            groups = int(conn.execute(
-                f"SELECT COUNT(*) FROM (SELECT 1 FROM docs{where} GROUP BY {group_expr})",
-                params).fetchone()[0])
             rows = conn.execute(
-                f"SELECT {group_expr} AS label, {metric_expr} AS value "
-                f"FROM docs{where} GROUP BY {group_expr} "
-                "ORDER BY value DESC, label ASC LIMIT ? OFFSET ?",
+                "WITH grouped AS ("
+                f"SELECT {group_expr} AS label, {metric_expr} AS value, "
+                f"COUNT(*) AS group_documents FROM docs{where} GROUP BY {group_expr}"
+                "), metadata AS ("
+                "SELECT COALESCE(SUM(group_documents), 0) AS matched_documents, "
+                "COUNT(*) AS group_count FROM grouped"
+                "), page AS ("
+                "SELECT label, value, 1 AS present FROM grouped "
+                "ORDER BY value DESC, label ASC LIMIT ? OFFSET ?"
+                ") "
+                "SELECT page.label, page.value, metadata.matched_documents, "
+                "metadata.group_count, page.present FROM metadata "
+                "LEFT JOIN page ON 1=1 ORDER BY page.value DESC, page.label ASC",
                 [*params, int(limit), int(offset)]).fetchall()
+            matched = int(rows[0][2]) if rows else 0
+            groups = int(rows[0][3]) if rows else 0
+            rows = [(label, value) for label, value, _matched, _groups, present in rows
+                    if present]
             conn.commit()
         except sqlite3.Error:
             conn.rollback()
