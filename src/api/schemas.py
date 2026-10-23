@@ -135,6 +135,19 @@ class CrawlJobCreate(BaseModel):
     proxy_strategy: ProxyStrategy = ProxyStrategy.auto
     extraction_schema: Optional[dict[str, Any]] = None  # JSON-schema for LLM parser
     webhook_url: Optional[str] = None
+    persist_marketplace_artifact: bool = Field(
+        default=False,
+        description="Persist a bounded private crawl artifact in configured object storage")
+    marketplace_data_rights_confirmed: bool = Field(
+        default=False,
+        description="Attest that this crawl output may be retained; licenses and privacy are not checked")
+
+    @model_validator(mode="after")
+    def _require_artifact_rights_confirmation(self):
+        if self.persist_marketplace_artifact and not self.marketplace_data_rights_confirmed:
+            raise ValueError(
+                "marketplace_data_rights_confirmed is required when persisting an artifact")
+        return self
 
     @field_validator("url")
     @classmethod
@@ -157,6 +170,9 @@ class CrawlJobOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     error: Optional[str] = None
+    artifact_status: Literal[
+        "not_requested", "pending", "available", "disabled", "unavailable", "rejected"
+    ] = "not_requested"
 
 
 class JobListOut(BaseModel):

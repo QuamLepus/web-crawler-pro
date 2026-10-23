@@ -220,3 +220,171 @@ def test_run_crawl_does_not_store_http_error_pages(crawl_env, monkeypatch):
     assert result["items"] == 0
     assert result["failures"] == ["https://example.com/missing: HTTP 404"]
     assert redis.hget("wcp:v1:job:job_http_error", "state") == "failed"
+
+
+def test_marketplace_artifact_jsonl_is_deterministic_and_bounded():
+    import hashlib
+    from src.marketplace.artifacts import ArtifactError, canonical_jsonl
+
+    records = [{"url": "https://b.example", "title": "B"},
+               {"title": "A", "url": "https://a.example"},
+               {"url": "https://a.example", "title": "A second page"}]
+    payload, digest, count = canonical_jsonl(records)
+    reversed_payload, reversed_digest, reversed_count = canonical_jsonl(list(reversed(records)))
+
+    assert payload == reversed_payload
+    assert digest == reversed_digest == hashlib.sha256(payload).hexdigest()
+    assert count == reversed_count == 3
+    assert payload.endswith(b"\n")
+    with pytest.raises(ArtifactError, match="byte limit"):
+        canonical_jsonl(records, max_bytes=len(payload) - 1)
+
+
+def test_marketplace_artifact_store_uploads_and_reads_back_exact_bytes():
+    import hashlib
+    import io
+    from src.marketplace.artifacts import (ArtifactError,
+                                           MinioMarketplaceArtifactStore,
+                                           canonical_jsonl)
+
+    class FakeResponse(io.BytesIO):
+        def release_conn(self):
+            pass
+
+    class FakeMinio:
+        def __init__(self, corrupt=False):
+            self.objects = {}
+            self.corrupt = corrupt
+            self.removed = []
+            self.lifecycle = None
+
+        def bucket_exists(self, bucket):
+            return True
+
+        def get_bucket_lifecycle(self, bucket):
+            return self.lifecycle
+
+        def set_bucket_lifecycle(self, bucket, config):
+            self.lifecycle = config
+
+        def put_object(self, bucket, key, stream, length, content_type):
+            self.objects[(bucket, key)] = stream.read(length)
+
+        def get_object(self, bucket, key):
+            data = self.objects[(bucket, key)]
+            return FakeResponse(data + b"corrupt" if self.corrupt else data)
+
+        def remove_object(self, bucket, key):
+            self.removed.append((bucket, key))
+            self.objects.pop((bucket, key), None)
+
+    records = [{"url": "https://example.com", "content": "sample"}]
+    payload, digest, count = canonical_jsonl(records)
+    fake = FakeMinio()
+    store = MinioMarketplaceArtifactStore(client=fake, bucket="test-artifacts")
+
+    result = store.put_verified("tenant-secret-id", "job_0123456789abcdef", payload, digest)
+
+    assert result.sha256 == hashlib.sha256(payload).hexdigest()
+    assert result.size_bytes == len(payload)
+    assert result.record_count == count == 1
+    assert result.uri.startswith("s3://test-artifacts/marketplace/tenants/")
+    assert "tenant-secret-id" not in result.object_key
+    assert fake.objects[("test-artifacts", result.object_key)] == payload
+    assert fake.lifecycle.rules[0].expiration.days == 30
+    assert fake.lifecycle.rules[0].rule_filter.prefix == "marketplace/tenants/"
+
+    corrupt_store = MinioMarketplaceArtifactStore(
+        client=FakeMinio(corrupt=True), bucket="test-artifacts")
+    with pytest.raises(ArtifactError, match="digest verification"):
+        corrupt_store.put_verified("tenant-secret-id", "job_0123456789abcdef",
+                                   payload, digest)
+    assert corrupt_store.client.removed
+
+
+def test_worker_persists_marketplace_artifact_only_with_explicit_rights(
+        crawl_env, monkeypatch):
+    from src.marketplace.artifacts import ArtifactMetadata
+
+    wt, redis = crawl_env
+    monkeypatch.setenv("MARKETPLACE_ARTIFACT_STORAGE_ENABLED", "true")
+    job_id = "job_artifact"
+    redis.hset(f"wcp:v1:job:{job_id}", mapping={"tenant": "tenant-private"})
+    records = [{"url": "https://example.com", "content": "crawl data"}]
+
+    class FakeStore:
+        called = False
+
+        def put_verified(self, tenant, received_job_id, payload, digest):
+            import hashlib
+            self.called = True
+            assert tenant == "tenant-private"
+            assert received_job_id == job_id
+            assert hashlib.sha256(payload).hexdigest() == digest
+            return ArtifactMetadata(
+                uri="s3://bucket/marketplace/tenants/hash/jobs/job_artifact/dataset.jsonl",
+                object_key="marketplace/tenants/hash/jobs/job_artifact/dataset.jsonl",
+                sha256=digest, size_bytes=len(payload), record_count=1,
+                expires_at="2026-11-22T00:00:00+00:00")
+
+    store = FakeStore()
+    status = wt._persist_marketplace_artifact(
+        redis, job_id, "tenant-private", records, rights_confirmed=True, store=store)
+
+    assert status == "available"
+    assert store.called is True
+    assert redis.hget(f"wcp:v1:job:{job_id}", "artifact_status") == "available"
+    assert redis.hget(f"wcp:v1:job:{job_id}", "artifact_sha256")
+    assert redis.hget(f"wcp:v1:job:{job_id}", "artifact_uri").startswith("s3://bucket/")
+
+    foreign_job_id = "job_foreign_artifact"
+    redis.hset(f"wcp:v1:job:{foreign_job_id}", mapping={"tenant": "other-tenant"})
+    store.called = False
+    rejected = wt._persist_marketplace_artifact(
+        redis, foreign_job_id, "tenant-private", records,
+        rights_confirmed=True, store=store)
+    assert rejected == "rejected"
+    assert store.called is False
+
+
+def test_crawl_request_requires_rights_confirmation_for_artifact_persistence():
+    from pydantic import ValidationError
+    from src.api.schemas import CrawlJobCreate
+
+    with pytest.raises(ValidationError, match="marketplace_data_rights_confirmed"):
+        CrawlJobCreate(url="https://example.com", persist_marketplace_artifact=True)
+
+    request = CrawlJobCreate(
+        url="https://example.com", persist_marketplace_artifact=True,
+        marketplace_data_rights_confirmed=True)
+    assert request.persist_marketplace_artifact is True
+
+
+def test_run_crawl_never_persists_full_artifact_without_explicit_opt_in(
+        crawl_env, monkeypatch):
+    wt, redis = crawl_env
+    monkeypatch.setenv("MARKETPLACE_ARTIFACT_STORAGE_ENABLED", "true")
+    monkeypatch.setattr(wt, "_store_item", lambda item: item)
+    persisted = []
+    monkeypatch.setattr(
+        wt, "_persist_marketplace_artifact",
+        lambda *args, **kwargs: persisted.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        wt, "_update_job",
+        lambda client, job_id, fields: client.hset(f"wcp:v1:job:{job_id}", mapping={
+            key: str(value) for key, value in fields.items()
+        }),
+    )
+    job_id = "job_artifact_optout"
+    redis.hset(f"wcp:v1:job:{job_id}", mapping={"tenant": "tenant-private",
+                                                "state": "queued"})
+
+    result = wt.run_crawl(
+        {"url": "https://example.com", "max_pages": 1,
+         "tenant": "tenant-private", "job_id": job_id, "obey_robots": False},
+        redis_client=redis, fetcher=lambda _url: ("<html><body>Content</body></html>", 200))
+
+    assert result["state"] == "completed"
+    assert persisted == []
+    assert redis.hget(f"wcp:v1:job:{job_id}", "artifact_status") == "not_requested"

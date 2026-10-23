@@ -257,3 +257,34 @@ def test_failed_crawl_job_cannot_be_cancelled(client):
     assert response.status_code == 409
     stored_state = redis_client.hget(job_key, "state")
     assert stored_state in (b"failed", "failed")
+
+
+def test_crawl_artifact_opt_in_requires_rights_confirmation_and_reaches_worker(
+        client, monkeypatch):
+    token = signup(client, email="artifact@example.com", org="Artifact Org")
+    api_key = make_key(client, token["access_token"])
+    headers = {"X-API-Key": api_key}
+    denied = client.post("/v1/jobs/crawl", headers=headers, json={
+        "url": "https://example.com", "max_pages": 1,
+        "persist_marketplace_artifact": True,
+    })
+    assert denied.status_code == 422
+    assert "marketplace_data_rights_confirmed" in denied.text
+
+    submitted = []
+    monkeypatch.setattr(client.app.state.services.scheduler, "submit",
+                        lambda spec: submitted.append(spec))
+    response = client.post("/v1/jobs/crawl", headers=headers, json={
+        "url": "https://example.com", "max_pages": 1,
+        "persist_marketplace_artifact": True,
+        "marketplace_data_rights_confirmed": True,
+    })
+
+    assert response.status_code == 202, response.text
+    assert response.json()["artifact_status"] == "pending"
+    assert len(submitted) == 1
+    assert submitted[0].payload["persist_marketplace_artifact"] is True
+    assert submitted[0].payload["marketplace_data_rights_confirmed"] is True
+    status = client.get(f"/v1/jobs/{response.json()['job_id']}", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["artifact_status"] == "pending"

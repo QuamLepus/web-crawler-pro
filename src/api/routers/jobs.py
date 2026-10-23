@@ -81,6 +81,8 @@ async def submit_crawl(body: CrawlJobCreate, request: Request, ctx: CtxDep,
         "job_id": job_id, "tenant": tenant, "state": JobState.queued.value,
         "url": body.url, "max_pages": body.max_pages, "pages_done": 0,
         "robots_blocked": 0, "items_collected": 0, "tokens_generated": 0,
+        "artifact_status": ("pending" if body.persist_marketplace_artifact
+                            else "not_requested"),
         "created_at": now.isoformat(), "updated_at": now.isoformat(),
         "error": "",
         "options": body.model_dump(mode="json"),
@@ -99,6 +101,8 @@ async def submit_crawl(body: CrawlJobCreate, request: Request, ctx: CtxDep,
         payload={"url": body.url, "max_pages": body.max_pages,
                  "obey_robots": body.obey_robots, "stealth": body.stealth,
                  "tenant": tenant, "job_id": job_id,
+                 "persist_marketplace_artifact": body.persist_marketplace_artifact,
+                 "marketplace_data_rights_confirmed": body.marketplace_data_rights_confirmed,
                  "options": record["options"]},
         tenant=tenant,
         priority=_PRIORITY_MAP.get(body.priority, JobPriority.NORMAL),
@@ -138,6 +142,7 @@ def _to_out(record: dict) -> CrawlJobOut:
         created_at=datetime.fromisoformat(record["created_at"]),
         updated_at=datetime.fromisoformat(record["updated_at"]),
         error=record.get("error") or None,
+        artifact_status=record.get("artifact_status", "not_requested"),
     )
 
 
