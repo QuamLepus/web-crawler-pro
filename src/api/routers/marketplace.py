@@ -231,6 +231,16 @@ async def create_bounty(body: BountyCreate, ctx: CtxDep,
                      target_urls=b.target_urls)
 
 
+@router.get("/bounties/{bounty_id}", response_model=BountyOut,
+            summary="Read an open bounty or one owned by the authenticated poster")
+async def get_bounty(bounty_id: str, ctx: CtxDep,
+                     request: Request) -> BountyOut:
+    bounty = _mkt(request).get_bounty_for_viewer(bounty_id, ctx["tenant"])
+    if bounty is None:
+        raise HTTPException(404, "bounty not found")
+    return bounty
+
+
 @router.get("/bounties", response_model=list[BountyOut])
 async def open_bounties(ctx: CtxDep, request: Request,
                         limit: int = Query(50, ge=1, le=200),

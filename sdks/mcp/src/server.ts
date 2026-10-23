@@ -362,6 +362,13 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
+  server.tool("wio_marketplace_bounty_get", "Read an open bounty or a closed bounty owned by the authenticated poster; this tool does not submit or award work.", {
+    bounty_id: z.string().regex(/^bty_[a-f0-9]{12}$/),
+  }, async ({ bounty_id }) => {
+    try { return result(await client.getMarketplaceBounty(bounty_id)); }
+    catch (error) { return failure(error); }
+  });
+
   server.tool("wio_marketplace_bounties_list", "List a page of open public marketplace bounties; this read-only tool does not submit or award work.", {
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).max(10000).optional(),
