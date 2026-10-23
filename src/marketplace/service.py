@@ -285,50 +285,79 @@ class MarketplaceService:
     # ------------------------------ ratings ----------------------------- #
     def add_review(self, buyer: str, dataset_id: str, rating: int,
                    comment: str) -> ReviewOut:
-        lst = self.get_listing(dataset_id)
-        if lst is None or lst.status != "published":
-            raise MarketplaceError("dataset not found")
-        if lst.seller_tenant == buyer:
-            raise MarketplaceError("sellers cannot review their own dataset")
-        buyers = {x.decode() if isinstance(x, bytes) else x
-                  for x in self.r.smembers(f"mkt:buyers:{dataset_id}")}
-        if buyer not in buyers:
-            raise MarketplaceError("purchase required to review dataset")
-
+        listing_key = f"mkt:listing:{dataset_id}"
+        buyers_key = f"mkt:buyers:{dataset_id}"
         reviewer_key = f"mkt:reviewer:{dataset_id}:{buyer}"
-        if self.r.exists(reviewer_key):
-            raise MarketplaceError("buyer has already reviewed this dataset")
-        # Pre-existing reviews predate the reviewer lock. Backfill the marker
-        # when encountered so the one-review rule also holds across upgrades.
-        for raw_review_id in self.r.lrange(f"mkt:reviews:{dataset_id}", 0, -1):
-            existing_id = (raw_review_id.decode()
-                           if isinstance(raw_review_id, bytes) else raw_review_id)
-            existing_raw = self.r.hget(f"mkt:review:{existing_id}", "data")
-            if not existing_raw:
-                continue
-            existing = json.loads(existing_raw)
-            if existing.get("buyer_tenant") == buyer:
-                self.r.set(reviewer_key, existing_id, nx=True)
-                raise MarketplaceError("buyer has already reviewed this dataset")
+        reviews_key = f"mkt:reviews:{dataset_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(listing_key, buyers_key, reviewer_key)
+                    raw_listing = pipe.hget(listing_key, "data")
+                    if not raw_listing:
+                        raise MarketplaceError("dataset not found")
+                    listing = Listing(**json.loads(raw_listing))
+                    if listing.status != "published":
+                        raise MarketplaceError("dataset not found")
+                    if listing.seller_tenant == buyer:
+                        raise MarketplaceError(
+                            "sellers cannot review their own dataset")
+                    if not pipe.sismember(buyers_key, buyer):
+                        raise MarketplaceError("purchase required to review dataset")
 
-        rid = uuid.uuid4().hex[:12]
-        if not self.r.set(reviewer_key, rid, nx=True):
-            raise MarketplaceError("buyer has already reviewed this dataset")
-        rev = {"review_id": rid, "dataset_id": dataset_id, "buyer_tenant": buyer,
-               "rating": int(rating), "comment": comment,
-               "verified_purchase": True,
-               "created_at": utcnow().isoformat()}
-        try:
-            pipe = self.r.pipeline()
-            pipe.hset(f"mkt:review:{rid}", mapping={"data": json.dumps(rev)})
-            pipe.rpush(f"mkt:reviews:{dataset_id}", rid)
-            pipe.hincrby(f"mkt:rating:{dataset_id}", "sum", int(rating))
-            pipe.hincrby(f"mkt:rating:{dataset_id}", "count", 1)
-            pipe.execute()
-        except Exception:
-            self.r.delete(reviewer_key)
-            raise
-        return ReviewOut(**rev)
+                    existing_marker = pipe.get(reviewer_key)
+                    if existing_marker:
+                        existing_id = (existing_marker.decode()
+                                       if isinstance(existing_marker, bytes)
+                                       else existing_marker)
+                        if pipe.hget(f"mkt:review:{existing_id}", "data"):
+                            raise MarketplaceError(
+                                "buyer has already reviewed this dataset")
+                        # Recover a lock left by older non-atomic writes which
+                        # stopped after claiming the marker but before saving.
+                        pipe.multi()
+                        pipe.delete(reviewer_key)
+                        pipe.execute()
+                        continue
+
+                    # Pre-existing reviews predate reviewer locks. Backfill the
+                    # marker transactionally to preserve one-review semantics.
+                    existing_id = None
+                    for raw_review_id in self.r.lrange(reviews_key, 0, -1):
+                        review_id = (raw_review_id.decode()
+                                     if isinstance(raw_review_id, bytes)
+                                     else raw_review_id)
+                        existing_raw = self.r.hget(
+                            f"mkt:review:{review_id}", "data")
+                        if existing_raw and json.loads(existing_raw).get(
+                                "buyer_tenant") == buyer:
+                            existing_id = review_id
+                            break
+                    if existing_id:
+                        pipe.multi()
+                        pipe.set(reviewer_key, existing_id)
+                        pipe.execute()
+                        raise MarketplaceError(
+                            "buyer has already reviewed this dataset")
+
+                    review_id = uuid.uuid4().hex[:12]
+                    review = {
+                        "review_id": review_id, "dataset_id": dataset_id,
+                        "buyer_tenant": buyer, "rating": int(rating),
+                        "comment": comment, "verified_purchase": True,
+                        "created_at": utcnow().isoformat(),
+                    }
+                    pipe.multi()
+                    pipe.set(reviewer_key, review_id)
+                    pipe.hset(f"mkt:review:{review_id}",
+                              mapping={"data": json.dumps(review)})
+                    pipe.rpush(reviews_key, review_id)
+                    pipe.hincrby(f"mkt:rating:{dataset_id}", "sum", int(rating))
+                    pipe.hincrby(f"mkt:rating:{dataset_id}", "count", 1)
+                    pipe.execute()
+                    return ReviewOut(**review)
+                except WatchError:
+                    continue
 
     def list_reviews(self, dataset_id: str, limit: int = 50) -> list[ReviewOut]:
         rids = self.r.lrange(f"mkt:reviews:{dataset_id}", 0, limit - 1)

@@ -466,6 +466,57 @@ def test_marketplace_review_uniqueness_backfills_preexisting_reviews(client):
     assert marketplace.r.llen(f"mkt:reviews:{listing.dataset_id}") == 1
 
 
+def test_concurrent_review_submissions_record_one_review(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Concurrent review target",
+        description="A public listing used to verify atomic review persistence.",
+        tags=["review"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="9" * 64)
+    buyer = "concurrent-buyer"
+    marketplace.r.sadd(f"mkt:buyers:{listing.dataset_id}", buyer)
+
+    def submit(comment):
+        try:
+            return marketplace.add_review(buyer, listing.dataset_id, 5, comment)
+        except MarketplaceError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(submit, ["First review.", "Second review."]))
+
+    assert sum(not isinstance(result, MarketplaceError) for result in results) == 1
+    assert sum(isinstance(result, MarketplaceError) for result in results) == 1
+    assert marketplace.rating_summary(listing.dataset_id) == (5.0, 1)
+    assert len(marketplace.list_reviews(listing.dataset_id)) == 1
+
+
+def test_stale_review_marker_is_recovered_atomically(client):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Stale review marker target",
+        description="A public listing used to verify recovery of stale review locks.",
+        tags=["review"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="8" * 64)
+    buyer = "stale-marker-buyer"
+    reviewer_key = f"mkt:reviewer:{listing.dataset_id}:{buyer}"
+    marketplace.r.sadd(f"mkt:buyers:{listing.dataset_id}", buyer)
+    marketplace.r.set(reviewer_key, "orphaned-review-id")
+
+    review = marketplace.add_review(
+        buyer, listing.dataset_id, 4, "Recovered after interrupted write.")
+
+    assert marketplace.r.get(reviewer_key) in (review.review_id.encode(),
+                                               review.review_id)
+    assert marketplace.rating_summary(listing.dataset_id) == (4.0, 1)
+
+
 def test_marketplace_bounty_submissions_require_owned_published_unique_listings(client):
     from src.marketplace.service import MarketplaceError, MarketplaceService
 
