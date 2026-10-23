@@ -286,7 +286,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining",
-                        "X-Process-Time-Ms", "Retry-After"],
+                        "X-Process-Time-Ms", "Retry-After", "X-Content-SHA256"],
     )
     if enable_rate_limit:
         try:

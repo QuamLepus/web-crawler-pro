@@ -264,6 +264,46 @@ class Client:
         """Retrieve a non-expired delivery manifest belonging to this tenant."""
         return self._request("GET", f"marketplace/deliveries/{quote(delivery_id, safe='')}")
 
+    def download_marketplace_delivery(self, delivery_id: str, *,
+                                      expected_sha256: str | None = None) -> bytes:
+        """Download bytes from a buyer-owned delivery and verify available digests.
+
+        Pass the manifest's ``sha256`` as ``expected_sha256`` to verify the
+        payload against the signed metadata in addition to the response digest.
+        The API may return 503 when the purchase has no retained artifact.
+        """
+        import hashlib
+        import re
+
+        if (expected_sha256 is not None and
+                not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256)):
+            raise ValueError("expected_sha256 must be a 64-character hexadecimal digest")
+        path = f"marketplace/deliveries/{quote(delivery_id, safe='')}/download"
+        try:
+            response = self._http.get(path, headers={"Accept": "application/x-ndjson"})
+        except httpx.HTTPError as exc:
+            raise WebIntelligenceError(
+                f"API request failed: {type(exc).__name__}") from exc
+        if response.is_error:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"detail": response.text[:500]}
+            detail = (payload.get("detail", response.reason_phrase)
+                      if isinstance(payload, dict) else response.reason_phrase)
+            raise WebIntelligenceError(
+                str(detail), status_code=response.status_code, response=payload)
+        content = response.content
+        digest = hashlib.sha256(content).hexdigest()
+        response_digest = response.headers.get("X-Content-SHA256")
+        if response_digest is not None and digest != response_digest.lower():
+            raise WebIntelligenceError("download response failed SHA-256 verification",
+                                       status_code=response.status_code)
+        if expected_sha256 is not None and digest != expected_sha256.lower():
+            raise WebIntelligenceError("download does not match expected SHA-256",
+                                       status_code=response.status_code)
+        return content
+
     def list_marketplace_purchases(self, *, limit: int = 50,
                                    offset: int = 0) -> list[dict[str, Any]]:
         """List a page of recent purchases belonging to this tenant."""
