@@ -437,6 +437,35 @@ def test_marketplace_reviews_omit_buyer_identity_and_hide_unpublished_listings(
     assert hidden_post.json()["detail"] == "dataset not found"
 
 
+def test_purchase_rechecks_listing_state_before_persisting(client, monkeypatch):
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    monkeypatch.setenv("MARKETPLACE_SIGNING_SECRET",
+                       "marketplace-test-signing-secret-0002")
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Purchase race target",
+        description="A public dataset used to test an atomic purchase transition.",
+        tags=["purchase"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="7" * 64)
+    original_issue_delivery = marketplace.issue_delivery
+    generated = []
+
+    def unpublish_after_manifest(buyer, dataset, *, persist=True):
+        manifest = original_issue_delivery(buyer, dataset, persist=persist)
+        generated.append(manifest)
+        marketplace.update_listing(listing.dataset_id, "seller", status="draft")
+        return manifest
+
+    monkeypatch.setattr(marketplace, "issue_delivery", unpublish_after_manifest)
+    with pytest.raises(MarketplaceError, match="not available"):
+        marketplace.purchase("buyer", listing.dataset_id)
+
+    assert marketplace.list_purchases("buyer") == []
+    assert not marketplace.r.sismember(f"mkt:buyers:{listing.dataset_id}", "buyer")
+    assert marketplace.r.get(f"mkt:delivery:{generated[0].delivery_id}") is None
+
+
 def test_marketplace_review_uniqueness_backfills_preexisting_reviews(client):
     import json
 
