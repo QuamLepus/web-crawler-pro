@@ -320,6 +320,16 @@ class Client:
         return self._request("GET", "marketplace/purchases", params={
             "limit": limit, "offset": offset})
 
+    def add_marketplace_review(self, dataset_id: str, rating: int,
+                               comment: str) -> dict[str, Any]:
+        """Review a listing purchased by this tenant; one review per dataset.
+
+        The API requires a rating from 1 to 5 and a 5–2,000 character comment.
+        """
+        return self._request(
+            "POST", f"marketplace/datasets/{quote(dataset_id, safe='')}/reviews",
+            json={"rating": rating, "comment": comment})
+
     def list_marketplace_reviews(self, dataset_id: str, *, limit: int = 50,
                                  offset: int = 0) -> list[dict[str, Any]]:
         """Read a page of public reviews; buyer tenant IDs are omitted."""

@@ -341,6 +341,22 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   ]);
 });
 
+test('marketplace review submission encodes dataset ID and posts review fields', async () => {
+  const calls = [];
+  const payload = { review_id: 'review_1', dataset_id: 'dataset:1', buyer_tenant: 'buyer',
+    rating: 5, comment: 'Useful dataset review.', verified_purchase: true };
+  const client = new WebIntelligenceClient({ apiKey: 'marketplace-key', fetch: async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(payload), { status: 201 });
+  } });
+  const result = await client.addMarketplaceReview('dataset:1', 5, 'Useful dataset review.');
+  assert.deepEqual(result, payload);
+  assert.deepEqual(calls, [{
+    url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1/reviews',
+    method: 'POST', body: { rating: 5, comment: 'Useful dataset review.' },
+  }]);
+});
+
 test('marketplace bounty award encodes both IDs and returns the selected winner', async () => {
   const calls = [];
   const payload = { bounty_id: 'bty:1', awarded_to_dataset: 'dataset:1', reward_usd_cents: 5000 };
