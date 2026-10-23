@@ -885,6 +885,52 @@ def test_bounty_submission_errors_use_not_found_and_conflict_statuses(client, ap
     assert closed.status_code == 409
 
 
+def test_bounty_poster_can_cancel_open_bounty(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    poster = client.app.state.services.users.list_orgs()[0].id
+    owned = marketplace.create_bounty(
+        poster, title="Cancel open bounty",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    foreign = marketplace.create_bounty(
+        "other-poster", title="Foreign open bounty",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    headers = _headers(api_key)
+
+    hidden = client.post(
+        f"/v1/marketplace/bounties/{foreign.bounty_id}/cancel", headers=headers)
+    assert hidden.status_code == 404
+
+    cancelled = client.post(
+        f"/v1/marketplace/bounties/{owned.bounty_id}/cancel", headers=headers)
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {
+        "bounty_id": owned.bounty_id, "status": "cancelled"}
+    assert marketplace.get_bounty(owned.bounty_id).status == "cancelled"
+    assert marketplace.r.zscore("mkt:bounties:open", owned.bounty_id) is None
+    open_ids = {item["bounty_id"] for item in client.get(
+        "/v1/marketplace/bounties", headers=headers,
+        params={"limit": 100}).json()}
+    assert owned.bounty_id not in open_ids
+
+    duplicate = client.post(
+        f"/v1/marketplace/bounties/{owned.bounty_id}/cancel", headers=headers)
+    assert duplicate.status_code == 409
+
+    expired = marketplace.create_bounty(
+        poster, title="Expired cancellation request",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=0, target_urls=[])
+    expired_response = client.post(
+        f"/v1/marketplace/bounties/{expired.bounty_id}/cancel", headers=headers)
+    assert expired_response.status_code == 409
+    assert marketplace.get_bounty(expired.bounty_id).status == "expired"
+    assert marketplace.r.zscore("mkt:bounties:open", expired.bounty_id) is None
+
+
 def test_bounty_detail_is_public_when_open_and_poster_only_when_closed(client, api_key):
     from src.marketplace.service import MarketplaceService
 

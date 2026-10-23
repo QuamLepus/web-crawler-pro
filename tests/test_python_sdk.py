@@ -394,6 +394,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
                 transport=httpx.MockTransport(handler)) as client:
         client.list_marketplace_bounties(limit=7, offset=2)
         client.get_marketplace_bounty("bty_0123456789ab")
+        client.cancel_marketplace_bounty("bty_0123456789ab")
         client.list_marketplace_bounty_submissions(
             "bty_0123456789ab", limit=4, offset=3)
         client.search_marketplace_datasets(q="climate change", tag="energy",
@@ -407,6 +408,7 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     assert calls == [
         ("GET", "/api/v1/marketplace/bounties?limit=7&offset=2"),
         ("GET", "/api/v1/marketplace/bounties/bty_0123456789ab"),
+        ("POST", "/api/v1/marketplace/bounties/bty_0123456789ab/cancel"),
         ("GET", "/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3"),
         ("GET", "/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5&offset=8"),
         ("GET", "/api/v1/marketplace/datasets/dataset%3A1"),

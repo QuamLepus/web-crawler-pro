@@ -231,6 +231,18 @@ async def create_bounty(body: BountyCreate, ctx: CtxDep,
                      target_urls=b.target_urls)
 
 
+@router.post("/bounties/{bounty_id}/cancel")
+async def cancel_bounty(bounty_id: str, ctx: CtxDep,
+                        request: Request) -> dict:
+    try:
+        return _mkt(request).cancel_bounty(ctx["tenant"], bounty_id)
+    except MarketplaceError as exc:
+        message = str(exc)
+        code = 404 if message == "bounty not found" else (
+            409 if "bounty is" in message or "bounty expired" in message else 400)
+        raise HTTPException(code, message) from exc
+
+
 @router.get("/bounties/{bounty_id}", response_model=BountyOut,
             summary="Read an open bounty or one owned by the authenticated poster")
 async def get_bounty(bounty_id: str, ctx: CtxDep,

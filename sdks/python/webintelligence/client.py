@@ -271,6 +271,11 @@ class Client:
         return self._request(
             "GET", f"marketplace/bounties/{quote(bounty_id, safe='')}")
 
+    def cancel_marketplace_bounty(self, bounty_id: str) -> dict[str, Any]:
+        """Cancel this tenant's open bounty."""
+        return self._request(
+            "POST", f"marketplace/bounties/{quote(bounty_id, safe='')}/cancel")
+
     def list_marketplace_bounties(self, *, limit: int = 50,
                                   offset: int = 0) -> list[dict[str, Any]]:
         """List a page of open public bounties; does not submit or award work."""

@@ -330,6 +330,10 @@ export class WebIntelligenceClient {
     return this.request("GET", `marketplace/bounties/${encodeURIComponent(bountyId)}`);
   }
 
+  cancelMarketplaceBounty(bountyId: string): Promise<JsonObject> {
+    return this.request("POST", `marketplace/bounties/${encodeURIComponent(bountyId)}/cancel`);
+  }
+
   listMarketplaceBounties(limit = 50, offset = 0): Promise<JsonObject[]> {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<JsonObject[]>("GET", `marketplace/bounties?${query}`);

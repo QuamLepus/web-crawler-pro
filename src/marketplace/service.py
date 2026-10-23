@@ -82,7 +82,7 @@ class Bounty:
     spec: str
     reward_usd_cents: int
     deadline: str
-    status: str = "open"               # open|claimed|submitted|awarded|expired
+    status: str = "open"               # open|claimed|submitted|awarded|expired|cancelled
     assigned_to: str | None = None
     submissions: int = 0
     target_urls: list[str] = field(default_factory=list)
@@ -617,6 +617,37 @@ class MarketplaceService:
                     pipe.execute()
                     return {"bounty_id": bounty_id, "dataset_id": dataset_id,
                             "queued_for_review": True}
+                except WatchError:
+                    continue
+
+    def cancel_bounty(self, poster: str, bounty_id: str) -> dict:
+        """Atomically close an open bounty at the request of its poster."""
+        key = f"mkt:bounty:{bounty_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(key)
+                    raw = pipe.hget(key, "data")
+                    if not raw:
+                        raise MarketplaceError("bounty not found")
+                    bounty = Bounty(**json.loads(raw))
+                    if bounty.poster_tenant != poster:
+                        raise MarketplaceError("bounty not found")
+                    if bounty.status != "open":
+                        raise MarketplaceError(f"bounty is {bounty.status}")
+                    if datetime.fromisoformat(bounty.deadline) < utcnow():
+                        bounty.status = "expired"
+                        pipe.multi()
+                        pipe.hset(key, "data", json.dumps(asdict(bounty)))
+                        pipe.zrem("mkt:bounties:open", bounty_id)
+                        pipe.execute()
+                        raise MarketplaceError("bounty expired")
+                    bounty.status = "cancelled"
+                    pipe.multi()
+                    pipe.hset(key, "data", json.dumps(asdict(bounty)))
+                    pipe.zrem("mkt:bounties:open", bounty_id)
+                    pipe.execute()
+                    return {"bounty_id": bounty_id, "status": bounty.status}
                 except WatchError:
                     continue
 
