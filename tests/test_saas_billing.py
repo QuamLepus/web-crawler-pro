@@ -526,6 +526,78 @@ def test_marketplace_bounty_submissions_require_owned_published_unique_listings(
     assert marketplace.get_bounty(expired.bounty_id).status == "expired"
 
 
+def test_concurrent_duplicate_bounty_submissions_are_recorded_once(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Unique submission transaction",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    listing = marketplace.create_listing(
+        "worker", title="One candidate", description="Public dataset submission.",
+        tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256="c" * 64)
+
+    def submit(_):
+        try:
+            return marketplace.submit_for_bounty(
+                "worker", bounty.bounty_id, listing.dataset_id)
+        except MarketplaceError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(submit, range(2)))
+
+    assert sum(isinstance(result, dict) for result in results) == 1
+    errors = [result for result in results if isinstance(result, MarketplaceError)]
+    assert len(errors) == 1 and "already submitted" in str(errors[0])
+    assert marketplace.get_bounty(bounty.bounty_id).submissions == 1
+    assert marketplace.list_bounty_submissions(
+        "poster", bounty.bounty_id) == [listing.dataset_id]
+
+
+def test_concurrent_bounty_awards_assign_only_one_submission(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.marketplace.service import MarketplaceError, MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    bounty = marketplace.create_bounty(
+        "poster", title="Single winner public bounty",
+        spec="Collect and curate a set of public records from approved sources.",
+        reward_usd_cents=5000, deadline_days=10, target_urls=[])
+    listings = [marketplace.create_listing(
+        f"worker-{index}", title=f"Candidate {index}",
+        description="Public dataset submitted for concurrent award verification.",
+        tags=["bounty"], price_usd_cents=100, license="CC-BY-4.0",
+        content_sha256=("a" if index == 0 else "b") * 64)
+        for index in range(2)]
+    for listing in listings:
+        marketplace.submit_for_bounty(
+            listing.seller_tenant, bounty.bounty_id, listing.dataset_id)
+
+    def award(listing):
+        try:
+            return marketplace.award_bounty(
+                "poster", bounty.bounty_id, listing.dataset_id)
+        except MarketplaceError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(award, listings))
+
+    successes = [result for result in results if isinstance(result, dict)]
+    failures = [result for result in results if isinstance(result, MarketplaceError)]
+    assert len(successes) == len(failures) == 1
+    assert "bounty is awarded" in str(failures[0])
+    assert marketplace.get_bounty(bounty.bounty_id).assigned_to in {
+        listing.dataset_id for listing in listings
+    }
+
+
 def test_bounty_target_urls_are_public_http_and_bounded(client, api_key):
     headers = _headers(api_key)
     base = {

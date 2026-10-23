@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
+from redis.exceptions import WatchError
+
 from src.api.schemas import (BountyOut, DatasetListingOut, DeliveryManifest,
                              ReviewOut, normalize_public_bounty_target_urls,
                              utcnow)
@@ -470,49 +472,85 @@ class MarketplaceService:
 
     def submit_for_bounty(self, worker: str, bounty_id: str,
                           dataset_id: str) -> dict:
-        b = self.get_bounty(bounty_id)
-        if b is None:
-            raise MarketplaceError("bounty not found")
-        if b.status != "open":
-            raise MarketplaceError(f"bounty is {b.status}")
-        if datetime.fromisoformat(b.deadline) < utcnow():
-            self._set_bounty_status(b, "expired")
-            raise MarketplaceError("bounty expired")
-        listing = self.get_listing(dataset_id)
-        if listing is None or listing.status != "published":
-            raise MarketplaceError("submission must reference a published listing")
-        if listing.seller_tenant != worker:
-            raise MarketplaceError("only the listing owner may submit it")
-        submissions_key = f"mkt:bounty:{bounty_id}:submissions"
-        if not self.r.sadd(submissions_key, dataset_id):
-            raise MarketplaceError("dataset already submitted for this bounty")
-        b.submissions = self.r.scard(submissions_key)
-        self._set_bounty_status(b, b.status, submissions=b.submissions)
-        return {"bounty_id": bounty_id, "dataset_id": dataset_id, "queued_for_review": True}
+        bounty_key = f"mkt:bounty:{bounty_id}"
+        submissions_key = f"{bounty_key}:submissions"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(bounty_key, submissions_key)
+                    raw = pipe.hget(bounty_key, "data")
+                    if not raw:
+                        raise MarketplaceError("bounty not found")
+                    b = Bounty(**json.loads(raw))
+                    if b.status != "open":
+                        raise MarketplaceError(f"bounty is {b.status}")
+                    if datetime.fromisoformat(b.deadline) < utcnow():
+                        b.status = "expired"
+                        pipe.multi()
+                        pipe.hset(bounty_key, "data", json.dumps(asdict(b)))
+                        pipe.zrem("mkt:bounties:open", bounty_id)
+                        pipe.execute()
+                        raise MarketplaceError("bounty expired")
+                    listing = self.get_listing(dataset_id)
+                    if listing is None or listing.status != "published":
+                        raise MarketplaceError(
+                            "submission must reference a published listing")
+                    if listing.seller_tenant != worker:
+                        raise MarketplaceError(
+                            "only the listing owner may submit it")
+                    if pipe.sismember(submissions_key, dataset_id):
+                        raise MarketplaceError(
+                            "dataset already submitted for this bounty")
+                    b.submissions = pipe.scard(submissions_key) + 1
+                    pipe.multi()
+                    pipe.sadd(submissions_key, dataset_id)
+                    pipe.hset(bounty_key, "data", json.dumps(asdict(b)))
+                    pipe.execute()
+                    return {"bounty_id": bounty_id, "dataset_id": dataset_id,
+                            "queued_for_review": True}
+                except WatchError:
+                    continue
 
     def award_bounty(self, poster: str, bounty_id: str, dataset_id: str) -> dict:
-        b = self.get_bounty(bounty_id)
-        if b is None:
-            raise MarketplaceError("bounty not found")
-        if b.poster_tenant != poster:
-            raise MarketplaceError("only the poster may award a bounty")
-        if b.status != "open":
-            raise MarketplaceError(f"bounty is {b.status}")
-        if datetime.fromisoformat(b.deadline) < utcnow():
-            self._set_bounty_status(b, "expired")
-            self.r.zrem("mkt:bounties:open", bounty_id)
-            raise MarketplaceError("bounty expired")
-        subs = {x.decode() if isinstance(x, bytes) else x
-                for x in self.r.smembers(f"mkt:bounty:{bounty_id}:submissions")}
-        if dataset_id not in subs:
-            raise MarketplaceError("dataset was not submitted for this bounty")
-        listing = self.get_listing(dataset_id)
-        if listing is None or listing.status != "published":
-            raise MarketplaceError("submitted dataset is no longer published")
-        self._set_bounty_status(b, "awarded", assigned_to=dataset_id)
-        self.r.zrem("mkt:bounties:open", bounty_id)
-        return {"bounty_id": bounty_id, "awarded_to_dataset": dataset_id,
-                "reward_usd_cents": b.reward_usd_cents}
+        bounty_key = f"mkt:bounty:{bounty_id}"
+        submissions_key = f"{bounty_key}:submissions"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(bounty_key, submissions_key)
+                    raw = pipe.hget(bounty_key, "data")
+                    if not raw:
+                        raise MarketplaceError("bounty not found")
+                    b = Bounty(**json.loads(raw))
+                    if b.poster_tenant != poster:
+                        raise MarketplaceError("only the poster may award a bounty")
+                    if b.status != "open":
+                        raise MarketplaceError(f"bounty is {b.status}")
+                    if datetime.fromisoformat(b.deadline) < utcnow():
+                        b.status = "expired"
+                        pipe.multi()
+                        pipe.hset(bounty_key, "data", json.dumps(asdict(b)))
+                        pipe.zrem("mkt:bounties:open", bounty_id)
+                        pipe.execute()
+                        raise MarketplaceError("bounty expired")
+                    if not pipe.sismember(submissions_key, dataset_id):
+                        raise MarketplaceError(
+                            "dataset was not submitted for this bounty")
+                    listing = self.get_listing(dataset_id)
+                    if listing is None or listing.status != "published":
+                        raise MarketplaceError(
+                            "submitted dataset is no longer published")
+                    b.status = "awarded"
+                    b.assigned_to = dataset_id
+                    pipe.multi()
+                    pipe.hset(bounty_key, "data", json.dumps(asdict(b)))
+                    pipe.zrem("mkt:bounties:open", bounty_id)
+                    pipe.execute()
+                    return {"bounty_id": bounty_id,
+                            "awarded_to_dataset": dataset_id,
+                            "reward_usd_cents": b.reward_usd_cents}
+                except WatchError:
+                    continue
 
     def _set_bounty_status(self, b: Bounty, status: str, **extra: Any) -> None:
         b.status = status
