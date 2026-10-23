@@ -1220,6 +1220,29 @@ def test_workflow_console_paginates_run_history(signed_in, monkeypatch):
                               "date_from": "2026-05-01", "date_to": "2026-05-03"})
 
 
+def test_workflow_console_distinguishes_list_and_history_errors_from_empty_states(
+        signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def workflows(self):
+        return Result(False, error="workflow service unavailable")
+
+    async def runs(self, **kwargs):
+        return Result(False, error="run history service unavailable")
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+
+    page = signed_in.get("/app/workflows")
+    assert page.status_code == 200
+    assert "workflow service unavailable" in page.text
+    assert "Saved workflows unavailable" in page.text
+    assert "No workflows created yet" not in page.text
+    assert "Could not load run history: run history service unavailable" in page.text
+    assert "Run history is unavailable" in page.text
+    assert "No workflow runs yet" not in page.text
+
+
 def test_workflow_overlay_persists_when_browsing_run_history(signed_in, monkeypatch):
     from src.webui.client import Api, Result
 
