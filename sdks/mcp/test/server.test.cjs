@@ -728,7 +728,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
       },
     });
     const search = await client.callTool({ name: 'wio_marketplace_dataset_search', arguments: {
-      q: 'climate change', tag: 'energy', max_price_cents: 500, limit: 5,
+      q: 'climate change', tag: 'energy', max_price_cents: 500, limit: 5, offset: 8,
     } });
     const get = await client.callTool({ name: 'wio_marketplace_dataset_get', arguments: {
       dataset_id: 'dataset:1',
@@ -756,7 +756,7 @@ test('MCP marketplace tools search public listings and fetch a safe dataset ID',
     assert.deepEqual(calls, [
       { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7&offset=2', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3', method: 'GET' },
-      { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
+      { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5&offset=8', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/my/datasets?status=draft&limit=5&offset=10', method: 'GET' },
       { url: 'http://localhost:8000/api/v1/marketplace/deliveries/dlv_0123456789ab', method: 'GET' },

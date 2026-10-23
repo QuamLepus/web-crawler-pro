@@ -395,9 +395,10 @@ export function buildServer(client: WebIntelligenceClient) {
     tag: z.string().max(64).optional(),
     max_price_cents: z.number().int().min(0).max(10_000_000).optional(),
     limit: z.number().int().min(1).max(100).optional(),
-  }, async ({ q, tag, max_price_cents, limit }) => {
+    offset: z.number().int().min(0).max(10000).optional(),
+  }, async ({ q, tag, max_price_cents, limit, offset }) => {
     try { return result(await client.searchMarketplaceDatasets({
-      q, tag, maxPriceCents: max_price_cents, limit,
+      q, tag, maxPriceCents: max_price_cents, limit, offset,
     })); }
     catch (error) { return failure(error); }
   });

@@ -101,6 +101,7 @@ export interface MarketplaceSearchOptions {
   tag?: string;
   maxPriceCents?: number;
   limit?: number;
+  offset?: number;
 }
 
 export type OwnSearchIndexSource = "curlie" | "wikipedia" | "commoncrawl";
@@ -316,6 +317,7 @@ export class WebIntelligenceClient {
     if (options.tag !== undefined) params.set("tag", options.tag);
     if (options.maxPriceCents !== undefined) params.set("max_price_cents", String(options.maxPriceCents));
     if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
     const query = params.toString();
     return this.request<JsonObject[]>("GET", `marketplace/datasets${query ? `?${query}` : ""}`);
   }

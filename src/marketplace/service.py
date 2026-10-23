@@ -198,7 +198,7 @@ class MarketplaceService:
 
     def search_listings(self, *, query: str = "", tag: str = "",
                         max_price_cents: int | None = None,
-                        limit: int = 20) -> list[Listing]:
+                        limit: int = 20, offset: int = 0) -> list[Listing]:
         out = []
         q = query.lower()
         normalized_tag = tag.strip().lower()
@@ -209,7 +209,9 @@ class MarketplaceService:
 
         start = 0
         batch_size = 100
-        while len(out) < limit:
+        target = offset + limit
+        matched = 0
+        while matched < target:
             batch = self.r.zrevrange("mkt:listings:new", start,
                                      start + batch_size - 1)
             if not batch:
@@ -229,8 +231,10 @@ class MarketplaceService:
                 if q and q not in (listing.title + " " + listing.description + " " +
                                    " ".join(listing.tags)).lower():
                     continue
-                out.append(listing)
-                if len(out) >= limit:
+                if matched >= offset:
+                    out.append(listing)
+                matched += 1
+                if matched >= target:
                     break
         return out
 
