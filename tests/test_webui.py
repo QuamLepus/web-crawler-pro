@@ -1382,6 +1382,8 @@ def test_watch_history_reports_load_errors_instead_of_empty_states(signed_in, mo
     assert "Could not load change history: change history service unavailable" in page.text
     assert "Could not load saved versions: snapshot service unavailable" in page.text
     assert "Unavailable" in page.text
+    assert "Viewing" in page.text and "https://example.org/status" in page.text
+    assert 'href="/app/watch">All watches</a>' in page.text
     assert 'class="alert warn card-pad" role="alert"' in page.text
     assert "No changes recorded" not in page.text
     assert "No snapshots saved" not in page.text

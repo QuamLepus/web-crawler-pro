@@ -1318,8 +1318,12 @@ async def watch_page(request: Request, watch_id: str = Query("", max_length=64))
         snapshot_result = await api.watch_snapshots(watch_id)
         snapshots = snapshot_result.get("items", []) if snapshot_result.ok else []
         snapshots_error = snapshot_result.error if not snapshot_result.ok else ""
+    selected_watch_item = next(
+        (watch for watch in items if watch.get("watch_id") == watch_id), None
+    )
     return render(request, "watch.html", page="watch", me=me, watches=items,
-                  selected_watch=watch_id, events=events, snapshots=snapshots,
+                  selected_watch=watch_id, selected_watch_item=selected_watch_item,
+                  events=events, snapshots=snapshots,
                   events_error=events_error, snapshots_error=snapshots_error,
                   error=(watches_result.error if not watches_result.ok else ""),
                   title="Web Monitoring — Web Intelligence OS")
