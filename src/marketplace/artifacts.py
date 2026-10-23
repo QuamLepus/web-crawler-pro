@@ -140,6 +140,33 @@ class MinioMarketplaceArtifactStore:
         client.set_bucket_lifecycle(self.bucket, LifecycleConfig(rules))
         self._bucket_ready = True
 
+    def get_verified(self, tenant: str, job_id: str, object_key: str,
+                     expected_sha256: str, expected_size: int) -> bytes:
+        """Read a tenant-scoped object and verify its exact size and digest."""
+        expected_key = artifact_object_key_for(tenant, job_id, expected_sha256)
+        if object_key != expected_key:
+            raise ArtifactRejected("artifact key does not match its tenant/job/digest")
+        if not 0 < expected_size <= MAX_MARKETPLACE_ARTIFACT_BYTES:
+            raise ArtifactRejected("artifact size is outside the allowed bound")
+
+        response = None
+        try:
+            response = self.client.get_object(self.bucket, object_key)
+            payload = response.read(MAX_MARKETPLACE_ARTIFACT_BYTES + 1)
+        except Exception as exc:
+            raise ArtifactUnavailable("stored crawl artifact could not be read") from exc
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                    response.release_conn()
+                except Exception:
+                    pass
+        if (len(payload) != expected_size or
+                hashlib.sha256(payload).hexdigest() != expected_sha256):
+            raise ArtifactUnavailable("stored crawl artifact failed integrity verification")
+        return payload
+
     def put_verified(self, tenant: str, job_id: str, payload: bytes,
                      expected_sha256: str) -> ArtifactMetadata:
         """Upload and read back bytes, rejecting storage that changes content."""
