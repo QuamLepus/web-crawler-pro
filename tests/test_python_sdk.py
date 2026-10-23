@@ -421,6 +421,32 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     ]
 
 
+def test_marketplace_review_submission_posts_encoded_id_and_review_fields():
+    import json
+
+    calls = []
+    payload = {"review_id": "review_1", "dataset_id": "dataset:1",
+               "buyer_tenant": "buyer", "rating": 5,
+               "comment": "Useful dataset review.", "verified_purchase": True}
+
+    def handler(request):
+        calls.append({"method": request.method,
+                      "path": request.url.raw_path.decode(),
+                      "body": json.loads(request.read())})
+        return httpx.Response(201, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.add_marketplace_review(
+            "dataset:1", 5, "Useful dataset review.") == payload
+
+    assert calls == [{
+        "method": "POST",
+        "path": "/api/v1/marketplace/datasets/dataset%3A1/reviews",
+        "body": {"rating": 5, "comment": "Useful dataset review."},
+    }]
+
+
 def test_marketplace_bounty_award_posts_encoded_ids_and_dataset_query():
     calls = []
     payload = {"bounty_id": "bty:1", "awarded_to_dataset": "dataset:1",

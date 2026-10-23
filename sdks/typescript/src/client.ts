@@ -434,6 +434,13 @@ export class WebIntelligenceClient {
     return this.request<JsonObject[]>("GET", `marketplace/purchases?${query}`);
   }
 
+  /** Review a dataset purchased by this tenant; one review per dataset. */
+  addMarketplaceReview(datasetId: string, rating: number, comment: string): Promise<JsonObject> {
+    return this.request("POST", `marketplace/datasets/${encodeURIComponent(datasetId)}/reviews`, {
+      rating, comment,
+    });
+  }
+
   listMarketplaceReviews(datasetId: string, limit = 50, offset = 0): Promise<JsonObject[]> {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<JsonObject[]>("GET",
