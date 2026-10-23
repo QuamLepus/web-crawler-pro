@@ -71,6 +71,7 @@ class Listing:
     storage_uri: str = ""
     preview_uri: str = ""
     artifact_bucket: str = ""
+    artifact_job_id: str = ""
     artifact_object_key: str = ""
     artifact_sha256: str = ""
     artifact_size_bytes: int = 0
@@ -162,6 +163,7 @@ class MarketplaceService:
             token_count=token_count, record_count=record_count,
             size_bytes=size_bytes, content_sha256=content_sha256,
             storage_uri=storage_uri, artifact_bucket=artifact_bucket,
+            artifact_job_id=source_job_id,
             artifact_object_key=artifact_object_key,
             artifact_sha256=artifact_sha256,
             artifact_size_bytes=artifact_size_bytes,
@@ -623,13 +625,39 @@ class MarketplaceService:
     def issue_delivery(self, buyer: str, lst: Listing, *,
                        persist: bool = True) -> DeliveryManifest:
         now = utcnow()
+        delivery_id = f"dlv_{uuid.uuid4().hex[:12]}"
+        uri = ""
+        sha256 = lst.content_sha256
+        size_bytes = lst.size_bytes
+        record_count = lst.record_count
+        expires_at = now + timedelta(days=DELIVERY_TTL_DAYS)
+
+        if lst.artifact_object_key:
+            try:
+                expected_key = artifact_object_key_for(
+                    lst.seller_tenant, lst.artifact_job_id, lst.artifact_sha256)
+                artifact_expires = datetime.fromisoformat(lst.artifact_expires_at)
+            except (ValueError, TypeError) as exc:
+                raise MarketplaceError("dataset artifact is not available") from exc
+            if (lst.artifact_object_key != expected_key or
+                    not lst.artifact_bucket or
+                    artifact_expires.tzinfo is None or
+                    not 0 < lst.artifact_size_bytes <= MAX_MARKETPLACE_ARTIFACT_BYTES or
+                    lst.artifact_record_count != lst.record_count):
+                raise MarketplaceError("dataset artifact is not available")
+            if artifact_expires > now:
+                uri = f"/api/v1/marketplace/deliveries/{delivery_id}/download"
+                sha256 = lst.artifact_sha256
+                size_bytes = lst.artifact_size_bytes
+                record_count = lst.artifact_record_count
+                expires_at = min(expires_at, artifact_expires)
+
         m = DeliveryManifest(
-            delivery_id=f"dlv_{uuid.uuid4().hex[:12]}",
+            delivery_id=delivery_id,
             dataset_id=lst.dataset_id, buyer_tenant=buyer,
-            uri="",
-            sha256=lst.content_sha256, size_bytes=lst.size_bytes,
-            record_count=lst.record_count, issued_at=now,
-            expires_at=now + timedelta(days=DELIVERY_TTL_DAYS),
+            uri=uri, sha256=sha256, size_bytes=size_bytes,
+            record_count=record_count, issued_at=now,
+            expires_at=expires_at,
             signature="")
         m.signature = self._sign(m)
         if persist:

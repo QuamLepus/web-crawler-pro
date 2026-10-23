@@ -291,8 +291,13 @@ def test_marketplace_artifact_store_uploads_and_reads_back_exact_bytes():
     assert result.uri.startswith("s3://test-artifacts/marketplace/tenants/")
     assert "tenant-secret-id" not in result.object_key
     assert fake.objects[("test-artifacts", result.object_key)] == payload
+    assert store.get_verified("tenant-secret-id", "job_0123456789abcdef",
+                              result.object_key, digest, len(payload)) == payload
     assert fake.lifecycle.rules[0].expiration.days == 30
     assert fake.lifecycle.rules[0].rule_filter.prefix == "marketplace/tenants/"
+    with pytest.raises(ArtifactError, match="key"):
+        store.get_verified("another-tenant", "job_0123456789abcdef",
+                           result.object_key, digest, len(payload))
 
     corrupt_store = MinioMarketplaceArtifactStore(
         client=FakeMinio(corrupt=True), bucket="test-artifacts")

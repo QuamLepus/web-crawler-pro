@@ -7,6 +7,7 @@ import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from src.api.routers.jobs import JOB_KEY, CtxDep
 from src.api.schemas import (BountyCreate, BountyOut, DatasetListingCreate,
@@ -210,7 +211,7 @@ async def get_reviews(dataset_id: str, ctx: CtxDep, request: Request,
 
 # ------------------------------ purchase / delivery ----------------------- #
 @router.post("/datasets/{dataset_id}/purchase",
-             summary="Record a free purchase and issue signed manifest metadata; dataset bytes are unavailable")
+             summary="Record a free purchase; buyer-scoped download is available when a verified artifact is linked")
 async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
     mkt = _mkt(request)
     try:
@@ -229,8 +230,12 @@ async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
                            "dataset_id": dataset_id})
     except Exception:
         logger.debug("webhook emit failed", exc_info=True)
+    verification = (
+        "verify the HMAC signature, then GET uri and verify SHA-256 of the response bytes"
+        if manifest.uri else
+        "check the HMAC signature; dataset bytes are not available for download")
     return {"purchase": pur.__dict__, "delivery": manifest.model_dump(mode="json"),
-            "verify": "check the HMAC signature; dataset bytes are not available for download"}
+            "verify": verification}
 
 
 @router.get("/purchases", response_model=list[MarketplacePurchaseOut],
@@ -248,6 +253,66 @@ async def get_delivery(delivery_id: str, ctx: CtxDep, request: Request):
     if m is None:
         raise HTTPException(404, "delivery not found or expired")
     return m
+
+
+@router.get("/deliveries/{delivery_id}/download",
+            summary="Download a purchased, tenant-authorized marketplace artifact")
+async def download_delivery(delivery_id: str, ctx: CtxDep,
+                           request: Request) -> Response:
+    marketplace = _mkt(request)
+    manifest = marketplace.get_delivery(delivery_id, ctx["tenant"])
+    if manifest is None:
+        raise HTTPException(404, "delivery not found or expired")
+    expected_uri = f"/api/v1/marketplace/deliveries/{delivery_id}/download"
+    if not manifest.uri or manifest.uri != expected_uri:
+        raise HTTPException(503, "dataset bytes are not available for this delivery")
+
+    listing = marketplace.get_listing(manifest.dataset_id)
+    if listing is None or not listing.artifact_object_key:
+        raise HTTPException(503, "dataset artifact is not available")
+    try:
+        artifact_expires = datetime.fromisoformat(listing.artifact_expires_at)
+        from src.marketplace.artifacts import (ArtifactError,
+                                               MinioMarketplaceArtifactStore,
+                                               artifact_object_key_for)
+        expected_key = artifact_object_key_for(
+            listing.seller_tenant, listing.artifact_job_id,
+            listing.artifact_sha256)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(503, "dataset artifact metadata is invalid") from exc
+    if (artifact_expires.tzinfo is None or
+            artifact_expires.astimezone(timezone.utc) <= datetime.now(timezone.utc)):
+        raise HTTPException(410, "dataset artifact has expired")
+    if (not listing.artifact_bucket or listing.artifact_format != "jsonl" or
+            listing.artifact_object_key != expected_key or
+            listing.artifact_record_count != manifest.record_count or
+            listing.artifact_sha256 != manifest.sha256 or
+            listing.artifact_size_bytes != manifest.size_bytes or
+            manifest.expires_at > artifact_expires):
+        raise HTTPException(503, "dataset artifact metadata is inconsistent")
+
+    try:
+        payload = MinioMarketplaceArtifactStore(
+            bucket=listing.artifact_bucket).get_verified(
+                listing.seller_tenant, listing.artifact_job_id,
+                listing.artifact_object_key, manifest.sha256, manifest.size_bytes)
+    except ArtifactError as exc:
+        logger.warning("marketplace artifact download unavailable (%s)",
+                       type(exc).__name__)
+        raise HTTPException(503, "dataset artifact is currently unavailable") from exc
+    except Exception as exc:  # storage adapter failures must not reveal internals
+        logger.warning("marketplace artifact download failed (%s)",
+                       type(exc).__name__)
+        raise HTTPException(503, "dataset artifact is currently unavailable") from exc
+
+    return Response(
+        content=payload, media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": f'attachment; filename="{listing.dataset_id}.jsonl"',
+            "X-Content-SHA256": manifest.sha256,
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        })
 
 
 # ------------------------------ bounties ---------------------------------- #

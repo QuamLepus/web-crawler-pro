@@ -594,7 +594,7 @@ class DeliveryManifest(BaseModel):
     dataset_id: str
     buyer_tenant: str
     uri: str = Field(
-        default="", description="Empty when no dataset object is available for download")
+        default="", description="Authenticated relative download path, or empty if no artifact is linked")
     sha256: str
     size_bytes: int
     record_count: int

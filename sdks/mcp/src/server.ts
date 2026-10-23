@@ -425,7 +425,7 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_marketplace_delivery_get", "Retrieve non-expired signed purchase metadata belonging to the authenticated tenant. The manifest currently has no dataset object URI and does not enable dataset-byte download.", {
+  server.tool("wio_marketplace_delivery_get", "Retrieve non-expired signed purchase metadata belonging to the authenticated tenant. When an unexpired artifact is linked, the manifest includes a buyer-authenticated API download path; this tool returns metadata only and does not fetch bytes.", {
     delivery_id: z.string().regex(/^dlv_[a-f0-9]{12}$/),
   }, async ({ delivery_id }) => {
     try { return result(await client.getMarketplaceDelivery(delivery_id)); }

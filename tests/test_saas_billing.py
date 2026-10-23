@@ -441,6 +441,10 @@ def test_marketplace_purchase_history_supports_offset_pagination(
         manifest = response.json()["delivery"]
         assert manifest["uri"] == ""
         assert "not available for download" in response.json()["verify"]
+        download = client.get(
+            f"/v1/marketplace/deliveries/{manifest['delivery_id']}/download",
+            headers=headers)
+        assert download.status_code == 503
         from src.api.schemas import DeliveryManifest
         assert MarketplaceService.verify_manifest(DeliveryManifest(**manifest))
         purchase_ids.append(response.json()["purchase"]["purchase_id"])
@@ -1598,3 +1602,83 @@ def test_publish_links_only_valid_unexpired_tenant_artifacts(client, api_key):
     assert expired.status_code == 201, expired.text
     expired_listing = MarketplaceService(redis).get_listing(expired.json()["dataset_id"])
     assert expired_listing.artifact_object_key == ""
+
+
+def test_purchased_artifact_download_is_buyer_scoped_and_integrity_checked(
+        client, api_key, monkeypatch):
+    import hashlib
+    from datetime import timedelta
+    import src.marketplace.artifacts as artifact_storage
+    from src.api.schemas import utcnow
+    from src.marketplace.artifacts import ArtifactUnavailable, artifact_object_key_for
+    from src.marketplace.service import MarketplaceService
+
+    monkeypatch.setenv("MARKETPLACE_SIGNING_SECRET",
+                       "marketplace-test-signing-secret-download")
+    payload = b'{"content":"verified crawl result","url":"https://example.com"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    job_id = "job_download"
+    seller = "artifact-seller"
+    bucket = "marketplace-artifacts"
+    key = artifact_object_key_for(seller, job_id, digest)
+    expires_at = (utcnow() + timedelta(days=3)).isoformat()
+    redis = client.app.state.services.redis
+    listing = MarketplaceService(redis).create_listing(
+        seller, title="Downloadable corpus",
+        description="A free dataset with an explicitly retained crawl artifact.",
+        tags=["download"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="c" * 64, record_count=1,
+        source_job_id=job_id, artifact_bucket=bucket,
+        artifact_object_key=key, artifact_sha256=digest,
+        artifact_size_bytes=len(payload), artifact_record_count=1,
+        artifact_format="jsonl", artifact_expires_at=expires_at)
+
+    corrupt = {"value": False}
+
+    class FakeArtifactStore:
+        def __init__(self, bucket):
+            assert bucket == "marketplace-artifacts"
+
+        def get_verified(self, tenant, received_job_id, received_key,
+                         expected_sha, expected_size):
+            assert tenant == seller
+            assert received_job_id == job_id
+            assert received_key == key
+            assert expected_size == len(payload)
+            if (corrupt["value"] or
+                    hashlib.sha256(payload).hexdigest() != expected_sha):
+                raise ArtifactUnavailable("verification failed")
+            return payload
+
+    monkeypatch.setattr(artifact_storage, "MinioMarketplaceArtifactStore",
+                        FakeArtifactStore)
+    headers = _headers(api_key)
+    purchase = client.post(
+        f"/v1/marketplace/datasets/{listing.dataset_id}/purchase", headers=headers)
+    assert purchase.status_code == 200, purchase.text
+    manifest = purchase.json()["delivery"]
+    assert manifest["uri"] == (
+        f"/api/v1/marketplace/deliveries/{manifest['delivery_id']}/download")
+    assert manifest["sha256"] == digest
+    assert manifest["size_bytes"] == len(payload)
+
+    download = client.get(manifest["uri"], headers=headers)
+    assert download.status_code == 200, download.text
+    assert download.content == payload
+    assert download.headers["x-content-sha256"] == digest
+    assert download.headers["cache-control"] == "private, no-store"
+    assert key not in download.text
+
+    second = client.post("/auth/signup", json={
+        "org_name": "Other Buyer", "email": "other-buyer@example.com",
+        "password": "another-s3cret-password!"}).json()
+    second_key = client.post(
+        "/keys", headers={"Authorization": f"Bearer {second['access_token']}"},
+        json={"name": "download-isolation"}).json()["key"]
+    hidden = client.get(manifest["uri"], headers=_headers(second_key))
+    assert hidden.status_code == 404
+
+    corrupt["value"] = True
+    failed = client.get(manifest["uri"], headers=headers)
+    assert failed.status_code == 503
+    assert "verification failed" not in failed.text
