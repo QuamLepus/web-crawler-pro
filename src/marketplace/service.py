@@ -137,6 +137,27 @@ class MarketplaceService:
             return None
         return Listing(**json.loads(raw))
 
+    def get_listing_for_viewer(self, dataset_id: str,
+                               viewer: str) -> Optional[Listing]:
+        """Read a listing only if it remains visible to this tenant."""
+        key = f"mkt:listing:{dataset_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(key)
+                    listing = self.get_listing(dataset_id)
+                    if listing is None:
+                        return None
+                    if (listing.status != "published" and
+                            listing.seller_tenant != viewer):
+                        return None
+                    pipe.multi()
+                    pipe.hget(key, "data")
+                    pipe.execute()
+                    return listing
+                except WatchError:
+                    continue
+
     def update_listing(self, dataset_id: str, actor: str, **changes: Any) -> Listing:
         current = self.get_listing(dataset_id)
         if current is None:

@@ -99,8 +99,8 @@ async def search_datasets(ctx: CtxDep, request: Request,
 @router.get("/datasets/{dataset_id}", response_model=DatasetListingOut)
 async def get_dataset(dataset_id: str, ctx: CtxDep, request: Request):
     mkt = _mkt(request)
-    lst = mkt.get_listing(dataset_id)
-    if lst is None or (lst.status != "published" and lst.seller_tenant != ctx["tenant"]):
+    lst = mkt.get_listing_for_viewer(dataset_id, ctx["tenant"])
+    if lst is None:
         # Draft/suspended inventory is visible only to its owning tenant.
         raise HTTPException(404, "dataset not found")
     return mkt.to_out(lst)
