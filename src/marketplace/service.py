@@ -138,10 +138,10 @@ class MarketplaceService:
         return Listing(**json.loads(raw))
 
     def update_listing(self, dataset_id: str, actor: str, **changes: Any) -> Listing:
-        lst = self.get_listing(dataset_id)
-        if lst is None:
+        current = self.get_listing(dataset_id)
+        if current is None:
             raise MarketplaceError("not found")
-        if lst.seller_tenant != actor:
+        if current.seller_tenant != actor:
             raise MarketplaceError("forbidden: not your listing")
         allowed = {"status", "title", "description", "tags", "price_usd_cents", "license"}
         bad = set(changes) - allowed
@@ -166,23 +166,35 @@ class MarketplaceService:
             license_name = changes["license"]
             if not isinstance(license_name, str) or not 1 <= len(license_name) <= 80:
                 raise MarketplaceError("license must contain between 1 and 80 characters")
-        old_tags = list(lst.tags)
-        updated_tags = None
         if "tags" in changes:
-            updated_tags = self._normalize_tags(changes["tags"])
-            changes = {**changes, "tags": updated_tags}
+            changes["tags"] = self._normalize_tags(changes["tags"])
 
-        for k, v in changes.items():
-            setattr(lst, k, v)
-        pipe = self.r.pipeline()
-        if updated_tags is not None:
-            for tag in set(old_tags) | set(updated_tags):
-                pipe.srem(f"mkt:tag:{tag}", dataset_id)
-            for tag in updated_tags:
-                pipe.sadd(f"mkt:tag:{tag}", dataset_id)
-        pipe.hset(f"mkt:listing:{dataset_id}", "data", json.dumps(asdict(lst)))
-        pipe.execute()
-        return lst
+        listing_key = f"mkt:listing:{dataset_id}"
+        with self.r.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(listing_key)
+                    raw = pipe.hget(listing_key, "data")
+                    if not raw:
+                        raise MarketplaceError("not found")
+                    lst = Listing(**json.loads(raw))
+                    if lst.seller_tenant != actor:
+                        raise MarketplaceError("forbidden: not your listing")
+                    old_tags = list(lst.tags)
+                    for key, value in changes.items():
+                        setattr(lst, key, value)
+                    pipe.multi()
+                    if "tags" in changes:
+                        updated_tags = changes["tags"]
+                        for tag in set(old_tags) | set(updated_tags):
+                            pipe.srem(f"mkt:tag:{tag}", dataset_id)
+                        for tag in updated_tags:
+                            pipe.sadd(f"mkt:tag:{tag}", dataset_id)
+                    pipe.hset(listing_key, "data", json.dumps(asdict(lst)))
+                    pipe.execute()
+                    return lst
+                except WatchError:
+                    continue
 
     def search_listings(self, *, query: str = "", tag: str = "",
                         max_price_cents: int | None = None,
