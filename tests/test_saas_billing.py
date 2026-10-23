@@ -528,6 +528,40 @@ def test_purchase_rechecks_listing_state_before_persisting(client, monkeypatch):
     assert marketplace.r.get(f"mkt:delivery:{generated[0].delivery_id}") is None
 
 
+def test_review_read_rechecks_listing_visibility_before_returning(client, api_key,
+                                                                  monkeypatch):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    listing = marketplace.create_listing(
+        "seller", title="Visibility race review",
+        description="A public listing used to validate a concurrent visibility change.",
+        tags=["review"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="2" * 64)
+    marketplace.r.sadd(f"mkt:buyers:{listing.dataset_id}", "review-buyer")
+    marketplace.add_review("review-buyer", listing.dataset_id, 5,
+                           "Public until the listing is unpublished.")
+    original_list_reviews = MarketplaceService.list_reviews
+    changed = False
+
+    def unpublish_after_read(self, dataset_id, limit=50, offset=0):
+        nonlocal changed
+        reviews = original_list_reviews(self, dataset_id, limit, offset)
+        if dataset_id == listing.dataset_id and not changed:
+            changed = True
+            self.update_listing(dataset_id, "seller", status="draft")
+        return reviews
+
+    monkeypatch.setattr(MarketplaceService, "list_reviews", unpublish_after_read)
+    response = client.get(
+        f"/v1/marketplace/datasets/{listing.dataset_id}/reviews",
+        headers=_headers(api_key))
+
+    assert changed is True
+    assert response.status_code == 404
+    assert response.json()["detail"] == "dataset not found"
+
+
 def test_marketplace_review_reads_support_bounded_offset_pagination(client, api_key):
     from src.marketplace.service import MarketplaceService
 
