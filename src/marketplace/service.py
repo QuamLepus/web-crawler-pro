@@ -27,6 +27,8 @@ from redis.exceptions import WatchError
 from src.api.schemas import (BountyOut, DatasetListingOut, DeliveryManifest,
                              ReviewOut, normalize_public_bounty_target_urls,
                              utcnow)
+from src.marketplace.artifacts import (MAX_MARKETPLACE_ARTIFACT_BYTES,
+                                      artifact_object_key_for)
 from src.marketplace.preview import (JOB_PREVIEW_KEY, LISTING_PREVIEW_KEY,
                                      PREVIEW_RETENTION_SECONDS,
                                      sanitize_preview_records)
@@ -68,6 +70,13 @@ class Listing:
     content_sha256: str = ""
     storage_uri: str = ""
     preview_uri: str = ""
+    artifact_bucket: str = ""
+    artifact_object_key: str = ""
+    artifact_sha256: str = ""
+    artifact_size_bytes: int = 0
+    artifact_record_count: int = 0
+    artifact_format: str = ""
+    artifact_expires_at: str = ""
     created_at: str = field(default_factory=lambda: utcnow().isoformat())
 
 
@@ -119,16 +128,46 @@ class MarketplaceService:
                        tags: list[str], price_usd_cents: int, license: str,
                        token_count: int = 0, record_count: int = 0,
                        size_bytes: int = 0, content_sha256: str = "",
-                       storage_uri: str = "") -> Listing:
+                       storage_uri: str = "", source_job_id: str = "",
+                       artifact_bucket: str = "", artifact_object_key: str = "",
+                       artifact_sha256: str = "", artifact_size_bytes: int = 0,
+                       artifact_record_count: int = 0, artifact_format: str = "",
+                       artifact_expires_at: str = "") -> Listing:
         if not content_sha256:
             raise MarketplaceError("dataset must be hashed (content_sha256) before listing")
+        artifact_fields = (artifact_bucket, artifact_object_key, artifact_sha256,
+                           artifact_size_bytes, artifact_record_count, artifact_format,
+                           artifact_expires_at)
+        if any(artifact_fields):
+            if (not source_job_id or not artifact_bucket or not artifact_object_key or
+                    not artifact_sha256 or not artifact_format or not artifact_expires_at):
+                raise MarketplaceError("verified crawl artifact metadata is incomplete")
+            try:
+                expected_key = artifact_object_key_for(
+                    seller, source_job_id, artifact_sha256)
+                expires_at = datetime.fromisoformat(artifact_expires_at)
+            except (ValueError, TypeError) as exc:
+                raise MarketplaceError("verified crawl artifact metadata is invalid") from exc
+            if (artifact_object_key != expected_key or
+                    artifact_format != "jsonl" or
+                    not 0 < artifact_size_bytes <= MAX_MARKETPLACE_ARTIFACT_BYTES or
+                    artifact_record_count <= 0 or
+                    artifact_record_count != record_count or
+                    expires_at.tzinfo is None or expires_at <= utcnow()):
+                raise MarketplaceError("verified crawl artifact metadata is unavailable")
         lst = Listing(
             dataset_id=f"ds_{uuid.uuid4().hex[:16]}", seller_tenant=seller,
             title=title, description=description, tags=self._normalize_tags(tags),
             price_usd_cents=price_usd_cents, license=license,
             token_count=token_count, record_count=record_count,
             size_bytes=size_bytes, content_sha256=content_sha256,
-            storage_uri=storage_uri,
+            storage_uri=storage_uri, artifact_bucket=artifact_bucket,
+            artifact_object_key=artifact_object_key,
+            artifact_sha256=artifact_sha256,
+            artifact_size_bytes=artifact_size_bytes,
+            artifact_record_count=artifact_record_count,
+            artifact_format=artifact_format,
+            artifact_expires_at=artifact_expires_at,
         )
         lst.preview_uri = f"preview://{lst.dataset_id}"
         pipe = self.r.pipeline()

@@ -1521,3 +1521,80 @@ def test_stripe_webhook_rejects_invalid_signature(client, monkeypatch):
         headers={"stripe-signature": f"t={int(time.time())},v1=invalid"},
     )
     assert response.status_code == 400
+
+
+def test_publish_links_only_valid_unexpired_tenant_artifacts(client, api_key):
+    from datetime import timedelta
+    from src.api.schemas import utcnow
+    from src.marketplace.artifacts import artifact_object_key_for
+    from src.marketplace.service import MarketplaceService
+
+    redis = client.app.state.services.redis
+    tenant = client.app.state.services.users.list_orgs()[0].id
+    digest = "a" * 64
+    artifact_digest = "b" * 64
+    payload = {
+        "title": "Artifact-backed corpus",
+        "description": "A crawl artifact is attached only after ownership and metadata checks.",
+        "price_usd_cents": 250,
+    }
+    now = utcnow()
+    expires_at = (now + timedelta(days=20)).isoformat()
+    job_id = "job_artifact_link"
+    object_key = artifact_object_key_for(tenant, job_id, artifact_digest)
+    redis.hset(f"wcp:v1:job:{job_id}", mapping={
+        "tenant": tenant, "state": "completed", "data_sha256": digest,
+        "items_collected": 2, "tokens_generated": 20,
+        "artifact_status": "available", "artifact_bucket": "marketplace-objects",
+        "artifact_uri": f"s3://marketplace-objects/{object_key}",
+        "artifact_object_key": object_key, "artifact_sha256": artifact_digest,
+        "artifact_size_bytes": 128, "artifact_record_count": 2,
+        "artifact_format": "jsonl", "artifact_expires_at": expires_at,
+    })
+
+    published = client.post("/v1/marketplace/datasets", headers=_headers(api_key),
+                            json={**payload, "source_job_id": job_id})
+    assert published.status_code == 201, published.text
+    listing = MarketplaceService(redis).get_listing(published.json()["dataset_id"])
+    assert listing.artifact_bucket == "marketplace-objects"
+    assert listing.artifact_object_key == object_key
+    assert listing.artifact_sha256 == artifact_digest
+    assert listing.artifact_size_bytes == 128
+    assert listing.artifact_record_count == 2
+    assert listing.artifact_expires_at == expires_at
+    assert "artifact_object_key" not in published.json()
+
+    foreign_job_id = "job_artifact_foreign_key"
+    foreign_key = artifact_object_key_for("another-tenant", foreign_job_id, artifact_digest)
+    redis.hset(f"wcp:v1:job:{foreign_job_id}", mapping={
+        "tenant": tenant, "state": "completed", "data_sha256": digest,
+        "items_collected": 2, "tokens_generated": 20,
+        "artifact_status": "available", "artifact_bucket": "marketplace-objects",
+        "artifact_uri": f"s3://marketplace-objects/{foreign_key}",
+        "artifact_object_key": foreign_key, "artifact_sha256": artifact_digest,
+        "artifact_size_bytes": 128, "artifact_record_count": 2,
+        "artifact_format": "jsonl", "artifact_expires_at": expires_at,
+    })
+    invalid_key = client.post(
+        "/v1/marketplace/datasets", headers=_headers(api_key),
+        json={**payload, "source_job_id": foreign_job_id})
+    assert invalid_key.status_code == 422
+
+    expired_job_id = "job_artifact_expired"
+    expired_at = (now - timedelta(seconds=1)).isoformat()
+    redis.hset(f"wcp:v1:job:{expired_job_id}", mapping={
+        "tenant": tenant, "state": "completed", "data_sha256": digest,
+        "items_collected": 2, "tokens_generated": 20,
+        "artifact_status": "available", "artifact_bucket": "marketplace-objects",
+        "artifact_object_key": artifact_object_key_for(
+            tenant, expired_job_id, artifact_digest),
+        "artifact_sha256": artifact_digest, "artifact_size_bytes": 128,
+        "artifact_record_count": 2, "artifact_format": "jsonl",
+        "artifact_expires_at": expired_at,
+    })
+    expired = client.post(
+        "/v1/marketplace/datasets", headers=_headers(api_key),
+        json={**payload, "source_job_id": expired_job_id})
+    assert expired.status_code == 201, expired.text
+    expired_listing = MarketplaceService(redis).get_listing(expired.json()["dataset_id"])
+    assert expired_listing.artifact_object_key == ""

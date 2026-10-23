@@ -418,6 +418,7 @@ def _persist_marketplace_artifact(redis_client, job_id: str, tenant: str,
         _update_job(redis_client, job_id, {
             "artifact_status": "available",
             "artifact_uri": metadata.uri,
+            "artifact_bucket": metadata.bucket,
             "artifact_object_key": metadata.object_key,
             "artifact_sha256": metadata.sha256,
             "artifact_size_bytes": metadata.size_bytes,
