@@ -421,6 +421,41 @@ def test_marketplace_methods_search_listings_and_encode_dataset_ids():
     ]
 
 
+def test_marketplace_bounty_submission_posts_encoded_ids_and_dataset_query():
+    calls = []
+    payload = {"bounty_id": "bty:1", "dataset_id": "dataset:1",
+               "submission_recorded": True}
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(), request.read()))
+        return httpx.Response(202, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.submit_marketplace_bounty("bty:1", "dataset:1") == payload
+
+    assert calls == [(
+        "POST", "/api/v1/marketplace/bounties/bty%3A1/submissions?dataset_id=dataset%3A1", b"")]
+
+
+def test_free_marketplace_purchase_posts_encoded_dataset_id():
+    calls = []
+    payload = {"purchase": {"purchase_id": "purchase_1"},
+               "delivery": {"delivery_id": "delivery_1", "uri": ""},
+               "verify": "check the HMAC signature; dataset bytes are not available for download"}
+
+    def handler(request):
+        calls.append((request.method, request.url.raw_path.decode(), request.read()))
+        return httpx.Response(200, json=payload)
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        assert client.purchase_free_marketplace_dataset("dataset:1") == payload
+
+    assert calls == [(
+        "POST", "/api/v1/marketplace/datasets/dataset%3A1/purchase", b"")]
+
+
 def test_provenance_methods_store_retrieve_and_export_tenant_records():
     import json
 

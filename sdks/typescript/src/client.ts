@@ -392,6 +392,13 @@ export class WebIntelligenceClient {
     return this.request<JsonObject[]>("GET", `marketplace/bounties?${query}`);
   }
 
+  /** Submit this tenant's published dataset to an open bounty; does not award it. */
+  submitMarketplaceBounty(bountyId: string, datasetId: string): Promise<JsonObject> {
+    const query = new URLSearchParams({ dataset_id: datasetId });
+    return this.request("POST",
+      `marketplace/bounties/${encodeURIComponent(bountyId)}/submissions?${query}`);
+  }
+
   listMarketplaceBountySubmissions(bountyId: string, limit = 50, offset = 0): Promise<string[]> {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<string[]>("GET",
@@ -407,6 +414,12 @@ export class WebIntelligenceClient {
     return this.requestBytes(
       `marketplace/deliveries/${encodeURIComponent(deliveryId)}/download`,
       expectedSha256);
+  }
+
+  /** Purchase an available free dataset; paid settlement is not implemented. */
+  purchaseFreeMarketplaceDataset(datasetId: string): Promise<JsonObject> {
+    return this.request("POST",
+      `marketplace/datasets/${encodeURIComponent(datasetId)}/purchase`);
   }
 
   listMarketplacePurchases(limit = 50, offset = 0): Promise<JsonObject[]> {
