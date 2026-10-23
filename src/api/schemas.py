@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -478,7 +479,29 @@ class BountyCreate(BaseModel):
     spec: str = Field(min_length=20, max_length=8000)
     reward_usd_cents: int = Field(ge=100, le=10_000_000)
     deadline_days: int = Field(default=30, ge=1, le=365)
-    target_urls: list[str] = Field(default_factory=list)
+    target_urls: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("target_urls")
+    @classmethod
+    def _validate_target_urls(cls, values: list[str]) -> list[str]:
+        normalized = []
+        for raw in values:
+            value = raw.strip()
+            try:
+                parsed = urlsplit(value)
+                port = parsed.port
+                valid = (len(value) <= 2048 and not any(char.isspace() for char in value)
+                         and parsed.scheme in {"http", "https"}
+                         and bool(parsed.hostname)
+                         and (port is None or 1 <= port <= 65535)
+                         and parsed.username is None and parsed.password is None)
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError(
+                    "target URLs must be HTTP(S), at most 2048 characters, and contain no credentials")
+            normalized.append(value)
+        return list(dict.fromkeys(normalized))
 
 
 class BountyOut(BaseModel):
