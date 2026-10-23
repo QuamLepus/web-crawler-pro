@@ -23,7 +23,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from src.api.schemas import (BountyOut, DatasetListingOut, DeliveryManifest,
-                             ReviewOut, utcnow)
+                             ReviewOut, normalize_public_bounty_target_urls,
+                             utcnow)
 
 logger = logging.getLogger("wcp.marketplace")
 
@@ -437,6 +438,10 @@ class MarketplaceService:
     def create_bounty(self, poster: str, *, title: str, spec: str,
                       reward_usd_cents: int, deadline_days: int,
                       target_urls: list[str]) -> Bounty:
+        try:
+            target_urls = normalize_public_bounty_target_urls(target_urls)
+        except ValueError as exc:
+            raise MarketplaceError(str(exc)) from exc
         b = Bounty(bounty_id=f"bty_{uuid.uuid4().hex[:12]}", poster_tenant=poster,
                    title=title, spec=spec, reward_usd_cents=reward_usd_cents,
                    deadline=(utcnow() + timedelta(days=deadline_days)).isoformat(),
@@ -459,6 +464,8 @@ class MarketplaceService:
             raw_targets = self.r.hget(key, "targets")
             if raw_targets:
                 bounty.target_urls = json.loads(raw_targets)
+        bounty.target_urls = normalize_public_bounty_target_urls(
+            bounty.target_urls, drop_invalid=True)
         return bounty
 
     def submit_for_bounty(self, worker: str, bounty_id: str,

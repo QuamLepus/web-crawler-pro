@@ -15,6 +15,58 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_BOUNTY_TARGET_SENSITIVE_QUERY_KEYS = {
+    "access_token", "token", "api_key", "apikey", "key", "password",
+    "passwd", "secret", "auth", "authorization", "session", "sessionid",
+    "code", "signature", "sig", "email", "phone", "ssn",
+}
+
+
+def normalize_public_bounty_target_urls(values: Any, *,
+                                       drop_invalid: bool = False) -> list[str]:
+    """Normalize URLs intended for public bounty responses.
+
+    Legacy records can be sanitized with ``drop_invalid=True``; new API input
+    rejects the whole list if any target is unsafe or outside its bounds.
+    """
+    if not isinstance(values, list):
+        if drop_invalid:
+            return []
+        raise ValueError("target URLs must be a list")
+    if len(values) > 50 and not drop_invalid:
+        raise ValueError("at most 50 target URLs are allowed")
+
+    normalized = []
+    seen = set()
+    for raw in values[:50]:
+        valid = isinstance(raw, str)
+        value = raw.strip() if valid else ""
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+            query_keys = {key.lower().replace("-", "_")
+                          for key, _ in parse_qsl(parsed.query)}
+            valid = (valid and len(value) <= 2048
+                     and not any(char.isspace() for char in value)
+                     and parsed.scheme in {"http", "https"}
+                     and bool(parsed.hostname)
+                     and (port is None or 1 <= port <= 65535)
+                     and parsed.username is None and parsed.password is None
+                     and not parsed.fragment
+                     and not (query_keys & _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS))
+        except ValueError:
+            valid = False
+        if not valid:
+            if drop_invalid:
+                continue
+            raise ValueError(
+                "target URLs must be HTTP(S), at most 2048 characters, and contain no credentials")
+        if value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized
+
+
 class JobState(str, Enum):
     queued = "queued"
     running = "running"
@@ -484,33 +536,7 @@ class BountyCreate(BaseModel):
     @field_validator("target_urls")
     @classmethod
     def _validate_target_urls(cls, values: list[str]) -> list[str]:
-        normalized = []
-        for raw in values:
-            value = raw.strip()
-            try:
-                parsed = urlsplit(value)
-                port = parsed.port
-                sensitive_keys = {
-                    "access_token", "token", "api_key", "apikey", "key",
-                    "password", "passwd", "secret", "auth", "authorization",
-                    "session", "sessionid", "code", "signature", "sig",
-                    "email", "phone", "ssn",
-                }
-                query_keys = {key.lower().replace("-", "_")
-                              for key, _ in parse_qsl(parsed.query)}
-                valid = (len(value) <= 2048 and not any(char.isspace() for char in value)
-                         and parsed.scheme in {"http", "https"}
-                         and bool(parsed.hostname)
-                         and (port is None or 1 <= port <= 65535)
-                         and parsed.username is None and parsed.password is None
-                         and not parsed.fragment and not (query_keys & sensitive_keys))
-            except ValueError:
-                valid = False
-            if not valid:
-                raise ValueError(
-                    "target URLs must be HTTP(S), at most 2048 characters, and contain no credentials")
-            normalized.append(value)
-        return list(dict.fromkeys(normalized))
+        return normalize_public_bounty_target_urls(values)
 
 
 class BountyOut(BaseModel):
