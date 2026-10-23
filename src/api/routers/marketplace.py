@@ -62,8 +62,7 @@ async def create_listing(body: DatasetListingCreate, ctx: CtxDep,
             tags=body.tags, price_usd_cents=body.price_usd_cents,
             license=body.license, content_sha256=sha,
             record_count=record_count,
-            token_count=token_count,
-            storage_uri=f"s3://wcp-tenants/{ctx['tenant']}/{body.source_job_id}")
+            token_count=token_count)
     except MarketplaceError as exc:
         raise HTTPException(422, str(exc))
     mkt.copy_job_preview(body.source_job_id, lst.dataset_id, ctx["tenant"])
@@ -177,7 +176,7 @@ async def get_reviews(dataset_id: str, ctx: CtxDep, request: Request,
 
 # ------------------------------ purchase / delivery ----------------------- #
 @router.post("/datasets/{dataset_id}/purchase",
-             summary="Acquire a free dataset; paid checkout is not yet configured")
+             summary="Record a free purchase and issue signed manifest metadata; dataset bytes are unavailable")
 async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
     mkt = _mkt(request)
     try:
@@ -197,7 +196,7 @@ async def purchase(dataset_id: str, ctx: CtxDep, request: Request) -> dict:
     except Exception:
         logger.debug("webhook emit failed", exc_info=True)
     return {"purchase": pur.__dict__, "delivery": manifest.model_dump(mode="json"),
-            "verify": "check HMAC signature + sha256 of downloaded object"}
+            "verify": "check the HMAC signature; dataset bytes are not available for download"}
 
 
 @router.get("/purchases", response_model=list[MarketplacePurchaseOut],

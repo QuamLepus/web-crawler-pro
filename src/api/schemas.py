@@ -572,12 +572,13 @@ class BountyOut(BaseModel):
 
 
 class DeliveryManifest(BaseModel):
-    """Signed, verifiable delivery of a purchased dataset."""
+    """Signed purchase metadata; an object download is not currently provided."""
 
     delivery_id: str
     dataset_id: str
     buyer_tenant: str
-    uri: str
+    uri: str = Field(
+        default="", description="Empty when no dataset object is available for download")
     sha256: str
     size_bytes: int
     record_count: int

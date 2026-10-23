@@ -195,6 +195,7 @@ def test_marketplace_publish_requires_own_completed_crawl_and_uses_its_counters(
     listing = MarketplaceService(redis).get_listing(published.json()["dataset_id"])
     assert listing.record_count == 7
     assert listing.token_count == 31
+    assert listing.storage_uri == ""
 
 
 def test_marketplace_listing_reads_keep_unpublished_inventory_private(client, api_key):
@@ -437,6 +438,11 @@ def test_marketplace_purchase_history_supports_offset_pagination(
             f"/v1/marketplace/datasets/{listing.dataset_id}/purchase",
             headers=headers)
         assert response.status_code == 200, response.text
+        manifest = response.json()["delivery"]
+        assert manifest["uri"] == ""
+        assert "not available for download" in response.json()["verify"]
+        from src.api.schemas import DeliveryManifest
+        assert MarketplaceService.verify_manifest(DeliveryManifest(**manifest))
         purchase_ids.append(response.json()["purchase"]["purchase_id"])
 
     first_page = client.get("/v1/marketplace/purchases", headers=headers,
@@ -448,6 +454,34 @@ def test_marketplace_purchase_history_supports_offset_pagination(
     assert [item["purchase_id"] for item in second_page.json()] == purchase_ids[::-1][2:]
     assert client.get("/v1/marketplace/purchases", headers=headers,
                       params={"offset": 10001}).status_code == 422
+
+
+def test_delivery_read_removes_legacy_synthetic_object_uris(client, monkeypatch):
+    import json
+    from src.api.schemas import DeliveryManifest
+    from src.marketplace.service import MarketplaceService
+
+    monkeypatch.setenv("MARKETPLACE_SIGNING_SECRET",
+                       "marketplace-test-signing-secret-legacy")
+    redis = client.app.state.services.redis
+    marketplace = MarketplaceService(redis)
+    listing = marketplace.create_listing(
+        "seller", title="Legacy manifest target",
+        description="A dataset used to exercise sanitization of old delivery metadata.",
+        tags=["legacy"], price_usd_cents=0, license="CC-BY-4.0",
+        content_sha256="d" * 64)
+    manifest = marketplace.issue_delivery("buyer", listing, persist=False)
+    legacy = manifest.model_dump(mode="json")
+    legacy["uri"] = (f"s3://wcp-marketplace/{listing.dataset_id}/buyer/"
+                     f"{listing.dataset_id}.parquet")
+    redis.setex(f"mkt:delivery:{manifest.delivery_id}", 60,
+                json.dumps(legacy))
+
+    result = marketplace.get_delivery(manifest.delivery_id, "buyer")
+
+    assert result is not None
+    assert result.uri == ""
+    assert MarketplaceService.verify_manifest(result)
 
 
 def test_purchase_history_ties_have_stable_page_order(client):

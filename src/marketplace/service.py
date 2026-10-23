@@ -2,10 +2,10 @@
 
 Storage backend is Redis (swappable): listings/reviews/bounties/purchases are
 kept in hashes + sorted-set indexes so the marketplace can be queried without
-a relational DB in single-node deployments.  Purchases produce **signed
-delivery manifests** (HMAC-SHA256 over a canonical JSON form) with an
-embedded SHA-256 content digest so buyers can verify dataset integrity and
-provenance offline.
+a relational DB in single-node deployments. Free purchases produce **signed
+manifest metadata** (HMAC-SHA256 over a canonical JSON form) with a declared
+SHA-256 digest. Dataset objects are not uploaded or downloadable yet, so the
+digest cannot currently be checked against delivered bytes.
 """
 
 from __future__ import annotations
@@ -587,7 +587,7 @@ class MarketplaceService:
         m = DeliveryManifest(
             delivery_id=f"dlv_{uuid.uuid4().hex[:12]}",
             dataset_id=lst.dataset_id, buyer_tenant=buyer,
-            uri=f"s3://wcp-marketplace/{lst.dataset_id}/{buyer}/{lst.dataset_id}.parquet",
+            uri="",
             sha256=lst.content_sha256, size_bytes=lst.size_bytes,
             record_count=lst.record_count, issued_at=now,
             expires_at=now + timedelta(days=DELIVERY_TTL_DAYS),
@@ -628,6 +628,11 @@ class MarketplaceService:
             return None
         if m.expires_at < utcnow():
             return None
+        # Older releases emitted this synthetic object key without uploading an
+        # object. Replace it in the response and re-sign the truthful metadata.
+        if m.uri.startswith("s3://wcp-marketplace/"):
+            m.uri = ""
+            m.signature = self._sign(m)
         return m
 
     # ------------------------------ bounties ---------------------------- #
