@@ -364,8 +364,9 @@ export class WebIntelligenceClient {
     return this.request("GET", "billing/usage");
   }
 
-  getBillingInvoiceEstimate(): Promise<JsonObject> {
-    return this.request("GET", "billing/invoice");
+  getBillingInvoiceEstimate(period?: string): Promise<JsonObject> {
+    const query = period === undefined ? "" : `?${new URLSearchParams({ period })}`;
+    return this.request("GET", `billing/invoice${query}`);
   }
 
   /** Read public OIDC configuration; the API never returns the client secret. */
