@@ -25,7 +25,7 @@
 <div class="grid g-main">
   <section class="card">
     <div class="card-head"><h2>Watched pages</h2><span class="badge">{{ watches|length }}</span></div>
-    {% if watches %}<div class="table-wrap"><table class="data"><thead><tr><th>Page</th><th>Interval</th><th>Last check</th><th>State</th><th></th></tr></thead><tbody>
+    {% if error %}<div class="empty"><h3>Watched pages unavailable</h3><p>Refresh after the service recovers to try again.</p></div>{% elif watches %}<div class="table-wrap"><table class="data"><thead><tr><th>Page</th><th>Interval</th><th>Last check</th><th>State</th><th></th></tr></thead><tbody>
       {% for watch in watches %}<tr>
         <td><a href="/app/watch?watch_id={{ watch.watch_id }}">{{ watch.url }}</a></td>
         <td>{{ watch.interval_minutes }} min</td>
@@ -37,14 +37,15 @@
   </section>
   <section class="card">
     <div class="card-head"><h2>Change history</h2>{% if selected_watch %}<a class="btn btn-sm" href="/app/watch">All watches</a>{% endif %}</div>
-    {% if selected_watch_missing %}<div class="alert warn card-pad" role="alert">This watch is no longer available. <a href="/app/watch">Return to all watches</a>.</div>
+    {% if selected_watch_unverified %}<div class="alert warn card-pad" role="alert">Could not verify the selected watch because the watch list failed to load. Refresh after the service recovers.</div>
+    {% elif selected_watch_missing %}<div class="alert warn card-pad" role="alert">This watch is no longer available. <a href="/app/watch">Return to all watches</a>.</div>
     {% elif selected_watch %}
       {% if selected_watch_item %}<div class="card-pad small dim">Viewing <strong>{{ selected_watch_item.url }}</strong> · {{ selected_watch_item.interval_minutes }} min{% if not selected_watch_item.active %} · stopped{% endif %}</div>{% endif %}
       {% if events_error %}<div class="alert warn card-pad" role="alert">Could not load change history: {{ events_error }}</div>{% elif events %}<div class="stack-sm card-pad">{% for event in events|reverse %}<article class="card card-pad"><div class="between"><b>{{ event.event_type }}</b><span class="tiny muted">{{ event.changed_at }}</span></div><p class="small mt-1">{{ event.summary }}</p>{% if event.title_changed %}<span class="badge">Title changed</span>{% endif %}{% if event.text_changed %}<details class="mt-2"><summary class="small">Changed text excerpt</summary><div class="grid g-2 mt-1"><div><span class="tiny muted">Before</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.old_text_excerpt }}</pre></div><div><span class="tiny muted">After</span><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto">{{ event.new_text_excerpt }}</pre></div></div></details>{% endif %}{% if event.price_mentions_before or event.price_mentions_after %}<p class="small mt-1">Price-like text: {{ event.price_mentions_before|join(', ') }} → {{ event.price_mentions_after|join(', ') }}</p>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty"><h3>No changes recorded</h3><p>Run a first crawl and wait for a later snapshot to compare.</p></div>{% endif %}
     {% else %}<div class="empty"><h3>Select a watch</h3><p>Choose a page to inspect its history.</p></div>{% endif %}
   </section>
 </div>
-{% if selected_watch and not selected_watch_missing %}
+{% if selected_watch and not selected_watch_missing and not selected_watch_unverified %}
 <section class="card mt-3">
   <div class="card-head"><h2>Saved versions</h2><span class="badge">{% if snapshots_error %}Unavailable{% else %}{{ snapshots|length }} / 20{% endif %}</span></div>
   <p class="small dim card-pad">Most recent first. Up to 20 snapshots are retained for 90 days; each stores at most 5,000 characters of extracted page text.</p>

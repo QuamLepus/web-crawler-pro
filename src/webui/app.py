@@ -1311,6 +1311,7 @@ async def watch_page(request: Request, watch_id: str = Query("", max_length=64))
         (watch for watch in items if watch.get("watch_id") == watch_id), None
     )
     selected_watch_missing = bool(watch_id and watches_result.ok and not selected_watch_item)
+    selected_watch_unverified = bool(watch_id and not watches_result.ok)
     events = []
     snapshots = []
     events_error = ""
@@ -1325,6 +1326,7 @@ async def watch_page(request: Request, watch_id: str = Query("", max_length=64))
     return render(request, "watch.html", page="watch", me=me, watches=items,
                   selected_watch=watch_id, selected_watch_item=selected_watch_item,
                   selected_watch_missing=selected_watch_missing,
+                  selected_watch_unverified=selected_watch_unverified,
                   events=events, snapshots=snapshots,
                   events_error=events_error, snapshots_error=snapshots_error,
                   error=(watches_result.error if not watches_result.ok else ""),
