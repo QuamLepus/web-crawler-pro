@@ -68,7 +68,7 @@
     <main class="content">
       {% if flash %}
         <div class="alert {{ 'ok' if flash_kind == 'ok' else ('warn' if flash_kind == 'warn' else 'danger') }} mb-3"
-             role="status" style="animation:fadeUp 300ms var(--ease-out)">
+             role="{{ 'alert' if flash_kind == 'danger' else 'status' }}" style="animation:fadeUp 300ms var(--ease-out)">
           <span class="ico">{{ '✓' if flash_kind == 'ok' else ('!' if flash_kind == 'warn' else '✕') }}</span>
           <span>{{ flash }}</span>
         </div>

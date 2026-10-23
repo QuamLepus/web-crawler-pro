@@ -1036,6 +1036,33 @@ def test_workflow_edit_applies_dependency_checkbox_edges(signed_in, monkeypatch)
         ]})]
 
 
+def test_workflow_dependency_validation_error_is_announced_to_screen_readers(
+        signed_in, monkeypatch):
+    import json
+
+    from src.webui.client import Api, Result
+
+    async def reject_update(self, workflow_id, **body):
+        return Result(False, error="Workflow dependency graph contains a cycle.")
+
+    monkeypatch.setattr(Api, "workflow_update", reject_update)
+    steps = [
+        {"step_id": "seed", "depends_on": [], "url": "https://seed.example"},
+        {"step_id": "branch", "depends_on": ["seed"],
+         "url": "https://branch.example"},
+    ]
+    response = signed_in.post(
+        "/app/workflows/workflow_aaaaaaaaaaaaaaaaaaaa/edit",
+        data={"name": "Branched", "steps_json": json.dumps(steps),
+              "dependency_editor": "1", "depends_on_0": ["branch"]},
+        follow_redirects=False)
+    assert response.status_code == 303
+    page = signed_in.get(response.headers["location"])
+    assert "Workflow dependency graph contains a cycle." in page.text
+    import re
+    assert re.search(r'class="alert danger mb-3"\s+role="alert"', page.text)
+
+
 def test_workflow_dag_preview_orders_nodes_to_reduce_crossings():
     from src.webui.app import _workflow_dag_preview
 
