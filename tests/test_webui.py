@@ -1393,3 +1393,26 @@ def test_watch_history_reports_load_errors_instead_of_empty_states(signed_in, mo
     assert "This watch is no longer available" in stale.text
     assert 'href="/app/watch">Return to all watches</a>' in stale.text
     assert "Saved versions" not in stale.text
+
+
+def test_watch_list_failure_is_not_reported_as_empty_or_missing_history(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    async def watches(self):
+        return Result(False, error="watch list service unavailable")
+
+    async def unexpected_history(self, watch_id):
+        raise AssertionError("history must not be requested when the watch list failed")
+
+    monkeypatch.setattr(Api, "watches", watches)
+    monkeypatch.setattr(Api, "watch_changes", unexpected_history)
+    monkeypatch.setattr(Api, "watch_snapshots", unexpected_history)
+
+    page = signed_in.get("/app/watch", params={"watch_id": "watch_aaaaaaaaaaaaaaaaaaaa"})
+    assert page.status_code == 200
+    assert "Could not verify the selected watch because the watch list failed to load" in page.text
+    assert "watch list service unavailable" in page.text
+    assert "Watched pages unavailable" in page.text
+    assert "No watches yet" not in page.text
+    assert "No changes recorded" not in page.text
+    assert "Saved versions" not in page.text
