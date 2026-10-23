@@ -72,8 +72,10 @@ The web console provides a simple URL-list form for sequential recipes, an
 advanced JSON editor for DAG step definitions, and a read-only visual dependency
 preview. The preview colors and labels nodes with the latest run's per-step status
 when available; a selector lets users choose another recent run for that workflow.
-Its saved-workflow editor retains per-step IDs, dependencies,
-page limits, and robots settings. Recent runs show settled, active, queued,
+The SVG also exposes an accessible title and a textual description of each step,
+its prerequisites, and its displayed status. The saved-workflow editor retains
+per-step IDs, dependencies, page limits, and robots settings. Recent runs show
+settled, active, queued,
 failed, skipped, and cancelled step counts plus each step's status and dependencies.
 Recent run history is paginated (20 runs per page); DAG selectors show runs on
 the current page, and a selected historical overlay remains available while

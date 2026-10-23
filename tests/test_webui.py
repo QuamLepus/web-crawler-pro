@@ -1142,6 +1142,11 @@ def test_workflow_console_renders_dependency_editor(signed_in, monkeypatch):
     assert "These prerequisites create a dependency cycle." in page.text
     assert "const createsCycle = () =>" in page.text
     assert 'data-viz="workflow-dag"' in page.text
+    assert 'aria-labelledby="workflow-dag-title-workflow_aaaaaaaaaaaaaaaaaaaa"' in page.text
+    assert 'aria-describedby="workflow-dag-description-workflow_aaaaaaaaaaaaaaaaaaaa"' in page.text
+    assert 'id="workflow-dag-description-workflow_aaaaaaaaaaaaaaaaaaaa">' in page.text
+    assert "Step seed at https://seed.example. Root step. Status: completed." in page.text
+    assert "Step summary at https://summary.example. Prerequisites: news, research. Status: queued." in page.text
     assert page.text.count('<path class="workflow-dag-edge"') == 4
     assert page.text.count('class="workflow-dag-node"') == 4
     assert "Visual dependency graph (read-only)" in page.text
