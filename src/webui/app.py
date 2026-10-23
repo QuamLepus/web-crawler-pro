@@ -1650,11 +1650,14 @@ async def marketplace(request: Request, q: str = Query(""), tag: str = Query("")
         if jobs.ok and isinstance(jobs.data, dict)
         else (jobs.data if isinstance(jobs.data, list) else [])
     )
+    from src.marketplace.service import delivery_signing_configured
+
     return render(
         request,
         "marketplace.html",
         page="marketplace",
         me=me,
+        manifest_available=delivery_signing_configured(),
         q=q,
         datasets=(datasets.data if datasets.ok else None),
         bounties=(bounties.data if bounties.ok else None),

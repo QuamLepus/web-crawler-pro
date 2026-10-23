@@ -91,6 +91,11 @@ DELIVERY_TTL_DAYS = 7
 _SIGNING_SECRET_ENV = "MARKETPLACE_SIGNING_SECRET"
 
 
+def delivery_signing_configured() -> bool:
+    """Whether delivery signatures can be issued without exposing key data."""
+    return len(os.getenv(_SIGNING_SECRET_ENV, "").encode()) >= 32
+
+
 def _signing_key() -> bytes:
     secret = os.getenv(_SIGNING_SECRET_ENV, "")
     key = secret.encode()

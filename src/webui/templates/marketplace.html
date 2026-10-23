@@ -68,6 +68,11 @@
                         title="Paid purchases are unavailable until settlement is integrated.">
                   Paid unavailable
                 </button>
+              {% elif not manifest_available %}
+                <button class="btn btn-sm" disabled
+                        title="A valid delivery signing secret is not configured.">
+                  Free manifest unavailable
+                </button>
               {% else %}
                 <form method="post"
                       action="/app/marketplace/datasets/{{ d.get('dataset_id') }}/purchase"
@@ -80,9 +85,14 @@
         {% endfor %}
       </div>
       <div class="card-foot">
-        Free acquisitions record a purchase and issue a signed manifest, but do
-        not transfer dataset bytes. Paid purchases are unavailable until
-        settlement is integrated; free acquisitions do not charge a platform fee.
+        {% if manifest_available %}
+          Free acquisitions record a purchase and issue a signed manifest, but do
+          not transfer dataset bytes; they do not charge a platform fee.
+        {% else %}
+          Free acquisitions are disabled until the operator configures a valid
+          delivery signing secret.
+        {% endif %}
+        Paid purchases are unavailable until settlement is integrated.
       </div>
     {% else %}
       <div class="empty">
@@ -148,8 +158,13 @@
       <div>
         <h4 class="mb-2">Buying</h4>
         <ol class="small dim" style="padding-left:18px">
-          <li>Free listings can create a signed manifest; paid purchases are not
-            available yet.</li>
+          {% if manifest_available %}
+            <li>Free listings can create a signed manifest; paid purchases are
+              not available yet.</li>
+          {% else %}
+            <li>Free manifest issuance is disabled until a valid signing secret
+              is configured; paid purchases are unavailable as well.</li>
+          {% endif %}
           <li>The manifest contains the dataset digest but does not transfer data
             bytes.</li>
           <li>Verify the digest only after obtaining the bytes from an authorized
