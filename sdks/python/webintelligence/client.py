@@ -251,9 +251,11 @@ class Client:
         """Retrieve a non-expired delivery manifest belonging to this tenant."""
         return self._request("GET", f"marketplace/deliveries/{quote(delivery_id, safe='')}")
 
-    def list_marketplace_purchases(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """List recent purchases belonging to this tenant."""
-        return self._request("GET", "marketplace/purchases", params={"limit": limit})
+    def list_marketplace_purchases(self, *, limit: int = 50,
+                                   offset: int = 0) -> list[dict[str, Any]]:
+        """List a page of recent purchases belonging to this tenant."""
+        return self._request("GET", "marketplace/purchases", params={
+            "limit": limit, "offset": offset})
 
     def list_marketplace_reviews(self, dataset_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         """Read public reviews for a visible dataset; buyer tenant IDs are omitted."""
