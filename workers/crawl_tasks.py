@@ -376,6 +376,71 @@ def _store_item(item: dict) -> dict | None:
     return cleaned
 
 
+def _persist_marketplace_artifact(redis_client, job_id: str, tenant: str,
+                                  collected: list[dict], *,
+                                  rights_confirmed: bool = False, store=None) -> str:
+    """Optionally persist a bounded full crawl artifact and record its metadata."""
+    if not rights_confirmed:
+        _update_job(redis_client, job_id, {
+            "artifact_status": "rejected",
+            "artifact_error": "data-rights confirmation is required",
+        })
+        return "rejected"
+    enabled = os.getenv("MARKETPLACE_ARTIFACT_STORAGE_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"}
+    if not enabled:
+        _update_job(redis_client, job_id, {"artifact_status": "disabled"})
+        return "disabled"
+    if redis_client is None or not job_id or not tenant:
+        _update_job(redis_client, job_id, {
+            "artifact_status": "rejected",
+            "artifact_error": "crawl job owner could not be verified",
+        })
+        return "rejected"
+
+    try:
+        from src.marketplace.artifacts import (ArtifactRejected,
+                                               MinioMarketplaceArtifactStore,
+                                               canonical_jsonl)
+        job_tenant = redis_client.hget(JOB_KEY.format(job_id=job_id), "tenant")
+        if isinstance(job_tenant, bytes):
+            job_tenant = job_tenant.decode("utf-8", errors="replace")
+        if job_tenant != tenant:
+            _update_job(redis_client, job_id, {
+                "artifact_status": "rejected",
+                "artifact_error": "crawl job tenant does not match artifact owner",
+            })
+            return "rejected"
+
+        payload, digest, count = canonical_jsonl(collected)
+        artifact_store = store or MinioMarketplaceArtifactStore()
+        metadata = artifact_store.put_verified(tenant, job_id, payload, digest)
+        _update_job(redis_client, job_id, {
+            "artifact_status": "available",
+            "artifact_uri": metadata.uri,
+            "artifact_object_key": metadata.object_key,
+            "artifact_sha256": metadata.sha256,
+            "artifact_size_bytes": metadata.size_bytes,
+            "artifact_record_count": metadata.record_count or count,
+            "artifact_format": metadata.format,
+            "artifact_expires_at": metadata.expires_at,
+        })
+        return "available"
+    except Exception as exc:  # artifact storage must not fail a successful crawl
+        from src.marketplace.artifacts import ArtifactRejected
+
+        status = "rejected" if isinstance(exc, ArtifactRejected) else "unavailable"
+        _update_job(redis_client, job_id, {
+            "artifact_status": status,
+            "artifact_error": (str(exc)[:200] if status == "rejected"
+                               else "object storage operation failed"),
+        })
+        if status == "unavailable":
+            logger.warning("could not persist marketplace artifact (%s)",
+                           type(exc).__name__)
+        return status
+
+
 def _store_marketplace_preview(redis_client, job_id: str, tenant: str,
                                collected: list[dict], digest: str) -> bool:
     """Retain only a bounded, sanitized marketplace sample for 30 days."""
@@ -543,6 +608,12 @@ def run_crawl(payload: dict, redis_client=None, fetcher=None, sleeper=None) -> d
     digest = canonical_sha256(collected)
     preview_available = False
     if state == "completed":
+        if payload.get("persist_marketplace_artifact") is True:
+            _persist_marketplace_artifact(
+                r, job_id, tenant, collected,
+                rights_confirmed=(payload.get("marketplace_data_rights_confirmed") is True))
+        else:
+            _update_job(r, job_id, {"artifact_status": "not_requested"})
         try:
             preview_available = _store_marketplace_preview(
                 r, job_id, tenant, collected, digest)
