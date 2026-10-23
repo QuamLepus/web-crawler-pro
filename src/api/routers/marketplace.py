@@ -231,8 +231,9 @@ async def create_bounty(body: BountyCreate, ctx: CtxDep,
 
 @router.get("/bounties", response_model=list[BountyOut])
 async def open_bounties(ctx: CtxDep, request: Request,
-                        limit: int = Query(50, ge=1, le=200)) -> list[BountyOut]:
-    return _mkt(request).list_open_bounties(limit=limit)
+                        limit: int = Query(50, ge=1, le=200),
+                        offset: int = Query(0, ge=0, le=10_000)) -> list[BountyOut]:
+    return _mkt(request).list_open_bounties(limit=limit, offset=offset)
 
 
 @router.get("/bounties/{bounty_id}/submissions", response_model=list[str],

@@ -981,6 +981,30 @@ def test_open_bounty_listing_expires_deadlines_and_fills_result_limit(client):
     assert marketplace.r.zscore("mkt:bounties:open", expired.bounty_id) is None
 
 
+def test_open_bounties_support_bounded_offset_pagination(client, api_key):
+    from src.marketplace.service import MarketplaceService
+
+    marketplace = MarketplaceService(client.app.state.services.redis)
+    for index in range(3):
+        marketplace.create_bounty(
+            "poster", title=f"Paginated public bounty {index}",
+            spec="Collect and curate a set of public records from approved sources.",
+            reward_usd_cents=5000, deadline_days=10, target_urls=[])
+
+    headers = _headers(api_key)
+    all_items = client.get("/v1/marketplace/bounties", headers=headers,
+                           params={"limit": 10}).json()
+    first_page = client.get("/v1/marketplace/bounties", headers=headers,
+                            params={"limit": 2, "offset": 0}).json()
+    second_page = client.get("/v1/marketplace/bounties", headers=headers,
+                             params={"limit": 2, "offset": 2}).json()
+
+    assert [item["bounty_id"] for item in first_page + second_page] == [
+        item["bounty_id"] for item in all_items]
+    assert client.get("/v1/marketplace/bounties", headers=headers,
+                      params={"offset": 10001}).status_code == 422
+
+
 def test_marketplace_preview_hides_other_tenants_drafts_and_never_fabricates_rows(client, api_key):
     from src.marketplace.service import MarketplaceService
 

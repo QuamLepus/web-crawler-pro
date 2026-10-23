@@ -313,7 +313,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
     return new Response(JSON.stringify([{ dataset_id: 'ds_public', status: 'published' }]),
       { status: 200 });
   } });
-  await client.listMarketplaceBounties(7);
+  await client.listMarketplaceBounties(7, 2);
   await client.listMarketplaceBountySubmissions('bty_0123456789ab', 4, 3);
   await client.searchMarketplaceDatasets({ q: 'climate change', tag: 'energy',
     maxPriceCents: 500, limit: 5 });
@@ -323,7 +323,7 @@ test('marketplace methods search published datasets and encode dataset IDs', asy
   await client.listMarketplacePurchases(12, 5);
   await client.listMarketplaceReviews('dataset:1', 12, 4);
   assert.deepEqual(calls, [
-    { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7', method: 'GET' },
+    { url: 'http://localhost:8000/api/v1/marketplace/bounties?limit=7&offset=2', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/bounties/bty_0123456789ab/submissions?limit=4&offset=3', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets?q=climate+change&tag=energy&max_price_cents=500&limit=5', method: 'GET' },
     { url: 'http://localhost:8000/api/v1/marketplace/datasets/dataset%3A1', method: 'GET' },

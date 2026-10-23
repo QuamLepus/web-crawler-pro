@@ -362,10 +362,11 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_marketplace_bounties_list", "List open public marketplace bounties; this read-only tool does not submit or award work.", {
+  server.tool("wio_marketplace_bounties_list", "List a page of open public marketplace bounties; this read-only tool does not submit or award work.", {
     limit: z.number().int().min(1).max(200).optional(),
-  }, async ({ limit }) => {
-    try { return result(await client.listMarketplaceBounties(limit)); }
+    offset: z.number().int().min(0).max(10000).optional(),
+  }, async ({ limit, offset }) => {
+    try { return result(await client.listMarketplaceBounties(limit, offset)); }
     catch (error) { return failure(error); }
   });
 
