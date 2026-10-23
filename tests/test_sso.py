@@ -247,6 +247,82 @@ def test_oidc_state_mismatch_and_bad_id_token_are_rejected(sso_client, monkeypat
     assert transaction["tenant"] == owner["org_id"]
 
 
+def test_oidc_callback_rejects_disallowed_domain_and_disabled_jit(sso_client, monkeypatch):
+    owner = _signup(sso_client)
+    headers = _enterprise(sso_client, owner)
+    configured = sso_client.put("/api/v1/sso/oidc", headers=headers,
+                                json=_config_body(jit_provisioning=False))
+    assert configured.status_code == 200, configured.text
+    record = json.loads(sso_client.app.state.services.redis.get(
+        sso.CONFIG_KEY.format(tenant=owner["org_id"])))
+    private_pem, jwk = _rsa_pair()
+    metadata = {"issuer": record["issuer"],
+        "authorization_endpoint": "https://idp.example.test/authorize",
+        "token_endpoint": "https://idp.example.test/token",
+        "jwks_uri": "https://idp.example.test/keys", "_jwks": [jwk]}
+    monkeypatch.setattr(sso, "_metadata", _fake_metadata(metadata))
+    token_holder = {"token": ""}
+
+    async def fake_http_json(*_args, **_kwargs):
+        return {"id_token": token_holder["token"]}
+
+    monkeypatch.setattr(sso, "_http_json", fake_http_json)
+
+    def attempt(email, subject):
+        login = sso_client.get(configured.json()["login_path"], follow_redirects=False)
+        params = parse_qs(urlsplit(login.headers["location"]).query)
+        state = params["state"][0]
+        digest = __import__("hashlib").sha256(state.encode()).hexdigest()
+        transaction = json.loads(sso_client.app.state.services.redis.get(
+            sso.STATE_KEY.format(digest=digest)))
+        claims = {"iss": record["issuer"], "sub": subject,
+                  "aud": record["client_id"], "iat": int(time.time()),
+                  "exp": int(time.time()) + 300, "nonce": transaction["nonce"],
+                  "email": email, "email_verified": True}
+        token_holder["token"] = jwt.encode(
+            claims, private_pem, algorithm="RS256", headers={"kid": jwk["kid"]})
+        return sso_client.get(
+            "/api/auth/oidc/callback", params={"state": state, "code": "one-time-code"},
+            headers={"Cookie": f"{sso.STATE_COOKIE}={state}"},
+            follow_redirects=False)
+
+    disallowed = attempt("person@outside.example", "subject-outside-domain")
+    assert disallowed.status_code == 401
+    assert "outside.example" not in disallowed.text
+    assert sso_client.app.state.services.users.get_by_email(
+        "person@outside.example") is None
+
+    jit_disabled = attempt("new.person@example.com", "subject-jit-disabled")
+    assert jit_disabled.status_code == 401
+    assert "JIT" not in jit_disabled.text
+    assert sso_client.app.state.services.users.get_by_email(
+        "new.person@example.com") is None
+    failures = sso_client.get("/api/v1/sso/audit", headers=headers).json()["items"]
+    assert [item["result"] for item in failures[:2]] == ["validation", "validation"]
+    assert all("email" not in item for item in failures[:2])
+
+
+def _fake_metadata(metadata):
+    async def _return(*_args, **_kwargs):
+        return metadata
+    return _return
+
+
+def test_sso_audit_history_is_bounded_and_expires(sso_client):
+    redis = sso_client.app.state.services.redis
+    tenant = "0123456789"
+    for index in range(sso.AUDIT_LIMIT + 5):
+        sso._audit(redis, tenant, f"test.event.{index}", user_id=str(index),
+                   result="success")
+
+    key = sso.AUDIT_KEY.format(tenant=tenant)
+    entries = [json.loads(raw) for raw in redis.lrange(key, 0, -1)]
+    assert len(entries) == sso.AUDIT_LIMIT
+    assert entries[0]["event"] == f"test.event.{sso.AUDIT_LIMIT + 4}"
+    assert entries[-1]["event"] == "test.event.5"
+    assert 0 < redis.ttl(key) <= 365 * 24 * 60 * 60
+
+
 def test_oidc_endpoint_validation_blocks_external_host_and_private_resolution(monkeypatch):
     with pytest.raises(sso._OIDCFailure):
         sso._validate_endpoint("https://169.254.169.254/latest/meta-data", "idp.example.test")
