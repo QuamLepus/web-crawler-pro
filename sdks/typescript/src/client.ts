@@ -399,6 +399,13 @@ export class WebIntelligenceClient {
       `marketplace/bounties/${encodeURIComponent(bountyId)}/submissions?${query}`);
   }
 
+  /** Select a submitted, still-published dataset as this poster's winner; does not transfer funds. */
+  awardMarketplaceBounty(bountyId: string, datasetId: string): Promise<JsonObject> {
+    const query = new URLSearchParams({ dataset_id: datasetId });
+    return this.request("POST",
+      `marketplace/bounties/${encodeURIComponent(bountyId)}/award?${query}`);
+  }
+
   listMarketplaceBountySubmissions(bountyId: string, limit = 50, offset = 0): Promise<string[]> {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<string[]>("GET",
