@@ -30,10 +30,13 @@ _BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES = (
 
 
 def _is_sensitive_bounty_target_query_key(key: str) -> bool:
-    normalized = key.casefold().replace("-", "_").replace(".", "_").strip("[]")
-    return (normalized in _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS or
-            any(normalized.endswith(suffix)
-                for suffix in _BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES))
+    normalized = key.casefold().replace("-", "_").replace(".", "_")
+    segments = (segment for segment in normalized.replace("]", "[").split("[")
+                if segment)
+    return any(segment in _BOUNTY_TARGET_SENSITIVE_QUERY_KEYS or
+               any(segment.endswith(suffix)
+                   for suffix in _BOUNTY_TARGET_SENSITIVE_QUERY_SUFFIXES)
+               for segment in segments)
 
 
 def normalize_public_bounty_target_urls(values: Any, *,
