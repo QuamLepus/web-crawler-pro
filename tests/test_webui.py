@@ -1387,3 +1387,9 @@ def test_watch_history_reports_load_errors_instead_of_empty_states(signed_in, mo
     assert 'class="alert warn card-pad" role="alert"' in page.text
     assert "No changes recorded" not in page.text
     assert "No snapshots saved" not in page.text
+
+    stale = signed_in.get("/app/watch", params={"watch_id": "watch_bbbbbbbbbbbbbbbbbbbb"})
+    assert stale.status_code == 200
+    assert "This watch is no longer available" in stale.text
+    assert 'href="/app/watch">Return to all watches</a>' in stale.text
+    assert "Saved versions" not in stale.text
