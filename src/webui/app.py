@@ -1704,7 +1704,8 @@ async def marketplace_purchase(request: Request, dataset_id: str):
     res = await api.dataset_purchase(dataset_id)
     return _redirect(
         "/app/marketplace",
-        "Purchased — delivery queued" if res.ok else res.error,
+        ("Free purchase recorded — signed manifest issued; dataset bytes were not transferred"
+         if res.ok else res.error),
         "ok" if res.ok else "err",
     )
 

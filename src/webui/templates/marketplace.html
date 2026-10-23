@@ -61,18 +61,26 @@
             <div><span class="badge">{{ d.get('license', '—') }}</span></div>
             <div class="cat-cell fee">{{ (d.get('price_usd_cents') or 0)|money }}</div>
             <div class="right">
-              <form method="post"
-                    action="/app/marketplace/datasets/{{ d.get('dataset_id') }}/purchase"
-                    data-confirm="Buy this dataset? The delivery is issued immediately.">
-                <button class="btn btn-sm btn-primary">Acquire</button>
-              </form>
+              {% if (d.get('price_usd_cents') or 0)|int > 0 %}
+                <button class="btn btn-sm" disabled
+                        title="Paid purchases are unavailable until settlement is integrated.">
+                  Paid unavailable
+                </button>
+              {% else %}
+                <form method="post"
+                      action="/app/marketplace/datasets/{{ d.get('dataset_id') }}/purchase"
+                      data-confirm="Record a free purchase and issue a signed manifest? Dataset bytes are not transferred by this console.">
+                  <button class="btn btn-sm btn-primary">Get signed manifest</button>
+                </form>
+              {% endif %}
             </div>
           </div>
         {% endfor %}
       </div>
       <div class="card-foot">
-        Every delivery is signed and hash-verifiable. The platform fee is
-        applied at purchase; the seller keeps the rest.
+        Free acquisitions record a purchase and issue a signed manifest, but do
+        not transfer dataset bytes. Paid purchases are unavailable until
+        settlement is integrated; free acquisitions do not charge a platform fee.
       </div>
     {% else %}
       <div class="empty">
@@ -130,16 +138,20 @@
           <li>Create a listing pointing at that job ID.</li>
           <li>Buyers browse the catalogue title, description, record count and
             licence.</li>
-          <li>On purchase the platform issues a signed delivery manifest and
-            takes its fee.</li>
+          <li>Free acquisitions create a signed manifest; paid purchases are
+            unavailable until payment settlement is integrated. No dataset bytes
+            are transferred by this console.</li>
         </ol>
       </div>
       <div>
         <h4 class="mb-2">Buying</h4>
         <ol class="small dim" style="padding-left:18px">
-          <li>Find a dataset; the digest is what you are really buying.</li>
-          <li>Acquire it — delivery is queued immediately.</li>
-          <li>Verify the hash against the manifest before you trust a row.</li>
+          <li>Free listings can create a signed manifest; paid purchases are not
+            available yet.</li>
+          <li>The manifest contains the dataset digest but does not transfer data
+            bytes.</li>
+          <li>Verify the digest only after obtaining the bytes from an authorized
+            source.</li>
           <li>Leave a rating so the next buyer knows.</li>
         </ol>
       </div>
