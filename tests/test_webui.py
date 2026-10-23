@@ -494,7 +494,9 @@ def test_nothing_pretends_to_be_a_consumer_search_engine(signed_in):
     assert "not a general web search" in res.text
 
 
-def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in):
+def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in, monkeypatch):
+    monkeypatch.setenv("MARKETPLACE_SIGNING_SECRET",
+                       "marketplace-console-signing-key-0001")
     from src.marketplace.service import MarketplaceService
 
     marketplace = MarketplaceService(signed_in.app.state.services.redis)
@@ -529,6 +531,15 @@ def test_marketplace_is_a_data_catalogue_not_a_shop(signed_in):
     assert "dataset bytes are not transferred" in text.lower()
     assert "delivery is queued immediately" not in text.lower()
     assert "platform fee is applied at purchase" not in text.lower()
+
+    monkeypatch.delenv("MARKETPLACE_SIGNING_SECRET", raising=False)
+    unconfigured = signed_in.get("/app/marketplace")
+    soup = BeautifulSoup(unconfigured.text, "html.parser")
+    free_row = next(row for row in soup.select(".cat-row")
+                    if "Catalogue item 0" in row.get_text())
+    assert "Free manifest unavailable" in free_row.get_text()
+    assert free_row.select_one("form[action$='/purchase']") is None
+    assert "disabled until the operator configures a valid" in unconfigured.text
 
 
 def test_console_declares_the_platform_on_every_page(signed_in):
