@@ -1868,11 +1868,16 @@ async def settings_page(request: Request):
         return redirect
     hooks = await api.webhooks()
     sso_config, audit = ({}, {})
+    sso_status_error = ""
+    sso_audit_error = ""
     sso_admin = me.get("role") in {"owner", "admin"}
     if sso_admin:
         sso_result, audit_result = await _gather(api.sso_oidc(), api.sso_audit())
         sso_config = sso_result.data if sso_result.ok else {}
         audit = audit_result.data if audit_result.ok else {}
+        sso_status_error = (sso_result.error if not sso_result.ok and
+                            sso_result.status not in {404} else "")
+        sso_audit_error = audit_result.error if not audit_result.ok else ""
     return render(
         request,
         "settings.html",
@@ -1882,8 +1887,8 @@ async def settings_page(request: Request):
         error=hooks.error,
         sso_admin=sso_admin, sso_config=sso_config,
         sso_audit_events=audit.get("items", []),
-        sso_status_error=(sso_result.error if sso_admin and not sso_result.ok and
-                          sso_result.status not in {404} else ""),
+        sso_status_error=sso_status_error,
+        sso_audit_error=sso_audit_error,
         events=webhook_events(),
         has_provider=_has_discovery_provider(),
         stripe_ready=bool(os.getenv("STRIPE_SECRET_KEY")),

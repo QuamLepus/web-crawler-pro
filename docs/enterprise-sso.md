@@ -49,7 +49,7 @@ allowlisted email in the same organization. When JIT is enabled, new users are
 created only inside that configured organization and only as `viewer` or
 `member`; never as an admin or owner. JIT is disabled by default. Admins can
 read a bounded SSO audit history at `GET /api/v1/sso/audit` and disable the
-provider with `DELETE /api/v1/sso/oidc`.
+provider with `DELETE /api/v1/sso/oidc`. The settings page distinguishes audit-history retrieval failures from a successfully empty history.
 
 ## Protocol/security boundaries
 

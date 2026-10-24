@@ -89,7 +89,7 @@
         <button class="btn btn-primary" data-busy="Saving encrypted settings…">{{ 'Update OIDC settings' if sso_config.client_secret_configured else 'Configure OIDC SSO' }}</button>
       </form>
       {% if sso_config.client_secret_configured %}</details>{% endif %}
-      {% if sso_audit_events %}<details class="mt-2"><summary>Recent SSO audit events ({{ sso_audit_events|length }})</summary><ul class="small">{% for event in sso_audit_events %}<li><code>{{ event.at }}</code> · {{ event.event }} · {{ event.result }}{% if event.user_id %} · user {{ event.user_id }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+      {% if sso_audit_error %}<div class="alert warn mt-2" role="alert">Could not load SSO audit history: {{ sso_audit_error }}</div>{% elif sso_audit_events %}<details class="mt-2"><summary>Recent SSO audit events ({{ sso_audit_events|length }})</summary><ul class="small">{% for event in sso_audit_events %}<li><code>{{ event.at }}</code> · {{ event.event }} · {{ event.result }}{% if event.user_id %} · user {{ event.user_id }}{% endif %}</li>{% endfor %}</ul></details>{% else %}<p class="small muted mt-2">No SSO audit events recorded yet.</p>{% endif %}
     </section>
     {% endif %}
 
