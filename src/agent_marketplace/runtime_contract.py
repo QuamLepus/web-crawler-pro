@@ -6,6 +6,7 @@ supply independently verified backend and artifact-review state before use.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -91,6 +92,25 @@ def verify_attestation_signature(
     except (ValueError, TypeError, UnicodeEncodeError, InvalidSignature):
         return False
     return True
+
+
+def verify_artifact_bytes(
+    attestation: ArtifactAttestation,
+    artifact_bytes: bytes,
+    *,
+    maximum_bytes: int = 50 * 1024 * 1024,
+) -> bool:
+    """Verify supplied artifact bytes against the signed SHA-256 digest.
+
+    This bounded helper does not retrieve the artifact or provide storage,
+    quarantine scanning, or immutability. Callers must enforce those controls
+    around byte acquisition and retention.
+    """
+    if not isinstance(artifact_bytes, bytes) or maximum_bytes < 0:
+        return False
+    if len(artifact_bytes) > maximum_bytes:
+        return False
+    return hashlib.sha256(artifact_bytes).hexdigest() == attestation.sha256
 
 
 class BackendReadiness(StrictContract):
