@@ -20,9 +20,9 @@ def _event(tenant_id="tenant-a", suffix="1"):
         policy_revision="policy-1", reason_code="artifact_not_approved")
 
 
-def _ledger(max_events=100):
+def _ledger(redis_client=None, max_events=100):
     return RuntimeAuditLedger(
-        fakeredis.FakeStrictRedis(decode_responses=True),
+        redis_client or fakeredis.FakeStrictRedis(decode_responses=True),
         max_events_per_tenant=max_events)
 
 
@@ -54,7 +54,7 @@ def test_audit_ledger_keeps_bounded_window_and_verifies_chain_head():
 
 def test_audit_ledger_detects_record_tampering_and_head_mismatch():
     redis_client = fakeredis.FakeStrictRedis(decode_responses=True)
-    ledger = RuntimeAuditLedger(redis_client)
+    ledger = _ledger(redis_client)
     ledger.append("tenant-a", _event())
     records_key, head_key = ledger._keys("tenant-a")
 
@@ -63,11 +63,48 @@ def test_audit_ledger_detects_record_tampering_and_head_mismatch():
     redis_client.lset(records_key, 0, json.dumps(original))
     assert not ledger.verify("tenant-a")
 
-    redis_client.lset(records_key, 0, ledger.read("tenant-a")[0].to_json()
-                      if ledger.verify("tenant-a") else "{}")
+    redis_client.lset(records_key, 0, "{}")
     assert not ledger.verify("tenant-a")
     redis_client.hset(head_key, "event_hash", "b" * 64)
     assert not ledger.verify("tenant-a")
+
+
+def test_retained_window_anchor_detects_missing_prefix_record():
+    redis_client = fakeredis.FakeStrictRedis(decode_responses=True)
+    ledger = _ledger(redis_client, max_events=3)
+    for index in range(5):
+        ledger.append("tenant-a", _event(suffix=str(index)))
+    records_key, _ = ledger._keys("tenant-a")
+    assert [item.sequence for item in ledger.read("tenant-a", limit=3)] == [3, 4, 5]
+    assert ledger.verify("tenant-a")
+
+    redis_client.lpop(records_key)
+    assert not ledger.verify("tenant-a")
+
+
+def test_legacy_unanchored_ledger_can_be_verified_and_upgraded_on_append():
+    redis_client = fakeredis.FakeStrictRedis(decode_responses=True)
+    ledger = _ledger(redis_client, max_events=3)
+    for index in range(3):
+        ledger.append("tenant-a", _event(suffix=str(index)))
+    _, head_key = ledger._keys("tenant-a")
+    redis_client.hdel(head_key, "first_sequence", "first_previous_hash")
+
+    assert ledger.verify("tenant-a")
+    ledger.append("tenant-a", _event(suffix="new"))
+    assert ledger.verify("tenant-a")
+
+
+def test_retention_limit_can_be_reduced_without_breaking_chain():
+    redis_client = fakeredis.FakeStrictRedis(decode_responses=True)
+    larger = _ledger(redis_client, max_events=10)
+    for index in range(5):
+        larger.append("tenant-a", _event(suffix=str(index)))
+
+    smaller = _ledger(redis_client, max_events=2)
+    smaller.append("tenant-a", _event(suffix="after-shrink"))
+    assert [item.sequence for item in smaller.read("tenant-a", limit=2)] == [5, 6]
+    assert smaller.verify("tenant-a")
 
 
 def test_concurrent_appends_have_a_single_ordered_chain():

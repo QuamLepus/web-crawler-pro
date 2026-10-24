@@ -97,11 +97,48 @@ class RuntimeAuditLedger:
                         event_hash=_record_hash(sequence, previous_hash, event_data),
                         event=event,
                     )
+                    current_length = pipe.llen(records_key)
+                    trim_count = max(0, current_length + 1 - self.max_events)
+                    raw_evicted = (pipe.lrange(records_key, 0, trim_count - 1)
+                                   if trim_count else [])
+                    if "first_sequence" in head and "first_previous_hash" in head:
+                        first_sequence = int(head["first_sequence"])
+                        first_previous_hash = head["first_previous_hash"]
+                    elif current_length:
+                        raw_first = (raw_evicted[0] if raw_evicted
+                                     else pipe.lindex(records_key, 0))
+                        if raw_first is None:
+                            raise AuditLedgerError("audit retention anchor is missing")
+                        oldest = self._decode_records([raw_first])[0]
+                        first_sequence = oldest.sequence
+                        first_previous_hash = oldest.previous_hash
+                    else:
+                        first_sequence = 1
+                        first_previous_hash = self.ZERO_HASH
+                    if raw_evicted:
+                        expected_sequence = first_sequence
+                        expected_previous_hash = first_previous_hash
+                        evicted = self._decode_records(raw_evicted)
+                        for old_record in evicted:
+                            old_event = _canonical_event(old_record.event)
+                            if (old_record.sequence != expected_sequence
+                                    or old_record.previous_hash != expected_previous_hash
+                                    or old_record.event_hash != _record_hash(
+                                        old_record.sequence, old_record.previous_hash,
+                                        old_event)):
+                                raise AuditLedgerError(
+                                    "audit retention anchor is invalid")
+                            expected_sequence += 1
+                            expected_previous_hash = old_record.event_hash
+                        first_sequence = expected_sequence
+                        first_previous_hash = expected_previous_hash
                     pipe.multi()
                     pipe.rpush(records_key, record.to_json())
                     pipe.ltrim(records_key, -self.max_events, -1)
                     pipe.hset(head_key, mapping={
-                        "sequence": sequence, "event_hash": record.event_hash})
+                        "sequence": sequence, "event_hash": record.event_hash,
+                        "first_sequence": first_sequence,
+                        "first_previous_hash": first_previous_hash})
                     pipe.execute()
                     return record
                 except WatchError:
@@ -143,8 +180,17 @@ class RuntimeAuditLedger:
         head = self._text_mapping(raw_head)
         if not records:
             return not head
-        previous = records[0].previous_hash
-        prior_sequence = records[0].sequence - 1
+        try:
+            first_sequence = int(head.get("first_sequence", records[0].sequence))
+            first_previous_hash = head.get(
+                "first_previous_hash", records[0].previous_hash)
+        except (TypeError, ValueError):
+            return False
+        if (records[0].sequence != first_sequence
+                or records[0].previous_hash != first_previous_hash):
+            return False
+        previous = first_previous_hash
+        prior_sequence = first_sequence - 1
         for record in records:
             event_data = _canonical_event(record.event)
             if (record.sequence != prior_sequence + 1

@@ -120,10 +120,14 @@ window or in the future. The caller still owns secure key distribution, rotation
 revocation state. This policy is not wired into an API, scheduler, artifact store,
 review-state source. `src/agent_marketplace/audit_ledger.py` adds a bounded,
 tenant-partitioned Redis store for metadata-only audit events, with optimistic
-concurrent appends and SHA-256 hash links plus a chain/head verifier. It is not
-wired into runtime paths; Redis operators can rewrite both records and heads,
-so it is not immutable, tamper-proof, or externally anchored. Retention keeps
-the latest configured window and the head remains stored. No backend is
+concurrent appends and SHA-256 hash links plus a chain/head verifier. The stored
+head anchors the first retained sequence and its predecessor digest, so the
+verifier detects accidental retained-prefix loss as well as changes inside the
+window. Legacy ledgers without this anchor are accepted using their current
+oldest record and are upgraded on their next append. It is not wired into
+runtime paths; Redis operators can rewrite both records and heads, so it is not
+immutable, tamper-proof, or externally anchored. Retention keeps the latest
+configured window and the head remains stored. No backend is
 provisioned or enabled; all launch gates below remain in force.
 
 ## Proposed architecture (not implemented)
