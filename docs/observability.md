@@ -45,3 +45,12 @@ instrumentation is best validated in a staging deployment with the same Celery
 pool and OTLP collector configuration used in production. This is not a
 replacement for end-to-end trace sampling, collector availability, or exporter
 backpressure testing.
+
+## API request metric labels
+
+`/metrics` exposes HTTP request counters labeled by method, route template, and
+status, plus latency histograms by method and route template. Matched routes use
+their registered template (for example, `/api/v1/jobs/{job_id}`); paths that do
+not match a route share the fixed `unmatched` label rather than exporting the
+concrete URL. This prevents arbitrary IDs in 404 paths from creating unbounded
+Prometheus time series.

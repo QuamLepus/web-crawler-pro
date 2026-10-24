@@ -48,6 +48,45 @@ def test_metrics_noop_without_prometheus_or_real():
     assert metrics.init_sentry() is False  # no SENTRY_DSN
 
 
+def test_api_metrics_bound_unmatched_paths_and_keep_route_templates():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.observability import (
+        HTTP_REQUESTS_TOTAL,
+        PROMETHEUS_AVAILABLE,
+        MetricsMiddleware,
+    )
+
+    if not PROMETHEUS_AVAILABLE:
+        pytest.skip("prometheus-client is not installed")
+
+    app = FastAPI()
+    app.add_middleware(MetricsMiddleware)
+
+    @app.get("/items/{item_id}")
+    async def get_item(item_id: str):
+        return {"item_id": item_id}
+
+    unmatched_paths = ["/missing/" + os.urandom(12).hex() for _ in range(2)]
+    with TestClient(app) as client:
+        assert client.get("/items/item-1").status_code == 200
+        assert [client.get(path).status_code for path in unmatched_paths] == [404, 404]
+
+    samples = [sample for family in HTTP_REQUESTS_TOTAL.collect()
+               for sample in family.samples if sample.name.endswith("_total")]
+    route_samples = [sample for sample in samples
+                     if sample.labels.get("path_template") == "/items/{item_id}"
+                     and sample.labels.get("status") == "200"]
+    unmatched_samples = [sample for sample in samples
+                         if sample.labels.get("path_template") == "unmatched"
+                         and sample.labels.get("status") == "404"]
+    assert route_samples and route_samples[-1].value >= 1
+    assert unmatched_samples and unmatched_samples[-1].value >= 2
+    assert not any(sample.labels.get("path_template") in unmatched_paths
+                   for sample in samples)
+
+
 def test_slil_html_and_hash_embedder():
     from src.ai.llm_parser import slim_html
     from src.ai.vector_search import _HashEmbedder

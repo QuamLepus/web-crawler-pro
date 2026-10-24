@@ -158,7 +158,9 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         finally:
             dur = time.perf_counter() - t0
             route = request.scope.get("route")
-            template = getattr(route, "path", None) or request.url.path
+            # Never use the concrete URL as a label: unmatched requests may
+            # contain random identifiers and create unbounded series.
+            template = getattr(route, "path", None) or "unmatched"
             if HTTP_REQUESTS_TOTAL is not None:
                 HTTP_REQUESTS_TOTAL.labels(
                     method=request.method, path_template=template,
