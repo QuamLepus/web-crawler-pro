@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 
 from src.agent_marketplace.runtime_contract import (
+    BACKEND_REQUIRED_GATES,
     AdmissionRequest,
     ArtifactAttestation,
     BackendReadiness,
@@ -20,6 +21,7 @@ from src.agent_marketplace.runtime_contract import (
     decide_admission,
     verify_artifact_bytes,
     verify_attestation_signature,
+    verify_backend_readiness,
 )
 
 ARTIFACT_BYTES = b"minimal inert wasm artifact fixture"
@@ -81,10 +83,14 @@ def _attestation(**changes):
 
 
 def _ready(**changes):
+    backend = changes.get("backend", RuntimeBackend.WASM_WASI)
     data = {
-        "backend": RuntimeBackend.WASM_WASI,
+        "backend": backend,
         "enabled": True,
-        "conformance_passed": True,
+        "conformance_evidence": {
+            gate: hashlib.sha256(gate.encode()).hexdigest()
+            for gate in BACKEND_REQUIRED_GATES[backend]
+        },
         "policy_revision": "policy-v1",
         "issued_at": NOW,
         "expires_at": NOW + timedelta(hours=1),
@@ -119,6 +125,17 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
         backend_readiness=readiness)
 
 
+def test_backend_readiness_evidence_is_backend_specific_and_signed():
+    for backend, required_gates in BACKEND_REQUIRED_GATES.items():
+        readiness = _ready(backend=backend)
+        assert set(readiness.conformance_evidence) == required_gates
+        assert verify_backend_readiness(readiness, _READINESS_KEYS, now=NOW)
+
+    with pytest.raises(ValidationError, match="unknown backend gates"):
+        _ready(conformance_evidence={
+            "microvm_vm_per_run": hashlib.sha256(b"vm").hexdigest()})
+
+
 def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(attestation=_attestation(), readiness=_ready()).admitted
     assert _decide(approved=False).reason == "artifact_not_approved"
@@ -130,7 +147,7 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(artifact_bytes=ARTIFACT_BYTES + b"tampered").reason == "artifact_mismatch"
     assert _decide(readiness=None).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(enabled=False)).reason == "backend_not_provisioned"
-    assert _decide(readiness=_ready(conformance_passed=False)).reason == "backend_not_conformant"
+    assert _decide(readiness=_ready(conformance_evidence={})).reason == "backend_not_conformant"
     assert _decide(readiness=_ready().model_copy(
         update={"signature": "invalid"})).reason == "backend_not_provisioned"
     # Artifact-review trust alone must never assert backend isolation readiness.

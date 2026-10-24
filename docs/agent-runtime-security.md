@@ -99,11 +99,12 @@ run admission requests/decisions, and metadata-only audit events. Its pure
 admission function requires an exact backend, digest, agent/version, approved
 review state, and enabled/conformant readiness for that same backend. Backend
 readiness is an Ed25519-signed, time-bounded operator assertion bound to the
-backend, policy revision, enabled/conformance state, and trusted key lifecycle.
-It uses a separate operator-managed trusted-key set from artifact attestations,
-so an artifact reviewer cannot implicitly assert backend isolation readiness;
-unsigned, expired, future-dated, mismatched, or revoked-key assertions fail
-closed. It rejects resource-limit overruns and never selects a fallback. Contract tests
+backend, policy revision, enabled state, per-gate evidence digests, and trusted
+key lifecycle. Each backend has a distinct required gate set; missing gates or
+evidence with malformed digests fail closed. It uses a separate
+operator-managed trusted-key set from artifact attestations, so an artifact
+reviewer cannot implicitly assert backend isolation readiness; unsigned,
+expired, future-dated, mismatched, or revoked-key assertions fail closed. It rejects resource-limit overruns and never selects a fallback. Contract tests
 cover mismatches, unavailable backends, bounds, and rejection of unknown
 fields.
 
