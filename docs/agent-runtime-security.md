@@ -58,6 +58,39 @@ Supporting all three requires separately provisioned and validated execution
 pools. A single Docker worker or an abstract interface without enforced backend
 policies does not satisfy this design.
 
+### Infrastructure readiness matrix
+
+| Backend | Deployment prerequisites | Required deny-by-default settings |
+|---|---|---|
+| WASM/WASI | Pinned runtime/version and component ABI; host-side runner with a fuel/instruction budget and memory limiter | No ambient filesystem, environment, clock, randomness, process, or network imports; expose only reviewed host functions; bound stdin/stdout and terminate on fuel/time exhaustion. |
+| Sandboxed Kubernetes | Dedicated cluster or node pool with a tested `RuntimeClass` (for example, gVisor), admission policy, and an egress enforcement point | Restricted pod security; non-root UID, read-only root filesystem, no privilege escalation/capabilities/host namespaces/mounts, runtime-default seccomp, hard CPU/memory/PID/ephemeral-storage limits, and default-deny ingress/egress NetworkPolicies enforced by the installed CNI. |
+| Dedicated microVM | Dedicated KVM-capable hosts and isolated runner service that creates and destroys a fresh VM per run; pinned VMM and guest image | No shared writable disks or snapshots across tenants; minimal read-only guest image, bounded vCPU/RAM/disk/time, deny network by default, restricted VMM API and vsock, and host-side kill/cleanup verification. |
+
+The actual runtime, CNI, host kernel, and VMM configuration must be selected
+and tested in the operator's environment; these requirements are not deployment
+manifests and do not assert that the controls are present. Network policy at the
+Kubernetes API alone is insufficient if the selected CNI does not enforce it.
+
+### Rollout sequence for the full portfolio
+
+1. Implement and threat-review a backend-neutral run contract, artifact
+   attestation, admission decision, and audit event format. It must include an
+   explicit backend and digest and reject requests if that backend is disabled.
+2. Provision each backend as an independently disabled pool. Add a preflight
+   probe and adversarial conformance suite for every backend; a passing suite
+   for one backend never enables another.
+3. Validate WASM/WASI, sandboxed Kubernetes, and microVM separately in staging
+   using malicious test artifacts, egress tests, quotas, cancellation, cleanup,
+   and cross-tenant tests.
+4. Enable one explicitly selected backend only after its operator-owned gates
+   pass. Keep the other two disabled until their own evidence is approved; do
+   not implement silent fallback.
+5. Add paid access only after per-backend usage metering, spend ceilings,
+   cancellation/refund handling, and settlement reconciliation are reviewed.
+
+No cost or capacity estimate is included: those require the selected cloud/host
+prices, workload mix, runtime overhead, and expected concurrency.
+
 ## Proposed architecture (not implemented)
 
 - **Control plane:** the API authenticates the caller, checks ownership/access,
