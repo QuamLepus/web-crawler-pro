@@ -2,10 +2,11 @@
 """Reproducible synthetic, in-process API benchmark for Data Studio aggregates.
 
 Measures authenticated GET requests through FastAPI's TestClient against a
-synthetic SQLite DocStore. This includes application routing, auth, middleware,
-SQLite and JSON serialization, but not TCP/TLS, a reverse proxy, browser work,
-production Redis, or concurrent traffic. It is a local microbenchmark, not an
-SLO or capacity test. All temporary data is removed when the process exits.
+synthetic SQLite DocStore. An optional thread pool can send concurrent requests
+through the in-process client. This includes application routing, auth,
+middleware, SQLite and JSON serialization, but not TCP/TLS, a reverse proxy,
+browser work, or production Redis. It is a local microbenchmark, not an SLO or
+capacity test. All temporary data is removed when the process exits.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,10 +46,12 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=10,
                         help="measured API calls per profile")
     parser.add_argument("--warmup", type=int, default=2,
-                        help="unmeasured API calls per profile")
+                        help="unmeasured request waves per profile")
+    parser.add_argument("--concurrency", type=int, default=1,
+                        help="parallel requests per wave (default: 1)")
     args = parser.parse_args()
-    if args.docs < 1 or args.iterations < 1 or args.warmup < 0:
-        parser.error("docs and iterations must be positive; warmup cannot be negative")
+    if args.docs < 1 or args.iterations < 1 or args.warmup < 0 or args.concurrency < 1:
+        parser.error("docs, iterations, and concurrency must be positive; warmup cannot be negative")
 
     # The API requires a signing secret even for this disposable local app.
     # Generate an ephemeral key only when no caller-provided value exists.
@@ -89,7 +93,10 @@ def main() -> int:
         analytics_store = DocStore(db_path, readonly=True)
         search_index._index = lambda _request: analytics_store
         redis = fakeredis.FakeStrictRedis(decode_responses=True)
-        app = create_api_app(redis_client=redis, enable_graphql=False)
+        # Disable the token bucket so request waves measure route handling
+        # rather than being paced or rejected by the API's configured limits.
+        app = create_api_app(redis_client=redis, enable_graphql=False,
+                             enable_rate_limit=False)
         profiles = {
             "source_count": {"group_by": "source", "metric": "count", "limit": 20},
             "host_mean_authority": {"group_by": "host", "metric": "avg_authority", "limit": 50},
@@ -120,36 +127,52 @@ def main() -> int:
                         f"benchmark API key setup failed: HTTP {key_response.status_code}")
                 headers = {"X-API-Key": key_response.json()["key"]}
 
-                for name, params in profiles.items():
-                    durations: list[float] = []
-                    last_payload = None
-                    for iteration in range(args.warmup + args.iterations):
-                        started = time.perf_counter()
-                        response = client.get("/api/v1/studio/analytics",
-                                              headers=headers, params=params)
-                        elapsed_ms = (time.perf_counter() - started) * 1000
-                        if response.status_code != 200:
-                            raise RuntimeError(
-                                f"{name} returned HTTP {response.status_code}: "
-                                f"{response.text[:200]}")
-                        last_payload = response.json()
-                        if iteration >= args.warmup:
-                            durations.append(elapsed_ms)
-                    expected_matches, expected_groups, expected_limit = expected_profiles[name]
-                    expected_rows = min(expected_groups, expected_limit)
-                    actual = (last_payload["matched_documents"], last_payload["group_count"],
-                              len(last_payload["rows"]))
-                    if actual != (expected_matches, expected_groups, expected_rows):
+                def request(params):
+                    started = time.perf_counter()
+                    response = client.get("/api/v1/studio/analytics",
+                                          headers=headers, params=params)
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+                    if response.status_code != 200:
                         raise RuntimeError(
-                            f"{name} returned unexpected benchmark result counts: {actual}")
-                    results[name] = {
-                        "matched_documents": last_payload["matched_documents"],
-                        "groups": last_payload["group_count"],
-                        "response_rows": len(last_payload["rows"]),
-                        "p50_ms": round(statistics.median(durations), 3),
-                        "p95_ms": round(percentile(durations, 0.95), 3),
-                        "mean_ms": round(statistics.mean(durations), 3),
-                    }
+                            f"request returned HTTP {response.status_code}: "
+                            f"{response.text[:200]}")
+                    return elapsed_ms, response.json()
+
+                with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+                    for name, params in profiles.items():
+                        durations: list[float] = []
+                        last_payload = None
+                        throughput_started = None
+                        measured_requests = 0
+                        for wave in range(args.warmup + args.iterations):
+                            if wave == args.warmup:
+                                throughput_started = time.perf_counter()
+                            futures = [pool.submit(request, params)
+                                       for _ in range(args.concurrency)]
+                            responses = [future.result() for future in futures]
+                            if wave >= args.warmup:
+                                durations.extend(elapsed for elapsed, _ in responses)
+                                measured_requests += len(responses)
+                            last_payload = responses[-1][1]
+                        elapsed_seconds = time.perf_counter() - throughput_started
+                        requests_per_second = measured_requests / elapsed_seconds
+                        expected_matches, expected_groups, expected_limit = expected_profiles[name]
+                        expected_rows = min(expected_groups, expected_limit)
+                        actual = (last_payload["matched_documents"], last_payload["group_count"],
+                                  len(last_payload["rows"]))
+                        if actual != (expected_matches, expected_groups, expected_rows):
+                            raise RuntimeError(
+                                f"{name} returned unexpected benchmark result counts: {actual}")
+                        results[name] = {
+                            "matched_documents": last_payload["matched_documents"],
+                            "groups": last_payload["group_count"],
+                            "response_rows": len(last_payload["rows"]),
+                            "requests": measured_requests,
+                            "p50_ms": round(statistics.median(durations), 3),
+                            "p95_ms": round(percentile(durations, 0.95), 3),
+                            "mean_ms": round(statistics.mean(durations), 3),
+                            "throughput_requests_per_second": round(requests_per_second, 3),
+                        }
         finally:
             analytics_store.close()
 
@@ -158,14 +181,17 @@ def main() -> int:
             "python": sys.version.split()[0], "platform": platform.platform(),
             "documents": args.docs, "iterations_per_profile": args.iterations,
             "warmup_per_profile": args.warmup,
+            "concurrency": args.concurrency,
+            "requests_per_profile": args.iterations * args.concurrency,
+            "rate_limiting_enabled": False,
             "sqlite_bytes": store.size_bytes(),
             "build_seconds": round(build_seconds, 3),
             "profiles": results,
             "limitations": [
                 "in-process TestClient; no TCP/TLS or reverse proxy",
                 "synthetic SQLite corpus; no production Redis",
-                "single sequential client; no concurrent load",
-                "warm-up requests; local cache state",
+                "threaded in-process client only; no multi-process or replica load",
+                "warm-up request waves; local cache state",
                 "not an SLO or production capacity estimate",
             ],
         }

@@ -130,3 +130,36 @@ filtered profile's p95) and should be compared only with matching conditions;
 it is an API-path baseline, not a production capacity claim or SLO. The script
 prints its environment, query profiles, and limitations as JSON and removes
 the temporary database on exit.
+
+### Threaded request-wave retest (2026-10-24)
+
+The API harness also accepts `--concurrency N`: each measured iteration sends
+one wave of N requests through a shared in-process `TestClient`, and output
+includes per-request p50/p95 plus aggregate throughput. The token-bucket rate
+limiter is disabled in this harness so it does not pace or reject synthetic
+waves; the script reports this explicitly. Run sequentially to compare a single
+request per wave with four concurrent requests:
+
+```sh
+python scripts/bench-studio-api.py --docs 50000 --iterations 10 --warmup 2 --concurrency 1
+python scripts/bench-studio-api.py --docs 50000 --iterations 10 --warmup 2 --concurrency 4
+```
+
+Same sandbox and synthetic 50k-row database (15,736,832 bytes); each run used
+two warm-up waves and ten measured waves. Results are per-request p50 / p95
+milliseconds and measured request throughput:
+
+| Profile | Concurrency 1 p50 / p95 | Concurrency 1 req/s | Concurrency 4 p50 / p95 | Concurrency 4 req/s |
+|---|---:|---:|---:|---:|
+| Source document count | 24.698 / 38.029 | 36.421 | 88.129 / 98.499 | 44.568 |
+| Host mean authority | 39.418 / 48.715 | 24.390 | 149.722 / 168.394 | 26.033 |
+| Filtered host mean quality (source=wiki) | 24.868 / 33.325 | 37.912 | 88.837 / 132.527 | 41.978 |
+
+Here four in-process threads increased measured throughput only modestly while
+raising per-request latency substantially. The runs are sequential, small,
+thread-level microbenchmarks with only 10 waves (40 requests per profile at
+concurrency four); they do not establish a general saturation curve and cannot
+represent multiple processes, replicas, network overhead, production Redis, or
+a realistic traffic mix. Do not interpret them as production capacity or SLO
+evidence. The API's configured rate limits were deliberately disabled, so this
+measurement does not reflect deployed rate-limit behavior.
