@@ -205,6 +205,13 @@ class RuntimeAuditEvent(StrictContract):
     policy_revision: str = Field(min_length=1, max_length=80)
     reason_code: str = Field(min_length=1, max_length=80)
 
+    @field_validator("occurred_at")
+    @classmethod
+    def _occurred_at_timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("audit timestamp must include a timezone")
+        return value
+
     @field_validator("artifact_sha256")
     @classmethod
     def _lowercase_digest(cls, value: str) -> str:
