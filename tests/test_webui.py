@@ -19,6 +19,7 @@ pytest.importorskip("jinja2", reason="jinja2 is required for the web console")
 import fakeredis
 from fastapi.testclient import TestClient
 
+from src.agent_marketplace.service import AgentMarketplaceService
 from src.api.main import create_api_app
 from src.webui.app import NAV, PLANS, webhook_events
 
@@ -238,6 +239,37 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert unpublished.status_code == 200
     assert "Listing draft" in unpublished.text
     assert "No published Agent cards yet." in unpublished.text
+
+
+def test_agent_marketplace_browse_and_owner_views_paginate(signed_in):
+    token = signed_in.cookies["wcp_session"]
+    headers = {"Authorization": f"Bearer {token}"}
+    me = signed_in.get("/api/auth/me", headers=headers).json()
+    service = AgentMarketplaceService(signed_in.app.state.services.redis)
+    for index in range(21):
+        card = service.create(me["tenant"], manifest={
+            "name": f"Pager Agent {index:02d}",
+            "version": "1.0.0",
+            "summary": "An Agent listing for pagination tests.",
+            "capabilities": ["summarize"],
+            "input_schema": {},
+            "output_schema": {},
+        }, tags=["paging"], license="CC-BY-4.0")
+        service.update(card.agent_id, me["tenant"], changes={"status": "published"})
+
+    browse_first = signed_in.get("/app/agents")
+    assert "Pager Agent 00" not in browse_first.text
+    assert 'name="catalog_offset" value="20"' in browse_first.text
+    browse_next = signed_in.get("/app/agents?tab=browse&catalog_offset=20")
+    assert "Pager Agent 00" in browse_next.text
+    assert "Previous" in browse_next.text
+
+    owned_first = signed_in.get("/app/agents?tab=owned")
+    assert "Pager Agent 00" not in owned_first.text
+    assert 'name="mine_offset" value="20"' in owned_first.text
+    owned_next = signed_in.get("/app/agents?tab=owned&mine_offset=20")
+    assert "Pager Agent 00" in owned_next.text
+    assert "Previous" in owned_next.text
 
 
 def test_agent_detail_distinguishes_unavailable_listing(signed_in):
