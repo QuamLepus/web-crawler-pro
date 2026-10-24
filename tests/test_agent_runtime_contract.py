@@ -194,3 +194,5 @@ def test_audit_event_contains_bounded_metadata_not_input_or_output_payloads():
     assert "output" not in event.model_dump()
     with pytest.raises(ValidationError):
         RuntimeAuditEvent(**{**event.model_dump(), "input": {"secret": "x"}})
+    with pytest.raises(ValidationError, match="timezone"):
+        RuntimeAuditEvent(**{**event.model_dump(), "occurred_at": NOW.replace(tzinfo=None)})
