@@ -31,7 +31,7 @@
         <td>{{ watch.interval_minutes }} min</td>
         <td>{{ watch.last_checked_at or 'Not checked yet' }}</td>
         <td><span class="badge {{ 'ok' if watch.active else 'muted' }}">{{ 'Active' if watch.active else 'Stopped' }}</span></td>
-        <td><div class="row"><form method="post" action="/app/watch/{{ watch.watch_id }}/run"><button class="btn btn-sm">Run now</button></form><form method="post" action="/app/watch/{{ watch.watch_id }}/delete"><button class="btn btn-sm">Stop</button></form></div></td>
+        <td>{% if watch.active %}<div class="row"><form method="post" action="/app/watch/{{ watch.watch_id }}/run"><button class="btn btn-sm">Run now</button></form><form method="post" action="/app/watch/{{ watch.watch_id }}/delete"><button class="btn btn-sm">Stop</button></form></div>{% else %}<span class="muted">Stopped</span>{% endif %}</td>
       </tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="empty"><h3>No watches yet</h3><p>Add a page above to start tracking changes.</p></div>{% endif %}
   </section>

@@ -1377,6 +1377,31 @@ def test_login_page_offers_sso_with_validated_workspace_route(client):
     assert valid.headers["location"] == "/api/auth/oidc/0123456789/login"
 
 
+def test_stopped_watch_does_not_offer_run_or_stop_actions(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    active_id = "watch_aaaaaaaaaaaaaaaaaaaa"
+    stopped_id = "watch_bbbbbbbbbbbbbbbbbbbb"
+
+    async def watches(self):
+        return Result(True, data={"items": [
+            {"watch_id": active_id, "url": "https://example.org/active",
+             "interval_minutes": 60, "last_checked_at": None, "active": True},
+            {"watch_id": stopped_id, "url": "https://example.org/stopped",
+             "interval_minutes": 360, "last_checked_at": "yesterday", "active": False},
+        ]})
+
+    monkeypatch.setattr(Api, "watches", watches)
+
+    page = signed_in.get("/app/watch")
+    assert page.status_code == 200
+    assert f"/app/watch/{active_id}/run" in page.text
+    assert f"/app/watch/{active_id}/delete" in page.text
+    assert f"/app/watch/{stopped_id}/run" not in page.text
+    assert f"/app/watch/{stopped_id}/delete" not in page.text
+    assert "Stopped</span>" in page.text
+
+
 def test_watch_history_reports_load_errors_instead_of_empty_states(signed_in, monkeypatch):
     from src.webui.client import Api, Result
 
