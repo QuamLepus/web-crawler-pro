@@ -159,10 +159,85 @@ def verify_artifact_bytes(
 
 
 class BackendReadiness(StrictContract):
+    """Operator-signed, short-lived backend gate result.
+
+    A boolean readiness claim is not evidence by itself. The signature binds
+    the backend, enabled/conformance state, policy revision, and validity
+    window to an operator-managed trusted key.
+    """
+
     backend: RuntimeBackend
     enabled: bool
     conformance_passed: bool
     policy_revision: str = Field(min_length=1, max_length=80)
+    issued_at: datetime
+    expires_at: datetime
+    signer_id: str = Field(min_length=1, max_length=160)
+    key_id: str = Field(min_length=1, max_length=160)
+    signature_algorithm: Literal["ed25519"] = "ed25519"
+    signature: str = Field(min_length=1, max_length=256)
+
+    @field_validator("issued_at", "expires_at")
+    @classmethod
+    def _readiness_timestamps_timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("readiness timestamps must include a timezone")
+        return value
+
+    @field_validator("expires_at")
+    @classmethod
+    def _readiness_expiry_after_issue(cls, value: datetime, info) -> datetime:
+        issued_at = info.data.get("issued_at")
+        if issued_at is not None and value <= issued_at:
+            raise ValueError("readiness expiry must be after issue time")
+        return value
+
+
+def backend_readiness_signing_payload(readiness: BackendReadiness) -> bytes:
+    """Return canonical signed bytes for a backend readiness gate result."""
+    value = readiness.model_dump(mode="json", exclude={"signature"})
+    value["issued_at"] = readiness.issued_at.astimezone(UTC).isoformat()
+    value["expires_at"] = readiness.expires_at.astimezone(UTC).isoformat()
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("utf-8")
+
+
+def verify_backend_readiness(
+    readiness: BackendReadiness,
+    trusted_keys: Mapping[str, TrustedAttestationKey],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Verify signed readiness and reject stale, future, or revoked evidence."""
+    key = trusted_keys.get(readiness.key_id)
+    if (key is None or key.key_id != readiness.key_id
+            or key.signer_id != readiness.signer_id):
+        return False
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        return False
+    current_time = current_time.astimezone(UTC)
+    issued_at = readiness.issued_at.astimezone(UTC)
+    expires_at = readiness.expires_at.astimezone(UTC)
+    if (issued_at > current_time or current_time >= expires_at
+            or issued_at < key.valid_from.astimezone(UTC)
+            or issued_at >= key.expires_at.astimezone(UTC)
+            or expires_at > key.expires_at.astimezone(UTC)
+            or (key.revoked_at is not None
+                and current_time >= key.revoked_at.astimezone(UTC))):
+        return False
+    try:
+        public_key = serialization.load_pem_public_key(key.public_key_pem.encode("ascii"))
+        if not isinstance(public_key, Ed25519PublicKey):
+            return False
+        signature = base64.b64decode(
+            readiness.signature.encode("ascii")
+            + b"=" * (-len(readiness.signature) % 4),
+            altchars=b"-_", validate=True)
+        public_key.verify(signature, backend_readiness_signing_payload(readiness))
+    except (ValueError, TypeError, UnicodeEncodeError, InvalidSignature):
+        return False
+    return True
 
 
 class AdmissionRequest(StrictContract):
@@ -252,14 +327,16 @@ def decide_admission(
     if (readiness is None or readiness.backend != request.backend
             or not readiness.enabled):
         return deny("backend_not_provisioned")
-    if not readiness.conformance_passed:
-        return deny("backend_not_conformant")
     if artifact_revoked:
         return deny("artifact_revoked")
     if attestation is None or not review_approved:
         return deny("artifact_not_approved")
     if not verify_attestation_signature(attestation, trusted_keys):
         return deny("artifact_signature_invalid")
+    if not verify_backend_readiness(readiness, trusted_keys):
+        return deny("backend_not_provisioned")
+    if not readiness.conformance_passed:
+        return deny("backend_not_conformant")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):
         return deny("artifact_mismatch")
