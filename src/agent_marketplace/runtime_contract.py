@@ -301,6 +301,7 @@ def decide_admission(
     attestation: ArtifactAttestation | None,
     artifact_bytes: bytes | None,
     trusted_keys: Mapping[str, TrustedAttestationKey],
+    trusted_readiness_keys: Mapping[str, TrustedAttestationKey],
     review_approved: bool,
     artifact_revoked: bool,
     backend_readiness: BackendReadiness | None,
@@ -311,8 +312,10 @@ def decide_admission(
     """Evaluate explicit pinning and readiness; never choose another backend.
 
     The review-state and readiness arguments must come from trusted,
-    independently verified control-plane sources. The attestation signature is
-    verified against operator-supplied keys, and the supplied artifact bytes
+    independently verified control-plane sources. Artifact attestations and
+    backend readiness use separate trusted-key sets, preventing artifact
+    reviewers from implicitly asserting runtime isolation readiness. The
+    attestation signature is verified against operator-supplied keys, and artifact bytes
     must match its signed digest. This does not retrieve or persist artifact
     bytes, launch a sandbox, or prove a backend is secure.
     """
@@ -333,7 +336,7 @@ def decide_admission(
         return deny("artifact_not_approved")
     if not verify_attestation_signature(attestation, trusted_keys):
         return deny("artifact_signature_invalid")
-    if not verify_backend_readiness(readiness, trusted_keys):
+    if not verify_backend_readiness(readiness, trusted_readiness_keys):
         return deny("backend_not_provisioned")
     if not readiness.conformance_passed:
         return deny("backend_not_conformant")
