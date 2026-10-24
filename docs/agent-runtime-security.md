@@ -103,15 +103,21 @@ cover mismatches, unavailable backends, bounds, and rejection of unknown
 fields.
 
 The module verifies Ed25519 signatures over a canonical, timezone-aware
-attestation payload using an operator-supplied key-ID-to-PEM trust map. The
+attestation payload using operator-supplied trusted-key records. Each record
+binds key ID and signer identity to a PEM public key, validity interval, and
+optional key-revocation instant. The
 admission policy itself requires this signature verification as well as a
 trusted review approval and readiness record, and emits a distinct denial for
 an invalid signature. It requires size-limited artifact bytes matching the
 signed SHA-256 digest and rejects an explicitly revoked artifact before review
 or signature checks. Revocation state still must come from a trusted control
 plane source. This does not retrieve or store artifacts,
-scan/quarantine them, establish that review is current, or manage trust-key
-rotation. Neither helper is wired into an API, scheduler, artifact store,
+scan/quarantine them, or establish that review is current. Trusted-key records
+define signer identity, a validity interval, and an optional revocation
+instant; the verifier denies unknown, mismatched, expired, not-yet-valid, or
+revoked keys, and rejects attestations timestamped outside the key's validity
+window or in the future. The caller still owns secure key distribution, rotation, and
+revocation state. This policy is not wired into an API, scheduler, artifact store,
 review-state source, or audit persistence. No backend is provisioned or enabled;
 all launch gates below remain in force.
 
