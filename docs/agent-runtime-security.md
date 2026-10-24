@@ -112,11 +112,13 @@ backend, exact environment/pool ID, policy revision, enabled state, per-gate
 evidence digests, and trusted key lifecycle. Admission requires the requested
 pool ID to match, preventing readiness evidence from being replayed across
 staging/production or separate backend pools. Each backend has a distinct
-required gate set; admission also requires the corresponding bounded evidence
-bytes and recomputes each signed digest. Missing, extra, malformed, oversized, or
-mismatched evidence fails closed. Digest matching verifies byte identity only;
-it does not establish that evidence semantically proves a gate, which remains
-an independent operator review responsibility. Readiness is dual-signed: an
+required gate set; admission also requires bounded JSON evidence reports and
+recomputes each signed digest. Reports must say `passed` and match the exact gate,
+backend, pool, and policy revision; they must be timezone-aware, no more than 24
+hours old, and not future-dated. Missing, extra, malformed, oversized, stale, or
+mismatched evidence fails closed. This validates report shape and identity, not
+the underlying test logs or whether the report semantically proves the control;
+assessors must retain and independently interpret that source evidence. Readiness is dual-signed: an
 independent conformance assessor signs the gate evidence digests, then a distinct
 operator signs the enablement assertion. The assertion validity window is capped
 at 24 hours, in addition to each signer's key lifecycle. Admission verifies them
