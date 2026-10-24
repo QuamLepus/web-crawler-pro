@@ -519,6 +519,173 @@ class DatasetListingOut(BaseModel):
     created_at: datetime
 
 
+class AgentManifest(BaseModel):
+    """Bounded declarative metadata; it cannot contain executable code."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=3, max_length=120)
+    version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=32)
+    summary: str = Field(min_length=10, max_length=1000)
+    capabilities: list[str] = Field(min_length=1, max_length=20)
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name", "summary")
+    @classmethod
+    def _trim_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value must not be blank")
+        return value
+
+    @field_validator("capabilities")
+    @classmethod
+    def _normalize_capabilities(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() or len(value) > 80 for value in values):
+            raise ValueError("capabilities must be non-empty strings of at most 80 characters")
+        return list(dict.fromkeys(value.strip().lower() for value in values))
+
+    @field_validator("input_schema", "output_schema")
+    @classmethod
+    def _bounded_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        import json
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"),
+                                 allow_nan=False)
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise ValueError("schema must contain JSON-compatible values") from exc
+        if len(encoded.encode("utf-8")) > 8192:
+            raise ValueError("each input/output schema is limited to 8192 bytes")
+        return value
+
+
+class AgentCardCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: AgentManifest
+    tags: list[str] = Field(default_factory=list, max_length=15)
+    license: str = Field(default="CC-BY-4.0", min_length=1, max_length=80)
+
+    @field_validator("license")
+    @classmethod
+    def _normalize_license(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("license must not be blank")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def _valid_tags(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() or len(value) > 40 for value in values):
+            raise ValueError("tags must be non-empty strings of at most 40 characters")
+        return list(dict.fromkeys(value.strip().lower() for value in values))
+
+
+class AgentCardUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: AgentManifest | None = None
+    tags: list[str] | None = Field(default=None, max_length=15)
+    license: str | None = Field(default=None, min_length=1, max_length=80)
+    status: Literal["draft", "published", "suspended", "archived"] | None = None
+
+    @field_validator("license")
+    @classmethod
+    def _normalize_license(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("license must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def _require_update(self):
+        if not self.model_fields_set:
+            raise ValueError("at least one catalog field must be changed")
+        if any(getattr(self, name) is None for name in self.model_fields_set):
+            raise ValueError("catalog update fields cannot be null")
+        return self
+
+    @field_validator("tags")
+    @classmethod
+    def _valid_tags(cls, values: list[str] | None) -> list[str] | None:
+        if values is not None and any(not value.strip() or len(value) > 40 for value in values):
+            raise ValueError("tags must be non-empty strings of at most 40 characters")
+        return (list(dict.fromkeys(value.strip().lower() for value in values))
+                if values is not None else None)
+
+
+class AgentCardOut(BaseModel):
+    agent_id: str
+    owner_tenant: str
+    manifest: AgentManifest
+    tags: list[str]
+    license: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ManagedAgentOut(BaseModel):
+    agent_id: str
+    version: str
+    summary: str
+    capabilities: list[str]
+    execution_engine: str
+
+
+class ManagedAgentRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    records: list[Any] = Field(min_length=1, max_length=20)
+
+    @field_validator("records")
+    @classmethod
+    def _bounded_records(cls, records: list[Any]) -> list[Any]:
+        import json
+        total_bytes = 0
+        for record in records:
+            if not isinstance(record, (str, dict)):
+                raise ValueError("records must contain strings or JSON objects")  # noqa: TRY004
+            try:
+                encoded = json.dumps(record, ensure_ascii=False, allow_nan=False,
+                                     separators=(",", ":"))
+            except (TypeError, ValueError, RecursionError) as exc:
+                raise ValueError("records must contain JSON-compatible values") from exc
+            size = len(encoded.encode("utf-8"))
+            if size > 8192:
+                raise ValueError("each record is limited to 8192 encoded bytes")
+            total_bytes += size
+        if total_bytes > 40_000:
+            raise ValueError("combined record input is limited to 40000 bytes")
+        return records
+
+
+class ManagedAgentRecordResult(BaseModel):
+    record_index: int = Field(ge=0)
+    relevance: int = Field(ge=1, le=5)
+    coherence: int = Field(ge=1, le=5)
+    density: int = Field(ge=1, le=5)
+    safety: int = Field(ge=1, le=5)
+    overall: float = Field(ge=0.0, le=1.0)
+    decision: Literal["keep", "drop", "review"]
+    reason: str = Field(max_length=300)
+
+
+class ManagedAgentRunOut(BaseModel):
+    agent_id: str
+    execution_engine: str
+    total: int
+    kept: int
+    dropped: int
+    reviewed: int
+    mean_quality: float
+    results: list[ManagedAgentRecordResult]
+    persisted: bool = False
+
+
 class ReviewCreate(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: str = Field(min_length=5, max_length=2000)

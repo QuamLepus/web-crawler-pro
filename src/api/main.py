@@ -92,6 +92,7 @@ class ApiServices:
         self.webhooks = WebhookService(r)
         self.billing = BillingService(self.users, r)
         self.marketplace = None  # routers instantiate on demand
+        self.agent_marketplace = None  # routers instantiate on demand
         celery_app = None
         if self._use_default_celery:
             try:
@@ -364,6 +365,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
 
     # ---- REST v1 routers ------------------------------------------------------ #
     from src.api.routers import (
+        agent_marketplace,
         billing,
         discovery,
         jobs,
@@ -394,6 +396,7 @@ def create_api_app(redis_client=None, *, enable_graphql: bool = True,
         r.include_router(webhooks.router)
         r.include_router(billing.router)
         r.include_router(marketplace.router)
+        r.include_router(agent_marketplace.router)
         r.include_router(search_index.router)
         r.include_router(studio.router)
         r.include_router(workflows.router)
