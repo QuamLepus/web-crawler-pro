@@ -27,8 +27,9 @@ publisher code payload.
 ## Console
 
 Authenticated users can browse published cards, search by name/summary or tag,
-create draft cards, edit their own listing metadata, and publish or unpublish
-cards at `/app/agents`. These console actions call the catalog API using the
+create draft cards, edit their own listing metadata, publish or unpublish
+cards, and inspect listing metadata plus declared input/output schemas at
+`/app/agents`. These console actions call the catalog API using the
 user's session. The UI does not accept code uploads or execute publisher code;
 editing a card's version is metadata-only and does not provision a backend.
 

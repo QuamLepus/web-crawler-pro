@@ -30,6 +30,7 @@
         <div class="row-wrap tiny">{% for t in card.get('tags') or [] %}<span class="badge">{{ t }}</span>{% endfor %}<span class="badge">{{ card.get('license', '—') }}</span></div>
         <p class="tiny dim mt-1">Capabilities: {{ (m.get('capabilities') or [])|join(', ') }}</p>
         <p class="tiny muted">Declarative listing · no executable artifact</p>
+        <a class="btn btn-sm" href="/app/agents/{{ card.get('agent_id') }}">View listing details</a>
       </article>{% endfor %}
     </div>{% else %}<div class="empty"><strong>No published Agent cards yet.</strong><p>Try another search, or create a draft listing.</p></div>{% endif %}
   </section>
