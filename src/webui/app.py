@@ -64,6 +64,7 @@ NAV: list[dict] = [
         {"href": "/app/workflows", "icon": "⇢", "label": "Workflows", "key": "workflows"},
         {"href": "/app/index", "icon": "🗂", "label": "Own search index", "key": "index"},
         {"href": "/app/marketplace", "icon": "🛒", "label": "Data exchange", "key": "marketplace"},
+        {"href": "/app/agents", "icon": "⚙", "label": "Agent marketplace", "key": "agent_marketplace"},
     ]},
     {"group": "Developers & settings", "pages": [
         {"href": "/app/keys", "icon": "🔑", "label": "API keys", "key": "keys"},
@@ -1700,6 +1701,70 @@ async def marketplace(request: Request, q: str = Query(""), tag: str = Query("")
     )
 
 
+@router.get("/app/agents", response_class=HTMLResponse, name="agent_marketplace")
+async def agent_marketplace(request: Request, q: str = Query(""), tag: str = Query(""),
+                            notice: str = Query(""), error: str = Query("")):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    catalog, mine = await _gather(
+        api.get("/api/v1/agent-marketplace/agents", params={"q": q, "tag": tag}),
+        api.get("/api/v1/agent-marketplace/my/agents"),
+    )
+    return render(
+        request, "agents.html", page="agent_marketplace", me=me, q=q, tag=tag,
+        catalog=(catalog.data if catalog.ok and isinstance(catalog.data, list) else None),
+        my_agents=(mine.data if mine.ok and isinstance(mine.data, list) else None),
+        catalog_error=(catalog.error if not catalog.ok else None),
+        mine_error=(mine.error if not mine.ok else None),
+        notice=notice, form_error=error,
+        title="Agent marketplace — Web Intelligence OS",
+    )
+
+
+@router.post("/app/agents")
+async def agent_marketplace_create(
+    request: Request, name: str = Form(""), version: str = Form("1.0.0"),
+    summary: str = Form(""), capabilities: str = Form(""), tags: str = Form(""),
+    license: str = Form("CC-BY-4.0"), input_schema: str = Form("{}"),
+    output_schema: str = Form("{}"),
+):
+    api, _, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    try:
+        in_schema, out_schema = json.loads(input_schema), json.loads(output_schema)
+        if not isinstance(in_schema, dict) or not isinstance(out_schema, dict):
+            raise ValueError("Input and output schemas must be JSON objects.")
+    except (json.JSONDecodeError, ValueError) as exc:
+        message = str(exc) if str(exc) else "Schemas must be valid JSON objects."
+        return RedirectResponse(f"/app/agents?error={quote(message)}", status_code=303)
+    result = await api.post("/api/v1/agent-marketplace/agents", {
+        "manifest": {"name": name, "version": version, "summary": summary,
+                     "capabilities": [v.strip() for v in capabilities.split(",") if v.strip()],
+                     "input_schema": in_schema, "output_schema": out_schema},
+        "tags": [v.strip() for v in tags.split(",") if v.strip()],
+        "license": license,
+    })
+    if not result.ok:
+        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not create listing.'))}", status_code=303)
+    return RedirectResponse("/app/agents?notice=Draft%20listing%20created.%20No%20code%20was%20uploaded%20or%20executed.", status_code=303)
+
+
+@router.post("/app/agents/{agent_id}/status")
+async def agent_marketplace_status(request: Request, agent_id: str,
+                                  status: str = Form("")):
+    api, _, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    if status not in {"draft", "published"}:
+        return RedirectResponse("/app/agents?error=Unsupported%20status%20change.", status_code=303)
+    result = await api.patch(f"/api/v1/agent-marketplace/agents/{agent_id}", {"status": status})
+    if not result.ok:
+        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}", status_code=303)
+    return RedirectResponse(f"/app/agents?notice=Listing%20{quote(status)}.", status_code=303)
+
+
 @router.post("/app/marketplace/datasets")
 async def marketplace_create(
     request: Request,
@@ -2046,6 +2111,9 @@ _ENDPOINTS = [
     ("GET", "/api/v1/search-index/stats", "Index size, sources and build state."),
     ("GET", "/api/v1/search-index/levels", "What each index level costs."),
     ("POST", "/api/v1/search", "Vector/RAG search over ingested pages."),
+    ("GET", "/api/v1/agent-marketplace/agents", "Browse published, declarative Agent catalog cards."),
+    ("POST", "/api/v1/agent-marketplace/agents", "Create a draft Agent catalog card; does not upload or execute code."),
+    ("GET", "/api/v1/agent-marketplace/my/agents", "List your Agent catalog cards."),
     ("GET", "/api/v1/marketplace/datasets", "Browse datasets for sale."),
     ("POST", "/api/v1/marketplace/datasets", "List a dataset you crawled."),
     ("POST", "/api/v1/marketplace/bounties", "Post a bounty for data you need."),

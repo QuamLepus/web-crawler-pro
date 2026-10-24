@@ -10,6 +10,8 @@ Everything runs in-process (``ASGITransport``), so no port is ever bound.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("jinja2", reason="jinja2 is required for the web console")
@@ -100,6 +102,7 @@ def test_console_pages_require_a_session(client):
         "/app/docs",
         "/app/index",
         "/app/marketplace",
+        "/app/agents",
         "/app/discovery",
     ):
         res = client.get(path, follow_redirects=False)
@@ -157,6 +160,7 @@ PAGES = [
     "/app/discovery",
     "/app/index",
     "/app/marketplace",
+    "/app/agents",
     "/app/keys",
     "/app/billing",
     "/app/settings",
@@ -169,6 +173,58 @@ def test_every_console_page_renders(signed_in, path):
     res = signed_in.get(path)
     assert res.status_code == 200, (path, res.text[:400])
     assert "<!doctype html" in res.text.lower()
+
+
+def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
+    page = signed_in.get("/app/agents")
+    assert page.status_code == 200
+    assert "No published Agent cards yet." in page.text
+    assert "does not accept or execute publisher code" in page.text
+
+    created = signed_in.post("/app/agents", data={
+        "name": "Console Research Agent",
+        "version": "1.0.0",
+        "summary": "A declarative research assistant listing.",
+        "capabilities": "summarize, classify",
+        "tags": "research, offline",
+        "license": "CC-BY-4.0",
+        "input_schema": '{"type":"object"}',
+        "output_schema": '{"type":"object"}',
+    }, follow_redirects=True)
+    assert created.status_code == 200
+    assert "Draft listing created" in created.text
+    assert "Console Research Agent" in created.text
+    assert "Publish card" in created.text
+
+    match = re.search(r'action="/app/agents/([^/]+)/status"', created.text)
+    assert match, "the owner's draft should include status controls"
+    agent_id = match.group(1)
+    published = signed_in.post(
+        f"/app/agents/{agent_id}/status", data={"status": "published"},
+        follow_redirects=True,
+    )
+    assert published.status_code == 200
+    assert "Listing published" in published.text
+    assert "Console Research Agent" in published.text
+    assert "Unpublish card" in published.text
+
+    unpublished = signed_in.post(
+        f"/app/agents/{agent_id}/status", data={"status": "draft"},
+        follow_redirects=True,
+    )
+    assert unpublished.status_code == 200
+    assert "Listing draft" in unpublished.text
+    assert "No published Agent cards yet." in unpublished.text
+
+
+def test_agent_marketplace_rejects_non_object_schema(signed_in):
+    response = signed_in.post("/app/agents", data={
+        "name": "Invalid Schema Agent", "summary": "A sample listing with a bad schema.",
+        "capabilities": "summarize", "input_schema": "[]", "output_schema": "{}",
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert "must be JSON objects" in response.text
+    assert "Invalid Schema Agent" not in response.text
 
 
 def test_search_page_with_a_query(signed_in):
