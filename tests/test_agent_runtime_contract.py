@@ -41,6 +41,15 @@ def _trusted_key(public_pem=_PUBLIC_KEY_PEM, **changes):
 
 
 _TRUSTED_KEYS = {"review-key-1": _trusted_key()}
+_READINESS_PRIVATE_KEY = Ed25519PrivateKey.generate()
+_READINESS_PUBLIC_KEY_PEM = _READINESS_PRIVATE_KEY.public_key().public_bytes(
+    serialization.Encoding.PEM,
+    serialization.PublicFormat.SubjectPublicKeyInfo)
+_READINESS_KEY = TrustedAttestationKey(
+    key_id="readiness-key-1", signer_id="runtime-operator",
+    public_key_pem=_READINESS_PUBLIC_KEY_PEM.decode("ascii"),
+    valid_from=NOW - timedelta(days=1), expires_at=NOW + timedelta(days=1))
+_READINESS_KEYS = {"readiness-key-1": _READINESS_KEY}
 
 
 def _request(**changes):
@@ -79,14 +88,14 @@ def _ready(**changes):
         "policy_revision": "policy-v1",
         "issued_at": NOW,
         "expires_at": NOW + timedelta(hours=1),
-        "signer_id": "review-service",
-        "key_id": "review-key-1",
+        "signer_id": "runtime-operator",
+        "key_id": "readiness-key-1",
         "signature": "pending",
     }
     data.update(changes)
     readiness = BackendReadiness(**data)
     signature = base64.urlsafe_b64encode(
-        _PRIVATE_KEY.sign(backend_readiness_signing_payload(readiness))
+        _READINESS_PRIVATE_KEY.sign(backend_readiness_signing_payload(readiness))
     ).decode().rstrip("=")
     return readiness.model_copy(update={"signature": signature})
 
@@ -96,6 +105,7 @@ _DEFAULT = object()
 
 def _decide(request=None, *, attestation=_DEFAULT, approved=True,
             readiness=_DEFAULT, trusted_keys=_TRUSTED_KEYS,
+            readiness_keys=_READINESS_KEYS,
             artifact_bytes=ARTIFACT_BYTES, revoked=False):
     if attestation is _DEFAULT:
         attestation = _attestation()
@@ -104,6 +114,7 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
     return decide_admission(
         request or _request(), attestation=attestation,
         artifact_bytes=artifact_bytes, trusted_keys=trusted_keys,
+        trusted_readiness_keys=readiness_keys,
         review_approved=approved, artifact_revoked=revoked,
         backend_readiness=readiness)
 
@@ -122,6 +133,8 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(readiness=_ready(conformance_passed=False)).reason == "backend_not_conformant"
     assert _decide(readiness=_ready().model_copy(
         update={"signature": "invalid"})).reason == "backend_not_provisioned"
+    # Artifact-review trust alone must never assert backend isolation readiness.
+    assert _decide(readiness_keys={}).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready().model_copy(
         update={"enabled": False})).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(
@@ -146,7 +159,8 @@ def test_admission_enforces_resource_bounds():
     request = _request(input_bytes=512, deadline_seconds=30)
     result = decide_admission(
         request, attestation=_attestation(), artifact_bytes=ARTIFACT_BYTES,
-        trusted_keys=_TRUSTED_KEYS, review_approved=True,
+        trusted_keys=_TRUSTED_KEYS, trusted_readiness_keys=_READINESS_KEYS,
+        review_approved=True,
         artifact_revoked=False, backend_readiness=_ready(), maximum_input_bytes=256,
         maximum_deadline_seconds=20)
     assert result.reason == "resource_limit_exceeded"
