@@ -101,7 +101,7 @@ group and filters matching no documents. The small iteration counts and
 synthetic, warm-cache corpus mean these results should guide further measurement,
 not be treated as an SLO or production capacity estimate.
 
-## In-process Data Studio API baseline (2026-10-23)
+## In-process Data Studio API baseline (2026-10-24)
 
 Run the authenticated FastAPI/TestClient benchmark against a temporary synthetic
 SQLite index with:
@@ -112,19 +112,21 @@ python scripts/bench-studio-api.py --docs 50000 --iterations 10 --warmup 2
 
 Observed in this development sandbox using Python 3.11.2 on Linux 6.1.158+
 x86_64 / glibc 2.36. The endpoint is called through the full in-process API
-stack with an API key; the index is a synthetic local SQLite DocStore and Redis
-is fakeredis. Results are p50 / p95 milliseconds:
+stack with an API key; the index is a synthetic local SQLite DocStore and the
+benchmark supplies fakeredis. Results are p50 / p95 milliseconds:
 
 | Profile | Matched docs / groups | Response rows | p50 / p95 |
 |---|---:|---:|---:|
-| Source document count | 50,000 / 3 | 3 | 21.823 / 22.453 |
-| Host mean authority | 50,000 / 500 | 50 | 37.286 / 39.302 |
-| Filtered host mean quality (source=wiki) | 16,667 / 500 | 50 | 24.196 / 25.465 |
+| Source document count | 50,000 / 3 | 3 | 19.463 / 21.963 |
+| Host mean authority | 50,000 / 500 | 50 | 33.439 / 38.984 |
+| Filtered host mean quality (source=wiki) | 16,667 / 500 | 50 | 18.102 / 51.843 |
 
-Synthetic build took 0.848 s; the SQLite file was 15,736,832 bytes. Request
+Synthetic build took 0.723 s; the SQLite file was 15,736,832 bytes. Request
 latency includes local TestClient/ASGI dispatch, API-key authentication,
 middleware, the aggregate query, and JSON serialization. It excludes TCP/TLS,
-reverse proxies, production Redis, browser work, and concurrent clients. This
-single sequential run is an API-path baseline, not a production capacity claim
-or SLO. The script prints its environment, query profiles, and limitations as
-JSON and removes the temporary database on exit.
+reverse proxies, production Redis, browser work, and concurrent clients. The
+small sequential sample is sensitive to local runtime noise (notably the
+filtered profile's p95) and should be compared only with matching conditions;
+it is an API-path baseline, not a production capacity claim or SLO. The script
+prints its environment, query profiles, and limitations as JSON and removes
+the temporary database on exit.
