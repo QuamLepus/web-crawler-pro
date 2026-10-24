@@ -91,6 +91,23 @@ Kubernetes API alone is insufficient if the selected CNI does not enforce it.
 No cost or capacity estimate is included: those require the selected cloud/host
 prices, workload mix, runtime overhead, and expected concurrency.
 
+## Implemented contract foundation (not an execution runtime)
+
+`src/agent_marketplace/runtime_contract.py` now defines strict, immutable
+backend-neutral shapes for artifact-attestation claims, backend readiness,
+run admission requests/decisions, and metadata-only audit events. Its pure
+admission function requires an exact backend, digest, agent/version, approved
+review state, and enabled/conformant readiness for that same backend; it
+rejects resource-limit overruns and never selects a fallback. Contract tests
+cover mismatches, unavailable backends, bounds, and rejection of unknown
+fields.
+
+This is only a data/policy foundation. It is not wired into an API, scheduler,
+artifact store, signature verifier, audit persistence, or runtime. Attestation
+signatures and the caller-supplied review/readiness state are not verified by
+the module. No backend is provisioned or enabled as a result; all launch gates
+below remain in force.
+
 ## Proposed architecture (not implemented)
 
 - **Control plane:** the API authenticates the caller, checks ownership/access,
