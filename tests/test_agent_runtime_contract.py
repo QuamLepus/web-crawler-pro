@@ -16,6 +16,7 @@ from src.agent_marketplace.runtime_contract import (
     RuntimeBackend,
     TrustedAttestationKey,
     attestation_signing_payload,
+    backend_readiness_signing_payload,
     decide_admission,
     verify_artifact_bytes,
     verify_attestation_signature,
@@ -71,10 +72,23 @@ def _attestation(**changes):
 
 
 def _ready(**changes):
-    data = {"backend": RuntimeBackend.WASM_WASI, "enabled": True,
-            "conformance_passed": True, "policy_revision": "policy-v1"}
+    data = {
+        "backend": RuntimeBackend.WASM_WASI,
+        "enabled": True,
+        "conformance_passed": True,
+        "policy_revision": "policy-v1",
+        "issued_at": NOW,
+        "expires_at": NOW + timedelta(hours=1),
+        "signer_id": "review-service",
+        "key_id": "review-key-1",
+        "signature": "pending",
+    }
     data.update(changes)
-    return BackendReadiness(**data)
+    readiness = BackendReadiness(**data)
+    signature = base64.urlsafe_b64encode(
+        _PRIVATE_KEY.sign(backend_readiness_signing_payload(readiness))
+    ).decode().rstrip("=")
+    return readiness.model_copy(update={"signature": signature})
 
 
 _DEFAULT = object()
@@ -106,6 +120,16 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(readiness=None).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(enabled=False)).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(conformance_passed=False)).reason == "backend_not_conformant"
+    assert _decide(readiness=_ready().model_copy(
+        update={"signature": "invalid"})).reason == "backend_not_provisioned"
+    assert _decide(readiness=_ready().model_copy(
+        update={"enabled": False})).reason == "backend_not_provisioned"
+    assert _decide(readiness=_ready(
+        issued_at=NOW - timedelta(hours=2),
+        expires_at=NOW - timedelta(hours=1))).reason == "backend_not_provisioned"
+    assert _decide(readiness=_ready(
+        issued_at=NOW + timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=1))).reason == "backend_not_provisioned"
 
 
 def test_admission_rejects_backend_digest_and_version_mismatch_without_fallback():

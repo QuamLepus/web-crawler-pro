@@ -97,8 +97,11 @@ prices, workload mix, runtime overhead, and expected concurrency.
 backend-neutral shapes for artifact-attestation claims, backend readiness,
 run admission requests/decisions, and metadata-only audit events. Its pure
 admission function requires an exact backend, digest, agent/version, approved
-review state, and enabled/conformant readiness for that same backend; it
-rejects resource-limit overruns and never selects a fallback. Contract tests
+review state, and enabled/conformant readiness for that same backend. Backend
+readiness is an Ed25519-signed, time-bounded operator assertion bound to the
+backend, policy revision, enabled/conformance state, and trusted key lifecycle;
+unsigned, expired, future-dated, mismatched, or revoked-key assertions fail
+closed. It rejects resource-limit overruns and never selects a fallback. Contract tests
 cover mismatches, unavailable backends, bounds, and rejection of unknown
 fields.
 
