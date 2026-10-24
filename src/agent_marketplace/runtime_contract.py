@@ -29,6 +29,32 @@ class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class TrustedAttestationKey(StrictContract):
+    """Operator-managed public signing key with explicit validity and revocation."""
+
+    key_id: str = Field(min_length=1, max_length=160)
+    signer_id: str = Field(min_length=1, max_length=160)
+    public_key_pem: str = Field(min_length=1, max_length=4096)
+    valid_from: datetime
+    expires_at: datetime
+    revoked_at: datetime | None = None
+
+    @field_validator("valid_from", "expires_at", "revoked_at")
+    @classmethod
+    def _timezone_required(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("key lifecycle timestamps must include a timezone")
+        return value
+
+    @field_validator("expires_at")
+    @classmethod
+    def _expires_after_valid_from(cls, value: datetime, info) -> datetime:
+        valid_from = info.data.get("valid_from")
+        if valid_from is not None and value <= valid_from:
+            raise ValueError("key expiry must be after its valid-from timestamp")
+        return value
+
+
 class ArtifactAttestation(StrictContract):
     """Claim binding an immutable artifact to its review/provenance record.
 
@@ -70,19 +96,38 @@ def attestation_signing_payload(attestation: ArtifactAttestation) -> bytes:
 
 def verify_attestation_signature(
     attestation: ArtifactAttestation,
-    trusted_public_keys: Mapping[str, bytes],
+    trusted_keys: Mapping[str, TrustedAttestationKey],
+    *,
+    now: datetime | None = None,
 ) -> bool:
-    """Verify an Ed25519 signature against operator-provisioned PEM keys.
+    """Verify signature and signing-key identity, validity, and revocation.
 
-    `key_id` selects the trusted key; unknown/malformed keys, signatures, or
-    payload timestamps fail closed. This verifies only the signed claim; it
-    does not fetch artifact bytes or establish that review state is current.
+    `key_id` selects a trusted operator-provisioned record. Unknown keys,
+    signer/key mismatch, keys outside their validity window, revoked keys,
+    malformed signatures, or payload timestamps fail closed.
     """
-    public_key_pem = trusted_public_keys.get(attestation.key_id)
-    if public_key_pem is None:
+    key = trusted_keys.get(attestation.key_id)
+    if (key is None or key.key_id != attestation.key_id
+            or key.signer_id != attestation.signer_id):
+        return False
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        return False
+    current_time = current_time.astimezone(UTC)
+    valid_from = key.valid_from.astimezone(UTC)
+    expires_at = key.expires_at.astimezone(UTC)
+    attested_at = attestation.created_at
+    if attested_at.tzinfo is None or attested_at.utcoffset() is None:
+        return False
+    attested_at = attested_at.astimezone(UTC)
+    if (current_time < valid_from or current_time >= expires_at
+            or attested_at < valid_from or attested_at >= expires_at
+            or attested_at > current_time
+            or (key.revoked_at is not None
+                and current_time >= key.revoked_at.astimezone(UTC))):
         return False
     try:
-        public_key = serialization.load_pem_public_key(public_key_pem)
+        public_key = serialization.load_pem_public_key(key.public_key_pem.encode("ascii"))
         if not isinstance(public_key, Ed25519PublicKey):
             return False
         encoded = attestation.signature.encode("ascii")
@@ -173,7 +218,7 @@ def decide_admission(
     *,
     attestation: ArtifactAttestation | None,
     artifact_bytes: bytes | None,
-    trusted_public_keys: Mapping[str, bytes],
+    trusted_keys: Mapping[str, TrustedAttestationKey],
     review_approved: bool,
     artifact_revoked: bool,
     backend_readiness: BackendReadiness | None,
@@ -206,7 +251,7 @@ def decide_admission(
         return deny("artifact_revoked")
     if attestation is None or not review_approved:
         return deny("artifact_not_approved")
-    if not verify_attestation_signature(attestation, trusted_public_keys):
+    if not verify_attestation_signature(attestation, trusted_keys):
         return deny("artifact_signature_invalid")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):

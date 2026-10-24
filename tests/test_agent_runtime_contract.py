@@ -1,7 +1,7 @@
 """Pure contract tests: no sandbox or publisher code is provisioned or run."""
 import base64
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -14,6 +14,7 @@ from src.agent_marketplace.runtime_contract import (
     BackendReadiness,
     RuntimeAuditEvent,
     RuntimeBackend,
+    TrustedAttestationKey,
     attestation_signing_payload,
     decide_admission,
     verify_artifact_bytes,
@@ -27,7 +28,18 @@ _PRIVATE_KEY = Ed25519PrivateKey.generate()
 _PUBLIC_KEY_PEM = _PRIVATE_KEY.public_key().public_bytes(
     serialization.Encoding.PEM,
     serialization.PublicFormat.SubjectPublicKeyInfo)
-_TRUSTED_KEYS = {"review-key-1": _PUBLIC_KEY_PEM}
+def _trusted_key(public_pem=_PUBLIC_KEY_PEM, **changes):
+    data = {
+        "key_id": "review-key-1", "signer_id": "review-service",
+        "public_key_pem": public_pem.decode("ascii"),
+        "valid_from": NOW - timedelta(days=1),
+        "expires_at": NOW + timedelta(days=1),
+    }
+    data.update(changes)
+    return TrustedAttestationKey(**data)
+
+
+_TRUSTED_KEYS = {"review-key-1": _trusted_key()}
 
 
 def _request(**changes):
@@ -77,7 +89,7 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
         readiness = _ready()
     return decide_admission(
         request or _request(), attestation=attestation,
-        artifact_bytes=artifact_bytes, trusted_public_keys=trusted_keys,
+        artifact_bytes=artifact_bytes, trusted_keys=trusted_keys,
         review_approved=approved, artifact_revoked=revoked,
         backend_readiness=readiness)
 
@@ -110,7 +122,7 @@ def test_admission_enforces_resource_bounds():
     request = _request(input_bytes=512, deadline_seconds=30)
     result = decide_admission(
         request, attestation=_attestation(), artifact_bytes=ARTIFACT_BYTES,
-        trusted_public_keys=_TRUSTED_KEYS, review_approved=True,
+        trusted_keys=_TRUSTED_KEYS, review_approved=True,
         artifact_revoked=False, backend_readiness=_ready(), maximum_input_bytes=256,
         maximum_deadline_seconds=20)
     assert result.reason == "resource_limit_exceeded"
@@ -131,14 +143,25 @@ def test_attestation_signature_verifies_claim_and_fails_closed_on_tampering():
         private_key.sign(attestation_signing_payload(unsigned))).decode().rstrip("=")
     signed = unsigned.model_copy(update={"signature": signature})
 
-    assert verify_attestation_signature(signed, {"review-key-1": public_pem})
-    assert not verify_attestation_signature(signed, {})
+    test_keys = {"review-key-1": _trusted_key(public_pem)}
+    assert verify_attestation_signature(signed, test_keys, now=NOW)
+    assert not verify_attestation_signature(signed, {}, now=NOW)
     assert not verify_attestation_signature(
-        signed.model_copy(update={"sha256": "b" * 64}),
-        {"review-key-1": public_pem})
+        signed.model_copy(update={"sha256": "b" * 64}), test_keys, now=NOW)
     assert not verify_attestation_signature(
         signed.model_copy(update={"signature": "not-base64%%%"}),
-        {"review-key-1": public_pem})
+        test_keys, now=NOW)
+    assert not verify_attestation_signature(
+        signed, {"review-key-1": _trusted_key(public_pem, revoked_at=NOW)}, now=NOW)
+    assert not verify_attestation_signature(
+        signed, {"review-key-1": _trusted_key(public_pem, expires_at=NOW)}, now=NOW)
+    assert not verify_attestation_signature(
+        signed, {"review-key-1": _trusted_key(public_pem, signer_id="other")}, now=NOW)
+    assert not verify_attestation_signature(
+        signed, {"review-key-1": _trusted_key(
+            public_pem, valid_from=NOW + timedelta(minutes=1))}, now=NOW)
+    assert not verify_attestation_signature(
+        _attestation(created_at=NOW + timedelta(minutes=1)), test_keys, now=NOW)
 
 
 def test_artifact_bytes_are_bounded_and_match_signed_digest():
