@@ -66,10 +66,19 @@ policies does not satisfy this design.
 | Sandboxed Kubernetes | Dedicated cluster or node pool with a tested `RuntimeClass` (for example, gVisor), admission policy, and an egress enforcement point | Restricted pod security; non-root UID, read-only root filesystem, no privilege escalation/capabilities/host namespaces/mounts, runtime-default seccomp, hard CPU/memory/PID/ephemeral-storage limits, and default-deny ingress/egress NetworkPolicies enforced by the installed CNI. |
 | Dedicated microVM | Dedicated KVM-capable hosts and isolated runner service that creates and destroys a fresh VM per run; pinned VMM and guest image | No shared writable disks or snapshots across tenants; minimal read-only guest image, bounded vCPU/RAM/disk/time, deny network by default, restricted VMM API and vsock, and host-side kill/cleanup verification. |
 
-The actual runtime, CNI, host kernel, and VMM configuration must be selected
-and tested in the operator's environment; these requirements are not deployment
-manifests and do not assert that the controls are present. Network policy at the
-Kubernetes API alone is insufficient if the selected CNI does not enforce it.
+The contract's `BACKEND_REQUIRED_GATES` names the signed evidence items for each
+class: WASM/WASI gates cover runtime/ABI pinning, capability imports, ambient
+filesystem/process/clock/randomness denial, resource bounds, network denial,
+cancellation, and cleanup; Kubernetes gates separately cover pool/runtime
+identity, host/pod restrictions, CPU/memory/PID/disk quotas, enforced network
+policy, metadata blocking, cancellation, and cleanup; microVM gates cover
+KVM/VMM/guest identity, a fresh VM and private writable storage per run, a
+minimal read-only guest, quotas, network denial, restricted VMM/vsock, and
+cleanup. These names are a checklist contract, not deployment manifests or
+proof that controls are present. The actual runtime, CNI, host kernel, and VMM
+configuration must be selected and tested in the operator's environment.
+Network policy at the Kubernetes API alone is insufficient if the selected CNI
+does not enforce it.
 
 ### Rollout sequence for the full portfolio
 

@@ -160,6 +160,27 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
         backend_readiness=readiness)
 
 
+def test_backend_required_gate_contracts_cover_isolation_controls():
+    assert BACKEND_REQUIRED_GATES[RuntimeBackend.WASM_WASI] == frozenset({
+        "runtime_version_pinned", "component_abi_pinned", "host_imports_allowlisted",
+        "filesystem_denied", "process_access_denied", "clock_randomness_restricted",
+        "fuel_memory_and_io_bounded", "network_denied", "cancellation_verified",
+        "cross_run_cleanup_verified",
+    })
+    assert BACKEND_REQUIRED_GATES[RuntimeBackend.SANDBOXED_KUBERNETES] == frozenset({
+        "dedicated_pool", "sandbox_runtime_verified", "host_access_denied",
+        "nonroot_readonly_pod", "capabilities_seccomp_restricted",
+        "cpu_memory_pid_disk_quotas", "network_policy_enforced", "metadata_blocked",
+        "cancellation_verified", "cross_run_cleanup_verified",
+    })
+    assert BACKEND_REQUIRED_GATES[RuntimeBackend.MICROVM] == frozenset({
+        "dedicated_kvm_hosts", "vmm_and_guest_pinned", "fresh_vm_per_run",
+        "no_shared_writable_storage", "minimal_readonly_guest", "network_denied",
+        "resource_quotas_enforced", "vmm_api_vsock_restricted",
+        "cancellation_verified", "cross_run_cleanup_verified",
+    })
+
+
 def test_backend_readiness_evidence_is_backend_specific_and_signed():
     for backend, required_gates in BACKEND_REQUIRED_GATES.items():
         readiness = _ready(backend=backend)
