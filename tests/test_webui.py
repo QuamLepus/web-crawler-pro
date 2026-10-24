@@ -1411,6 +1411,40 @@ def test_sso_settings_page_and_secure_configuration_form(signed_in, monkeypatch)
     assert disabled.status_code == 303 and calls[-1] == "disabled"
 
 
+def test_sso_settings_distinguishes_audit_errors_from_empty_history(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    audit_state = {"failed": True}
+
+    async def webhooks(self):
+        return Result(True, data=[])
+
+    async def oidc_config(self):
+        return Result(True, data={"client_secret_configured": False,
+                                  "allowed_domains": [], "jit_provisioning": False,
+                                  "default_role": "viewer"})
+
+    async def audit(self, limit=50):
+        if audit_state["failed"]:
+            return Result(False, error="SSO audit service unavailable")
+        return Result(True, data={"items": []})
+
+    monkeypatch.setattr(Api, "webhooks", webhooks)
+    monkeypatch.setattr(Api, "sso_oidc", oidc_config)
+    monkeypatch.setattr(Api, "sso_audit", audit)
+
+    failed_page = signed_in.get("/app/settings")
+    assert failed_page.status_code == 200
+    assert "Could not load SSO audit history: SSO audit service unavailable" in failed_page.text
+    assert "No SSO audit events recorded yet" not in failed_page.text
+
+    audit_state["failed"] = False
+    empty_page = signed_in.get("/app/settings")
+    assert empty_page.status_code == 200
+    assert "No SSO audit events recorded yet" in empty_page.text
+    assert "Could not load SSO audit history" not in empty_page.text
+
+
 def test_login_page_offers_sso_with_validated_workspace_route(client):
     response = client.get("/login")
     assert response.status_code == 200
