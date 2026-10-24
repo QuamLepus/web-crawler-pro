@@ -326,6 +326,7 @@ def verify_backend_readiness(
     trusted_assessor_keys: Mapping[str, TrustedAttestationKey],
     *,
     now: datetime | None = None,
+    maximum_validity_seconds: int = 24 * 60 * 60,
 ) -> bool:
     """Verify independently assessed gate evidence and operator readiness."""
     current_time = now or datetime.now(UTC)
@@ -334,7 +335,9 @@ def verify_backend_readiness(
     current_time = current_time.astimezone(UTC)
     issued_at = readiness.issued_at.astimezone(UTC)
     expires_at = readiness.expires_at.astimezone(UTC)
-    if (issued_at > current_time or current_time >= expires_at
+    if (maximum_validity_seconds < 1
+            or (expires_at - issued_at).total_seconds() > maximum_validity_seconds
+            or issued_at > current_time or current_time >= expires_at
             or readiness.key_id == readiness.assessor_key_id
             or readiness.signer_id == readiness.assessor_id):
         return False

@@ -167,6 +167,9 @@ def test_backend_readiness_evidence_is_backend_specific_and_signed():
         assert set(readiness.conformance_evidence) == required_gates
         assert verify_backend_readiness(
             readiness, _READINESS_KEYS, _ASSESSOR_KEYS, now=NOW)
+        assert not verify_backend_readiness(
+            readiness, _READINESS_KEYS, _ASSESSOR_KEYS, now=NOW,
+            maximum_validity_seconds=60)
         assert verify_backend_evidence(readiness, evidence)
         tampered = dict(evidence)
         first_gate = next(iter(tampered))
