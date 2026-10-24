@@ -710,6 +710,50 @@ def test_data_studio_renders_local_index_empty_state_and_navigation(signed_in):
     assert "/app/studio" in signed_in.get("/app").text
 
 
+def test_data_studio_saved_list_errors_are_distinct_from_successful_empty_lists(
+        signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    failed = {"enabled": True}
+
+    async def index_stats(self):
+        return Result(True, data={"docs": 0, "shards": 0, "available": False})
+
+    async def saved_queries(self):
+        if failed["enabled"]:
+            return Result(False, error="saved query service unavailable")
+        return Result(True, data={"items": []})
+
+    async def snapshots(self):
+        if failed["enabled"]:
+            return Result(False, error="snapshot service unavailable")
+        return Result(True, data={"items": []})
+
+    async def analytics(self, **kwargs):
+        return Result(True, data={"rows": [], "matched_documents": 0,
+                                  "group_count": 0, "offset": 0})
+
+    monkeypatch.setattr(Api, "index_stats", index_stats)
+    monkeypatch.setattr(Api, "studio_saved_queries", saved_queries)
+    monkeypatch.setattr(Api, "studio_snapshots", snapshots)
+    monkeypatch.setattr(Api, "studio_analytics", analytics)
+
+    failed_page = signed_in.get("/app/studio")
+    assert failed_page.status_code == 200
+    assert "Saved analyses unavailable: saved query service unavailable" in failed_page.text
+    assert "Saved snapshots unavailable: snapshot service unavailable" in failed_page.text
+    assert "No saved analyses yet" not in failed_page.text
+    assert "No saved snapshots yet" not in failed_page.text
+
+    failed["enabled"] = False
+    empty_page = signed_in.get("/app/studio")
+    assert empty_page.status_code == 200
+    assert "No saved analyses yet" in empty_page.text
+    assert "No saved snapshots yet" in empty_page.text
+    assert "Saved analyses unavailable" not in empty_page.text
+    assert "Saved snapshots unavailable" not in empty_page.text
+
+
 def test_data_studio_export_requires_session(client):
     response = client.get("/app/studio/export", params={"q": "solar"}, follow_redirects=False)
     assert response.status_code == 303
