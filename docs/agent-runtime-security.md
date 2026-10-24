@@ -102,10 +102,12 @@ rejects resource-limit overruns and never selects a fallback. Contract tests
 cover mismatches, unavailable backends, bounds, and rejection of unknown
 fields.
 
-This is only a data/policy foundation. It is not wired into an API, scheduler,
-artifact store, signature verifier, audit persistence, or runtime. Attestation
-signatures and the caller-supplied review/readiness state are not verified by
-the module. No backend is provisioned or enabled as a result; all launch gates
+The module also verifies Ed25519 signatures over a canonical, timezone-aware
+attestation payload using an operator-supplied key-ID-to-PEM trust map. This
+only authenticates the signed claim: it does not fetch artifact bytes, establish
+that review is current, or manage trust-key rotation. Signature verification
+is not yet wired into an API, scheduler, artifact store, review-state source,
+or audit persistence. No backend is provisioned or enabled; all launch gates
 below remain in force.
 
 ## Proposed architecture (not implemented)
