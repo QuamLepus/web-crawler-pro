@@ -181,6 +181,26 @@ def verify_artifact_bytes(
     return hashlib.sha256(artifact_bytes).hexdigest() == attestation.sha256
 
 
+class BackendGateEvidence(StrictContract):
+    """Structured summary of one independently assessed backend gate test."""
+
+    gate_id: str = Field(min_length=1, max_length=120)
+    backend: RuntimeBackend
+    environment_id: str = Field(min_length=1, max_length=160)
+    policy_revision: str = Field(min_length=1, max_length=80)
+    result: Literal["passed"]
+    tested_at: datetime
+    test_run_id: str = Field(min_length=1, max_length=160)
+    report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("tested_at")
+    @classmethod
+    def _tested_at_timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("gate evidence timestamp must include a timezone")
+        return value
+
+
 class BackendReadiness(StrictContract):
     """Operator-signed, short-lived backend gate result.
 
@@ -266,19 +286,27 @@ def verify_backend_evidence(
     readiness: BackendReadiness,
     evidence: Mapping[str, bytes] | None,
     *,
+    now: datetime | None = None,
     maximum_total_bytes: int = 10 * 1024 * 1024,
+    maximum_age_seconds: int = 24 * 60 * 60,
 ) -> bool:
-    """Verify supplied evidence bytes match every signed backend gate digest.
+    """Verify signed gate reports' bytes, backend/pool bindings, and freshness.
 
-    This verifies byte identity and bounded size, not the semantic validity of
-    the evidence; an independent operator review must interpret each item.
+    The report summaries are structurally validated, but their attached
+    underlying test logs/results are not retrieved here; assessors must retain
+    and interpret that source evidence independently.
     """
-    if evidence is None or maximum_total_bytes < 0:
+    if (evidence is None or maximum_total_bytes < 0
+            or maximum_age_seconds < 1):
         return False
     required = BACKEND_REQUIRED_GATES[readiness.backend]
     if (set(evidence) != set(readiness.conformance_evidence)
             or not required.issubset(evidence)):
         return False
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        return False
+    current_time = current_time.astimezone(UTC)
     total_bytes = 0
     for gate, raw in evidence.items():
         if not isinstance(raw, bytes):
@@ -287,6 +315,24 @@ def verify_backend_evidence(
         if total_bytes > maximum_total_bytes:
             return False
         if hashlib.sha256(raw).hexdigest() != readiness.conformance_evidence[gate]:
+            return False
+        try:
+            report = BackendGateEvidence.model_validate_json(raw)
+            canonical_report = json.dumps(
+                report.model_dump(mode="json"), sort_keys=True,
+                separators=(",", ":"), ensure_ascii=True,
+                allow_nan=False).encode("utf-8")
+        except (ValueError, TypeError):
+            return False
+        if raw != canonical_report:
+            return False
+        tested_at = report.tested_at.astimezone(UTC)
+        if (report.gate_id != gate
+                or report.backend != readiness.backend
+                or report.environment_id != readiness.environment_id
+                or report.policy_revision != readiness.policy_revision
+                or tested_at > current_time
+                or (current_time - tested_at).total_seconds() > maximum_age_seconds):
             return False
     return True
 

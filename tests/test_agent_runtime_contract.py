@@ -1,6 +1,7 @@
 """Pure contract tests: no sandbox or publisher code is provisioned or run."""
 import base64
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -12,6 +13,7 @@ from src.agent_marketplace.runtime_contract import (
     BACKEND_REQUIRED_GATES,
     AdmissionRequest,
     ArtifactAttestation,
+    BackendGateEvidence,
     BackendReadiness,
     RuntimeAuditEvent,
     RuntimeBackend,
@@ -94,16 +96,28 @@ def _attestation(**changes):
     return attestation
 
 
-def _evidence_for(backend):
-    return {
-        gate: f"signed-test-evidence:{backend.value}:{gate}".encode()
-        for gate in BACKEND_REQUIRED_GATES[backend]
-    }
+def _evidence_for(backend, *, environment_id="pool-test-a",
+                  policy_revision="policy-v1", tested_at=NOW):
+    reports = {}
+    for gate in BACKEND_REQUIRED_GATES[backend]:
+        report = BackendGateEvidence(
+            gate_id=gate, backend=backend, environment_id=environment_id,
+            policy_revision=policy_revision, result="passed", tested_at=tested_at,
+            test_run_id=f"conformance-{backend.value}-{gate}",
+            report_sha256=hashlib.sha256(
+                f"source-report:{backend.value}:{gate}".encode()).hexdigest())
+        reports[gate] = json.dumps(
+            report.model_dump(mode="json"), sort_keys=True,
+            separators=(",", ":")).encode()
+    return reports
 
 
 def _ready(**changes):
     backend = changes.get("backend", RuntimeBackend.WASM_WASI)
-    evidence = _evidence_for(backend)
+    environment_id = changes.get("environment_id", "pool-test-a")
+    policy_revision = changes.get("policy_revision", "policy-v1")
+    evidence = changes.pop("evidence_override", None) or _evidence_for(
+        backend, environment_id=environment_id, policy_revision=policy_revision)
     data = {
         "backend": backend,
         "environment_id": "pool-test-a",
@@ -222,6 +236,26 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     first_gate = next(iter(altered_evidence))
     altered_evidence[first_gate] += b"tampered"
     assert _decide(backend_evidence=altered_evidence).reason == "backend_not_conformant"
+    wrong_pool_evidence = _evidence_for(
+        RuntimeBackend.WASM_WASI, environment_id="pool-other")
+    wrong_pool_readiness = _ready(evidence_override=wrong_pool_evidence)
+    assert _decide(
+        readiness=wrong_pool_readiness,
+        backend_evidence=wrong_pool_evidence).reason == "backend_not_conformant"
+    noncanonical_evidence = _evidence_for(RuntimeBackend.WASM_WASI)
+    first_gate = next(iter(noncanonical_evidence))
+    noncanonical_evidence[first_gate] = b" " + noncanonical_evidence[first_gate]
+    noncanonical_readiness = _ready(evidence_override=noncanonical_evidence)
+    assert not verify_backend_evidence(
+        noncanonical_readiness, noncanonical_evidence, now=NOW)
+    stale_evidence = _evidence_for(
+        RuntimeBackend.WASM_WASI, tested_at=NOW - timedelta(days=2))
+    stale_readiness = _ready(evidence_override=stale_evidence)
+    assert not verify_backend_evidence(stale_readiness, stale_evidence, now=NOW)
+    future_evidence = _evidence_for(
+        RuntimeBackend.WASM_WASI, tested_at=NOW + timedelta(minutes=1))
+    future_readiness = _ready(evidence_override=future_evidence)
+    assert not verify_backend_evidence(future_readiness, future_evidence, now=NOW)
     assert _decide(readiness=_ready().model_copy(
         update={"signature": "invalid"})).reason == "backend_not_provisioned"
     # Artifact-review trust alone must never assert backend isolation readiness.
