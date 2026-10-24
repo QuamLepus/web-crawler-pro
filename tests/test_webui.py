@@ -10,6 +10,8 @@ Everything runs in-process (``ASGITransport``), so no port is ever bound.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("jinja2", reason="jinja2 is required for the web console")
@@ -194,9 +196,9 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert "Console Research Agent" in created.text
     assert "Publish card" in created.text
 
-    mine = signed_in.get("/api/v1/agent-marketplace/my/agents")
-    assert mine.status_code == 200
-    agent_id = mine.json()[0]["agent_id"]
+    match = re.search(r'action="/app/agents/([^/]+)/status"', created.text)
+    assert match, "the owner's draft should include status controls"
+    agent_id = match.group(1)
     published = signed_in.post(
         f"/app/agents/{agent_id}/status", data={"status": "published"},
         follow_redirects=True,
