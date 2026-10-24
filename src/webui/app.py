@@ -1007,6 +1007,7 @@ async def workflows_page(request: Request,
         if workflow_id:
             runs_by_workflow.setdefault(workflow_id, []).append(run)
     selected_run_record = None
+    selected_run_error = ""
     if selected_workflow_id and selected_run_id:
         selected_run_record = next((run for run in run_items
                                     if run.get("run_id") == selected_run_id
@@ -1017,6 +1018,14 @@ async def workflows_page(request: Request,
             if (isinstance(candidate, dict)
                     and candidate.get("workflow_id") == selected_workflow_id):
                 selected_run_record = candidate
+            elif selected_result.status == 404 or selected_result.ok:
+                selected_run_error = (
+                    "The selected run is unavailable for this workflow; it may have expired "
+                    "or no longer belong to the selected workflow.")
+            else:
+                selected_run_error = (
+                    "Could not verify the selected run: "
+                    f"{selected_result.error or 'request failed'}. Refresh and try again.")
     rendered_workflows = []
     for workflow in workflows:
         preview = _workflow_dag_preview(workflow)
@@ -1085,6 +1094,7 @@ async def workflows_page(request: Request,
                   run_to=run_to.isoformat() if run_to else "",
                   run_filter_active=bool(run_q.strip() or run_status or run_from or run_to),
                   history_error=runs.error if not runs.ok else "",
+                  selected_run_error=selected_run_error,
                   clear_runs_url=clear_runs_url,
                   previous_runs_url=previous_runs_url,
                   next_runs_url=next_runs_url,
