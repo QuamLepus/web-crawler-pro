@@ -1,5 +1,6 @@
 """Pure contract tests: no sandbox or publisher code is provisioned or run."""
 import base64
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from src.agent_marketplace.runtime_contract import (
     RuntimeBackend,
     attestation_signing_payload,
     decide_admission,
+    verify_artifact_bytes,
     verify_attestation_signature,
 )
 
@@ -130,6 +132,16 @@ def test_attestation_signature_verifies_claim_and_fails_closed_on_tampering():
     assert not verify_attestation_signature(
         signed.model_copy(update={"signature": "not-base64%%%"}),
         {"review-key-1": public_pem})
+
+
+def test_artifact_bytes_are_bounded_and_match_signed_digest():
+    artifact = b"minimal inert wasm artifact fixture"
+    attestation = _attestation(sha256=hashlib.sha256(artifact).hexdigest())
+
+    assert verify_artifact_bytes(attestation, artifact)
+    assert not verify_artifact_bytes(attestation, artifact + b"tampered")
+    assert not verify_artifact_bytes(attestation, artifact, maximum_bytes=4)
+    assert not verify_artifact_bytes(attestation, bytearray(artifact))
 
 
 def test_contracts_reject_unknown_fields_and_noncanonical_digest():
