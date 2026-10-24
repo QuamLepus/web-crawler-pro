@@ -544,6 +544,24 @@ test('discovery job methods keep crawling behind explicit approval', async () =>
   ]);
 });
 
+test('discovery auto mode is explicit and keeps robots compliance enabled', async () => {
+  let call;
+  const client = new WebIntelligenceClient({ apiKey: 'discovery-auto-key', fetch: async (url, init) => {
+    call = { url, method: init.method, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ job_id: 'disc_aaaaaaaaaaaa', auto: true }),
+      { status: 202 });
+  } });
+  const result = await client.createDiscovery('clean energy', {
+    auto: true, maxPagesPerSite: 4, perDomain: 2,
+  });
+  assert.equal(result.auto, true);
+  assert.deepEqual(call, {
+    url: 'http://localhost:8000/api/v1/discovery', method: 'POST',
+    body: { topic: 'clean energy', count: 10, seeds: [], language: 'en', auto: true,
+      max_pages_per_site: 4, per_domain: 2, obey_robots: true },
+  });
+});
+
 test('discovery review methods remove a candidate, approve explicit domains, and read results', async () => {
   const calls = [];
   const client = new WebIntelligenceClient({ apiKey: 'discovery-review-key', fetch: async (url, init) => {
