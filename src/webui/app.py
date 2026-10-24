@@ -1706,19 +1706,21 @@ async def agent_marketplace(
     request: Request, q: str = Query(""), tag: str = Query(""),
     catalog_offset: int = Query(0, ge=0, le=5000),
     mine_offset: int = Query(0, ge=0, le=5000),
+    mine_status: str = Query("", pattern="^(draft|published|suspended|archived)?$"),
     tab: str = Query("browse", pattern="^(browse|owned|create)$"),
     notice: str = Query(""), error: str = Query(""),
 ):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
+    mine_params = {"limit": 21, "offset": mine_offset}
+    if mine_status:
+        mine_params["status"] = mine_status
     catalog, mine = await _gather(
         api.get("/api/v1/agent-marketplace/agents", params={
             "q": q, "tag": tag, "limit": 21, "offset": catalog_offset,
         }),
-        api.get("/api/v1/agent-marketplace/my/agents", params={
-            "limit": 21, "offset": mine_offset,
-        }),
+        api.get("/api/v1/agent-marketplace/my/agents", params=mine_params),
     )
     catalog_data = catalog.data if catalog.ok and isinstance(catalog.data, list) else None
     mine_data = mine.data if mine.ok and isinstance(mine.data, list) else None
@@ -1730,6 +1732,7 @@ async def agent_marketplace(
         my_agents=(mine_data[:20] if mine_data is not None else None),
         mine_has_next=(len(mine_data) > 20 if mine_data is not None else False),
         catalog_offset=catalog_offset, mine_offset=mine_offset,
+        mine_status=mine_status,
         catalog_error=(catalog.error if not catalog.ok else None),
         mine_error=(mine.error if not mine.ok else None),
         notice=notice, form_error=error,

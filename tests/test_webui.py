@@ -198,6 +198,11 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert "Draft listing created" in created.text
     assert "Console Research Agent" in created.text
     assert "Publish card" in created.text
+    draft_filter = signed_in.get("/app/agents?tab=owned&mine_status=draft")
+    assert "Console Research Agent" in draft_filter.text
+    assert 'option value="draft" selected' in draft_filter.text
+    empty_published = signed_in.get("/app/agents?tab=owned&mine_status=published")
+    assert "No published listings." in empty_published.text
 
     match = re.search(r'action="/app/agents/([^/]+)/status"', created.text)
     assert match, "the owner's draft should include status controls"
@@ -231,6 +236,9 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert "Listing published" in published.text
     assert "Console Research Agent" in published.text
     assert "Unpublish card" in published.text
+    published_filter = signed_in.get("/app/agents?tab=owned&mine_status=published")
+    assert "Console Research Agent Revised" in published_filter.text
+    assert "No published listings." not in published_filter.text
 
     unpublished = signed_in.post(
         f"/app/agents/{agent_id}/status", data={"status": "draft"},

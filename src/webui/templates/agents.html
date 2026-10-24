@@ -36,12 +36,25 @@
     {% else %}<div class="empty"><strong>No published Agent cards yet.</strong><p>Try another search, or create a draft listing.</p></div>{% endif %}
     {% if catalog_rows or catalog_offset > 0 %}<div class="between mt-2">
       <span class="tiny muted">Page {{ catalog_offset // 20 + 1 }}</span><div class="row-wrap">
-        {% if catalog_offset > 0 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="browse"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset - 20 }}"><input type="hidden" name="mine_offset" value="{{ mine_offset }}"><button class="btn">Previous</button></form>{% endif %}
-        {% if catalog_has_next and catalog_offset < 5000 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="browse"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset + 20 }}"><input type="hidden" name="mine_offset" value="{{ mine_offset }}"><button class="btn">Next</button></form>{% endif %}
+        {% if catalog_offset > 0 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="browse"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset - 20 }}"><input type="hidden" name="mine_offset" value="{{ mine_offset }}"><input type="hidden" name="mine_status" value="{{ mine_status }}"><button class="btn">Previous</button></form>{% endif %}
+        {% if catalog_has_next and catalog_offset < 5000 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="browse"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset + 20 }}"><input type="hidden" name="mine_offset" value="{{ mine_offset }}"><input type="hidden" name="mine_status" value="{{ mine_status }}"><button class="btn">Next</button></form>{% endif %}
       </div>
     </div>{% endif %}
   </section>
   <section class="tabpanel" data-panel="owned" role="tabpanel" style="padding:1rem" {% if tab != 'owned' %}hidden{% endif %}>
+    <form method="get" action="/app/agents" class="row-wrap mb-3">
+      <input type="hidden" name="tab" value="owned">
+      <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}">
+      <input type="hidden" name="catalog_offset" value="{{ catalog_offset }}"><input type="hidden" name="mine_offset" value="0">
+      <label for="agent-status-filter">Listing status</label>
+      <select class="input" id="agent-status-filter" name="mine_status">
+        <option value="" {% if not mine_status %}selected{% endif %}>All statuses</option>
+        {% for status_option in ['draft', 'published', 'suspended', 'archived'] %}
+          <option value="{{ status_option }}" {% if mine_status == status_option %}selected{% endif %}>{{ status_option|title }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn">Filter</button>
+    </form>
     {% if mine_error %}<div class="alert danger">Your listings could not be loaded: {{ mine_error }}</div>
     {% elif owned_rows %}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">{% for card in owned_rows %}{% set m = card.get('manifest') or {} %}
       <article class="card" style="padding:1rem"><div class="between"><h2>{{ m.get('name', 'Agent') }}</h2><span class="badge">{{ card.get('status') }}</span></div>
@@ -64,11 +77,12 @@
           {% else %}<input type="hidden" name="status" value="draft"><button class="btn">Unpublish card</button>{% endif %}
         </form>{% endif %}
       </article>{% endfor %}</div>{% elif mine_offset > 0 %}<div class="empty"><strong>No more listings on this page.</strong><p>Return to the previous page to see your earlier listings.</p></div>
+    {% elif mine_status %}<div class="empty"><strong>No {{ mine_status }} listings.</strong><p>Choose another status or create a draft.</p></div>
     {% else %}<div class="empty"><strong>No listings yet.</strong><p>Create a draft to get started.</p></div>{% endif %}
     {% if owned_rows or mine_offset > 0 %}<div class="between mt-2">
       <span class="tiny muted">Page {{ mine_offset // 20 + 1 }}</span><div class="row-wrap">
-        {% if mine_offset > 0 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="owned"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset }}"><input type="hidden" name="mine_offset" value="{{ mine_offset - 20 }}"><button class="btn">Previous</button></form>{% endif %}
-        {% if mine_has_next and mine_offset < 5000 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="owned"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset }}"><input type="hidden" name="mine_offset" value="{{ mine_offset + 20 }}"><button class="btn">Next</button></form>{% endif %}
+        {% if mine_offset > 0 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="owned"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset }}"><input type="hidden" name="mine_offset" value="{{ mine_offset - 20 }}"><input type="hidden" name="mine_status" value="{{ mine_status }}"><button class="btn">Previous</button></form>{% endif %}
+        {% if mine_has_next and mine_offset < 5000 %}<form method="get" action="/app/agents"><input type="hidden" name="tab" value="owned"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="catalog_offset" value="{{ catalog_offset }}"><input type="hidden" name="mine_offset" value="{{ mine_offset + 20 }}"><input type="hidden" name="mine_status" value="{{ mine_status }}"><button class="btn">Next</button></form>{% endif %}
       </div>
     </div>{% endif %}
   </section>
