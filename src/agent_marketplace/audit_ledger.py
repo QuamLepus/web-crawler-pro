@@ -296,12 +296,25 @@ class RuntimeAuditLedger:
             private_key.sign(_checkpoint_payload(checkpoint))).decode("ascii").rstrip("=")
         return checkpoint.model_copy(update={"signature": signature})
 
-    def matches_checkpoint(self, checkpoint: AuditCheckpoint,
-                           tenant_id: str) -> bool:
-        """Check whether this valid current ledger still matches a saved checkpoint."""
+    def matches_checkpoint(
+        self,
+        checkpoint: AuditCheckpoint,
+        tenant_id: str,
+        *,
+        trusted_keys: dict[str, TrustedAttestationKey],
+        now: datetime | None = None,
+    ) -> bool:
+        """Verify a checkpoint signature and compare it to the current ledger.
+
+        Requiring trusted keys here prevents callers from accidentally treating
+        a merely well-shaped, unsigned checkpoint as an external trust anchor.
+        """
         tenant_id = str(tenant_id)
         tenant_hash = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()
-        if checkpoint.tenant_sha256 != tenant_hash:
+        if (checkpoint.tenant_sha256 != tenant_hash
+                or not self.verify_checkpoint(
+                    checkpoint, tenant_id=tenant_id,
+                    trusted_keys=trusted_keys, now=now)):
             return False
         try:
             records, head = self._snapshot(tenant_id)
