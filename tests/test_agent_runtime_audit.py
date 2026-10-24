@@ -137,15 +137,26 @@ def test_signed_checkpoint_is_tenant_bound_and_verifiable_outside_redis():
     assert checkpoint.sequence == 3
     assert RuntimeAuditLedger.verify_checkpoint(
         checkpoint, tenant_id="tenant-a", trusted_keys=trusted_keys, now=now)
-    assert ledger.matches_checkpoint(checkpoint, "tenant-a")
-    assert not ledger.matches_checkpoint(checkpoint, "tenant-b")
+    assert ledger.matches_checkpoint(
+        checkpoint, "tenant-a", trusted_keys=trusted_keys, now=now)
+    assert not ledger.matches_checkpoint(
+        checkpoint.model_copy(update={"signature": "not-a-valid-signature"}),
+        "tenant-a", trusted_keys=trusted_keys, now=now)
+    assert not ledger.matches_checkpoint(
+        checkpoint, "tenant-b", trusted_keys=trusted_keys, now=now)
+    assert not ledger.matches_checkpoint(
+        checkpoint, "tenant-a", trusted_keys={"audit-key-1": TrustedAttestationKey(
+            key_id="audit-key-1", signer_id="audit-operator",
+            public_key_pem=public_key_pem, valid_from=now - timedelta(days=1),
+            expires_at=now + timedelta(days=1), revoked_at=now)}, now=now)
     assert not RuntimeAuditLedger.verify_checkpoint(
         checkpoint, tenant_id="tenant-b", trusted_keys=trusted_keys, now=now)
     assert not RuntimeAuditLedger.verify_checkpoint(
         checkpoint.model_copy(update={"event_hash": "b" * 64}),
         tenant_id="tenant-a", trusted_keys=trusted_keys, now=now)
     ledger.append("tenant-a", _event(suffix="after-checkpoint"))
-    assert not ledger.matches_checkpoint(checkpoint, "tenant-a")
+    assert not ledger.matches_checkpoint(
+        checkpoint, "tenant-a", trusted_keys=trusted_keys, now=now)
 
 
 def test_signed_checkpoint_rejects_revoked_or_expired_signing_keys():
