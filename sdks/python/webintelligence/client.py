@@ -453,15 +453,17 @@ class Client:
     def create_discovery(self, topic: str, *, count: int = 10,
                          seeds: list[str] | None = None, language: str = "en",
                          max_pages_per_site: int = 5,
-                         per_domain: int = 1) -> dict[str, Any]:
-        """Queue candidate discovery for manual review; does not start crawls.
+                         per_domain: int = 1, auto: bool = False) -> dict[str, Any]:
+        """Queue topic discovery, optionally crawling the shortlist automatically.
 
-        The API charges ``count`` requests from quota when the job is created.
-        Crawling remains gated behind an explicit approval action.
+        By default, candidates stop for human review and crawling requires
+        ``approve_discovery``. Set ``auto=True`` to crawl ranked candidates
+        without a separate approval call. The API charges ``count`` requests
+        from quota when the job is created; robots compliance remains enabled.
         """
         return self._request("POST", "discovery", json={
             "topic": topic, "count": count, "seeds": seeds or [],
-            "language": language, "auto": False,
+            "language": language, "auto": auto,
             "max_pages_per_site": max_pages_per_site,
             "per_domain": per_domain, "obey_robots": True,
         })

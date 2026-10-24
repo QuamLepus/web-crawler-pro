@@ -679,6 +679,30 @@ def test_discovery_job_methods_keep_crawling_behind_approval():
     ]
 
 
+def test_discovery_auto_mode_is_explicit_and_keeps_robots_compliance_enabled():
+    import json
+
+    captured = {}
+
+    def handler(request):
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.read())
+        return httpx.Response(202, json={"job_id": "disc_aaaaaaaaaaaa", "auto": True})
+
+    with Client("secret", base_url="https://api.example",
+                transport=httpx.MockTransport(handler)) as client:
+        result = client.create_discovery("clean energy", auto=True,
+                                        max_pages_per_site=4, per_domain=2)
+
+    assert result["auto"] is True
+    assert captured == {
+        "path": "/api/v1/discovery",
+        "body": {"topic": "clean energy", "count": 10, "seeds": [],
+                 "language": "en", "auto": True, "max_pages_per_site": 4,
+                 "per_domain": 2, "obey_robots": True},
+    }
+
+
 def test_discovery_review_methods_forward_explicit_approval_and_results():
     import json
 
