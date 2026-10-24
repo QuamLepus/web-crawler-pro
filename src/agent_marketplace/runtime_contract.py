@@ -28,18 +28,21 @@ class RuntimeBackend(StrEnum):
 
 BACKEND_REQUIRED_GATES: dict[RuntimeBackend, frozenset[str]] = {
     RuntimeBackend.WASM_WASI: frozenset({
-        "runtime_version_pinned", "component_abi_pinned", "imports_allowlisted",
-        "fuel_and_memory_bounded", "io_bounded", "network_denied",
-        "cancellation_verified", "cross_run_cleanup_verified",
+        "runtime_version_pinned", "component_abi_pinned", "host_imports_allowlisted",
+        "filesystem_denied", "process_access_denied", "clock_randomness_restricted",
+        "fuel_memory_and_io_bounded", "network_denied", "cancellation_verified",
+        "cross_run_cleanup_verified",
     }),
     RuntimeBackend.SANDBOXED_KUBERNETES: frozenset({
-        "dedicated_pool", "sandbox_runtime_verified", "restricted_pod_security",
-        "resource_quotas_enforced", "egress_policy_enforced", "metadata_blocked",
-        "cancellation_verified", "cross_run_cleanup_verified",
+        "dedicated_pool", "sandbox_runtime_verified", "host_access_denied",
+        "nonroot_readonly_pod", "capabilities_seccomp_restricted",
+        "cpu_memory_pid_disk_quotas", "network_policy_enforced",
+        "metadata_blocked", "cancellation_verified", "cross_run_cleanup_verified",
     }),
     RuntimeBackend.MICROVM: frozenset({
-        "dedicated_kvm_hosts", "vmm_and_guest_pinned", "vm_per_run",
-        "network_denied", "resource_quotas_enforced", "vsock_restricted",
+        "dedicated_kvm_hosts", "vmm_and_guest_pinned", "fresh_vm_per_run",
+        "no_shared_writable_storage", "minimal_readonly_guest", "network_denied",
+        "resource_quotas_enforced", "vmm_api_vsock_restricted",
         "cancellation_verified", "cross_run_cleanup_verified",
     }),
 }
