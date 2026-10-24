@@ -135,8 +135,8 @@ class AdmissionDecision(StrictContract):
     admitted: bool
     reason: Literal[
         "admitted", "backend_not_provisioned", "backend_not_conformant",
-        "artifact_not_approved", "artifact_signature_invalid", "artifact_mismatch",
-        "agent_version_mismatch",
+        "artifact_not_approved", "artifact_revoked", "artifact_signature_invalid",
+        "artifact_mismatch", "agent_version_mismatch",
         "resource_limit_exceeded",
     ]
     backend: RuntimeBackend
@@ -175,6 +175,7 @@ def decide_admission(
     artifact_bytes: bytes | None,
     trusted_public_keys: Mapping[str, bytes],
     review_approved: bool,
+    artifact_revoked: bool,
     backend_readiness: BackendReadiness | None,
     maximum_input_bytes: int = 1_048_576,
     maximum_deadline_seconds: int = 3600,
@@ -201,6 +202,8 @@ def decide_admission(
         return deny("backend_not_provisioned")
     if not readiness.conformance_passed:
         return deny("backend_not_conformant")
+    if artifact_revoked:
+        return deny("artifact_revoked")
     if attestation is None or not review_approved:
         return deny("artifact_not_approved")
     if not verify_attestation_signature(attestation, trusted_public_keys):
