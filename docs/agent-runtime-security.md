@@ -106,8 +106,10 @@ The module verifies Ed25519 signatures over a canonical, timezone-aware
 attestation payload using an operator-supplied key-ID-to-PEM trust map. The
 admission policy itself requires this signature verification as well as a
 trusted review approval and readiness record, and emits a distinct denial for
-an invalid signature. It also requires size-limited artifact bytes matching the
-signed SHA-256 digest. This does not retrieve or store artifacts,
+an invalid signature. It requires size-limited artifact bytes matching the
+signed SHA-256 digest and rejects an explicitly revoked artifact before review
+or signature checks. Revocation state still must come from a trusted control
+plane source. This does not retrieve or store artifacts,
 scan/quarantine them, establish that review is current, or manage trust-key
 rotation. Neither helper is wired into an API, scheduler, artifact store,
 review-state source, or audit persistence. No backend is provisioned or enabled;

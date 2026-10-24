@@ -70,7 +70,7 @@ _DEFAULT = object()
 
 def _decide(request=None, *, attestation=_DEFAULT, approved=True,
             readiness=_DEFAULT, trusted_keys=_TRUSTED_KEYS,
-            artifact_bytes=ARTIFACT_BYTES):
+            artifact_bytes=ARTIFACT_BYTES, revoked=False):
     if attestation is _DEFAULT:
         attestation = _attestation()
     if readiness is _DEFAULT:
@@ -78,12 +78,14 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
     return decide_admission(
         request or _request(), attestation=attestation,
         artifact_bytes=artifact_bytes, trusted_public_keys=trusted_keys,
-        review_approved=approved, backend_readiness=readiness)
+        review_approved=approved, artifact_revoked=revoked,
+        backend_readiness=readiness)
 
 
 def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(attestation=_attestation(), readiness=_ready()).admitted
     assert _decide(approved=False).reason == "artifact_not_approved"
+    assert _decide(approved=False, revoked=True).reason == "artifact_revoked"
     assert _decide(attestation=None).reason == "artifact_not_approved"
     assert _decide(attestation=_attestation(signature="bad")).reason == "artifact_signature_invalid"
     assert _decide(trusted_keys={}).reason == "artifact_signature_invalid"
@@ -109,7 +111,7 @@ def test_admission_enforces_resource_bounds():
     result = decide_admission(
         request, attestation=_attestation(), artifact_bytes=ARTIFACT_BYTES,
         trusted_public_keys=_TRUSTED_KEYS, review_approved=True,
-        backend_readiness=_ready(), maximum_input_bytes=256,
+        artifact_revoked=False, backend_readiness=_ready(), maximum_input_bytes=256,
         maximum_deadline_seconds=20)
     assert result.reason == "resource_limit_exceeded"
 
