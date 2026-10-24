@@ -20,6 +20,11 @@ from src.agent_marketplace.runtime_contract import (
 
 DIGEST = "a" * 64
 NOW = datetime.now(UTC)
+_PRIVATE_KEY = Ed25519PrivateKey.generate()
+_PUBLIC_KEY_PEM = _PRIVATE_KEY.public_key().public_bytes(
+    serialization.Encoding.PEM,
+    serialization.PublicFormat.SubjectPublicKeyInfo)
+_TRUSTED_KEYS = {"review-key-1": _PUBLIC_KEY_PEM}
 
 
 def _request(**changes):
@@ -38,10 +43,16 @@ def _attestation(**changes):
         "backend": RuntimeBackend.WASM_WASI, "sha256": DIGEST,
         "provenance_id": "prov-1", "signer_id": "review-service",
         "key_id": "review-key-1", "signature_algorithm": "ed25519",
-        "signature": "opaque-signature", "created_at": NOW,
+        "signature": "pending", "created_at": NOW,
     }
     data.update(changes)
-    return ArtifactAttestation(**data)
+    attestation = ArtifactAttestation(**data)
+    if "signature" not in changes:
+        signature = base64.urlsafe_b64encode(
+            _PRIVATE_KEY.sign(attestation_signing_payload(attestation))
+        ).decode().rstrip("=")
+        attestation = attestation.model_copy(update={"signature": signature})
+    return attestation
 
 
 def _ready(**changes):
@@ -54,13 +65,15 @@ def _ready(**changes):
 _DEFAULT = object()
 
 
-def _decide(request=None, *, attestation=_DEFAULT, approved=True, readiness=_DEFAULT):
+def _decide(request=None, *, attestation=_DEFAULT, approved=True,
+            readiness=_DEFAULT, trusted_keys=_TRUSTED_KEYS):
     if attestation is _DEFAULT:
         attestation = _attestation()
     if readiness is _DEFAULT:
         readiness = _ready()
     return decide_admission(
         request or _request(), attestation=attestation,
+        trusted_public_keys=trusted_keys,
         review_approved=approved, backend_readiness=readiness)
 
 
@@ -68,6 +81,8 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(attestation=_attestation(), readiness=_ready()).admitted
     assert _decide(approved=False).reason == "artifact_not_approved"
     assert _decide(attestation=None).reason == "artifact_not_approved"
+    assert _decide(attestation=_attestation(signature="bad")).reason == "artifact_signature_invalid"
+    assert _decide(trusted_keys={}).reason == "artifact_signature_invalid"
     assert _decide(readiness=None).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(enabled=False)).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(conformance_passed=False)).reason == "backend_not_conformant"
@@ -86,8 +101,8 @@ def test_admission_rejects_backend_digest_and_version_mismatch_without_fallback(
 def test_admission_enforces_resource_bounds():
     request = _request(input_bytes=512, deadline_seconds=30)
     result = decide_admission(
-        request, attestation=_attestation(), review_approved=True,
-        backend_readiness=_ready(), maximum_input_bytes=256,
+        request, attestation=_attestation(), trusted_public_keys=_TRUSTED_KEYS,
+        review_approved=True, backend_readiness=_ready(), maximum_input_bytes=256,
         maximum_deadline_seconds=20)
     assert result.reason == "resource_limit_exceeded"
 

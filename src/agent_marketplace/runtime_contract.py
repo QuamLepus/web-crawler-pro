@@ -115,7 +115,8 @@ class AdmissionDecision(StrictContract):
     admitted: bool
     reason: Literal[
         "admitted", "backend_not_provisioned", "backend_not_conformant",
-        "artifact_not_approved", "artifact_mismatch", "agent_version_mismatch",
+        "artifact_not_approved", "artifact_signature_invalid", "artifact_mismatch",
+        "agent_version_mismatch",
         "resource_limit_exceeded",
     ]
     backend: RuntimeBackend
@@ -151,6 +152,7 @@ def decide_admission(
     request: AdmissionRequest,
     *,
     attestation: ArtifactAttestation | None,
+    trusted_public_keys: Mapping[str, bytes],
     review_approved: bool,
     backend_readiness: BackendReadiness | None,
     maximum_input_bytes: int = 1_048_576,
@@ -158,9 +160,10 @@ def decide_admission(
 ) -> AdmissionDecision:
     """Evaluate explicit pinning and readiness; never choose another backend.
 
-    The `review_approved` and readiness arguments must come from trusted,
-    independently verified control-plane sources. This pure function does not
-    validate signatures, launch a sandbox, or prove a backend is secure.
+    The review-state and readiness arguments must come from trusted,
+    independently verified control-plane sources. The attestation signature is
+    verified here against operator-supplied keys. This does not launch a
+    sandbox, fetch artifact bytes, or prove a backend is secure.
     """
     readiness = backend_readiness
     policy_revision = readiness.policy_revision if readiness else "unavailable"
@@ -177,6 +180,8 @@ def decide_admission(
         return deny("backend_not_conformant")
     if attestation is None or not review_approved:
         return deny("artifact_not_approved")
+    if not verify_attestation_signature(attestation, trusted_public_keys):
+        return deny("artifact_signature_invalid")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):
         return deny("artifact_mismatch")
