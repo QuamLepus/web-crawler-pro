@@ -199,6 +199,21 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     match = re.search(r'action="/app/agents/([^/]+)/status"', created.text)
     assert match, "the owner's draft should include status controls"
     agent_id = match.group(1)
+    edited = signed_in.post(f"/app/agents/{agent_id}/edit", data={
+        "name": "Console Research Agent Revised",
+        "version": "1.0.1",
+        "summary": "A revised declarative research assistant listing.",
+        "capabilities": "summarize, compare",
+        "tags": "research, revised",
+        "license": "CC-BY-4.0",
+        "input_schema": '{"type":"object","properties":{"query":{"type":"string"}}}',
+        "output_schema": '{"type":"object"}',
+    }, follow_redirects=True)
+    assert edited.status_code == 200
+    assert "Listing details updated" in edited.text
+    assert "Console Research Agent Revised" in edited.text
+    assert "compare" in edited.text
+
     published = signed_in.post(
         f"/app/agents/{agent_id}/status", data={"status": "published"},
         follow_redirects=True,
