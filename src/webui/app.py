@@ -1828,7 +1828,7 @@ async def agent_marketplace_status(request: Request, agent_id: str,
     api, _, redirect = await _guard(request)
     if redirect:
         return redirect
-    if status not in {"draft", "published"}:
+    if status not in {"draft", "published", "archived"}:
         return RedirectResponse("/app/agents?error=Unsupported%20status%20change.&tab=owned", status_code=303)
     result = await api.patch(f"/api/v1/agent-marketplace/agents/{agent_id}", {"status": status})
     if not result.ok:
