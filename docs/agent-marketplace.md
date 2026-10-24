@@ -24,6 +24,14 @@ to other tenants until their owner publishes them. Manifests are limited to
 fields are rejected, including fields that might otherwise imply a runtime or
 publisher code payload.
 
+## Console
+
+Authenticated users can browse published cards, search by name/summary or tag,
+create draft cards, edit their own listing metadata, and publish or unpublish
+cards at `/app/agents`. These console actions call the catalog API using the
+user's session. The UI does not accept code uploads or execute publisher code;
+editing a card's version is metadata-only and does not provision a backend.
+
 ## Managed server-hosted agent
 
 The first server-managed agent is `data-curator`:

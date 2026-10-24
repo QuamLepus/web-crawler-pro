@@ -1735,8 +1735,8 @@ async def agent_marketplace_create(
     try:
         in_schema, out_schema = json.loads(input_schema), json.loads(output_schema)
         if not isinstance(in_schema, dict) or not isinstance(out_schema, dict):
-            raise ValueError("Input and output schemas must be JSON objects.")
-    except (json.JSONDecodeError, ValueError) as exc:
+            raise TypeError("Input and output schemas must be JSON objects.")
+    except (json.JSONDecodeError, TypeError) as exc:
         message = str(exc) if str(exc) else "Schemas must be valid JSON objects."
         return RedirectResponse(f"/app/agents?error={quote(message)}", status_code=303)
     result = await api.post("/api/v1/agent-marketplace/agents", {
@@ -1749,6 +1749,41 @@ async def agent_marketplace_create(
     if not result.ok:
         return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not create listing.'))}", status_code=303)
     return RedirectResponse("/app/agents?notice=Draft%20listing%20created.%20No%20code%20was%20uploaded%20or%20executed.", status_code=303)
+
+
+@router.post("/app/agents/{agent_id}/edit")
+async def agent_marketplace_edit(
+    request: Request, agent_id: str,
+    name: str = Form(""), version: str = Form("1.0.0"),
+    summary: str = Form(""), capabilities: str = Form(""), tags: str = Form(""),
+    license: str = Form("CC-BY-4.0"), input_schema: str = Form("{}"),
+    output_schema: str = Form("{}"),
+):
+    api, _, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    try:
+        in_schema, out_schema = json.loads(input_schema), json.loads(output_schema)
+        if not isinstance(in_schema, dict) or not isinstance(out_schema, dict):
+            raise TypeError("Input and output schemas must be JSON objects.")
+    except (json.JSONDecodeError, TypeError) as exc:
+        message = str(exc) if str(exc) else "Schemas must be valid JSON objects."
+        return RedirectResponse(f"/app/agents?error={quote(message)}", status_code=303)
+    result = await api.patch(f"/api/v1/agent-marketplace/agents/{agent_id}", {
+        "manifest": {
+            "name": name, "version": version, "summary": summary,
+            "capabilities": [v.strip() for v in capabilities.split(",") if v.strip()],
+            "input_schema": in_schema, "output_schema": out_schema,
+        },
+        "tags": [v.strip() for v in tags.split(",") if v.strip()],
+        "license": license,
+    })
+    if not result.ok:
+        return RedirectResponse(
+            f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}",
+            status_code=303,
+        )
+    return RedirectResponse("/app/agents?notice=Listing%20details%20updated.", status_code=303)
 
 
 @router.post("/app/agents/{agent_id}/status")

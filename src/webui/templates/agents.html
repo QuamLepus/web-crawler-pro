@@ -38,6 +38,19 @@
     {% elif owned_rows %}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">{% for card in owned_rows %}{% set m = card.get('manifest') or {} %}
       <article class="card" style="padding:1rem"><div class="between"><h2>{{ m.get('name', 'Agent') }}</h2><span class="badge">{{ card.get('status') }}</span></div>
         <p class="dim">{{ m.get('summary', '') }}</p><p class="tiny muted">{{ card.get('agent_id') }}</p>
+        <details class="mt-1"><summary class="btn btn-sm">Edit listing details</summary>
+          <form method="post" action="/app/agents/{{ card.get('agent_id') }}/edit" class="grid" style="margin-top:1rem">
+            <label>Agent name<input class="input" name="name" minlength="3" maxlength="120" value="{{ m.get('name', '') }}" required></label>
+            <label>Version<input class="input" name="version" value="{{ m.get('version', '1.0.0') }}" pattern="[0-9]+\.[0-9]+\.[0-9]+" required></label>
+            <label>Summary<textarea class="input" name="summary" minlength="10" maxlength="1000" required>{{ m.get('summary', '') }}</textarea></label>
+            <label>Capabilities (comma-separated)<input class="input" name="capabilities" value="{{ (m.get('capabilities') or [])|join(', ') }}" required></label>
+            <label>Tags (comma-separated)<input class="input" name="tags" value="{{ (card.get('tags') or [])|join(', ') }}"></label>
+            <label>License<input class="input" name="license" value="{{ card.get('license', 'CC-BY-4.0') }}" maxlength="80" required></label>
+            <label>Input schema (JSON object)<textarea class="input" style="font-family:monospace" name="input_schema">{{ (m.get('input_schema') or {})|tojson(indent=2) }}</textarea></label>
+            <label>Output schema (JSON object)<textarea class="input" style="font-family:monospace" name="output_schema">{{ (m.get('output_schema') or {})|tojson(indent=2) }}</textarea></label>
+            <button class="btn btn-primary">Save listing</button>
+          </form>
+        </details>
         {% if card.get('status') in ['draft', 'published'] %}<form method="post" action="/app/agents/{{ card.get('agent_id') }}/status">
           {% if card.get('status') == 'draft' %}<input type="hidden" name="status" value="published"><button class="btn btn-primary">Publish card</button>
           {% else %}<input type="hidden" name="status" value="draft"><button class="btn">Unpublish card</button>{% endif %}
