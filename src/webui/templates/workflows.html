@@ -214,7 +214,8 @@
     <button class="btn btn-sm" type="submit">Filter runs</button>
     {% if run_filter_active %}<a class="btn btn-sm" href="{{ clear_runs_url }}">Clear filters</a>{% endif %}
   </form>
-  {% if history_error %}<div class="alert warn mt-2">Could not load run history: {{ history_error }}</div>{% endif %}
+  {% if history_error %}<div class="alert warn mt-2" role="alert">Could not load run history: {{ history_error }}</div>{% endif %}
+  {% if selected_run_error %}<div class="alert warn mt-2" role="alert">{{ selected_run_error }}</div>{% endif %}
   {% if run_page_count > 1 %}
   <nav class="row mt-2" aria-label="Workflow run history pages">
     {% if run_page > 1 %}<a class="btn btn-sm" href="{{ previous_runs_url }}">Newer runs</a>{% endif %}
@@ -268,6 +269,7 @@
   </div>
   {% else %}
     {% if history_error %}<p class="muted">Run history is unavailable; refresh after the service recovers.</p>
+    {% elif selected_run_error %}<p class="muted">The selected run could not be loaded; refresh or choose another run.</p>
     {% elif run_filter_active %}<p class="muted">No workflow runs match these filters.</p>
     {% else %}<p class="muted">No workflow runs yet.</p>{% endif %}
   {% endif %}

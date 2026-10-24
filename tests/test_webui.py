@@ -1287,6 +1287,45 @@ def test_workflow_console_distinguishes_list_and_history_errors_from_empty_state
     assert "No workflow runs yet" not in page.text
 
 
+def test_workflow_console_explains_unavailable_selected_run_overlays(signed_in, monkeypatch):
+    from src.webui.client import Api, Result
+
+    workflow_id = "workflow_aaaaaaaaaaaaaaaaaaaa"
+    run_id = "wfrun_bbbbbbbbbbbbbbbbbbbb"
+    status_result = {"value": Result(False, error="workflow run not found", status=404)}
+
+    async def workflows(self):
+        return Result(True, data={"items": []})
+
+    async def runs(self, page=1, page_size=20, **filters):
+        return Result(True, data={"items": [], "total": 0,
+                                  "page": page, "page_size": page_size})
+
+    async def run_status(self, requested_run_id):
+        assert requested_run_id == run_id
+        return status_result["value"]
+
+    monkeypatch.setattr(Api, "workflows", workflows)
+    monkeypatch.setattr(Api, "workflow_runs", runs)
+    monkeypatch.setattr(Api, "workflow_run_status", run_status)
+
+    unavailable = signed_in.get("/app/workflows", params={
+        "workflow_id": workflow_id, "run_id": run_id,
+    })
+    assert unavailable.status_code == 200
+    assert "The selected run is unavailable for this workflow" in unavailable.text
+    assert "The selected run could not be loaded" in unavailable.text
+    assert "No workflow runs yet" not in unavailable.text
+
+    status_result["value"] = Result(False, error="run status service unavailable", status=503)
+    transient = signed_in.get("/app/workflows", params={
+        "workflow_id": workflow_id, "run_id": run_id,
+    })
+    assert transient.status_code == 200
+    assert "Could not verify the selected run: run status service unavailable" in transient.text
+    assert "No workflow runs yet" not in transient.text
+
+
 def test_workflow_overlay_persists_when_browsing_run_history(signed_in, monkeypatch):
     from src.webui.client import Api, Result
 
