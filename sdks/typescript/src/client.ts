@@ -83,6 +83,8 @@ export interface DiscoveryCreateOptions {
   language?: string;
   maxPagesPerSite?: number;
   perDomain?: number;
+  /** Start robots-aware crawls automatically instead of waiting for approval. */
+  auto?: boolean;
 }
 
 export interface WatchCreateOptions {
@@ -520,7 +522,7 @@ export class WebIntelligenceClient {
   createDiscovery(topic: string, options: DiscoveryCreateOptions = {}): Promise<JsonObject> {
     return this.request("POST", "discovery", {
       topic, count: options.count ?? 10, seeds: options.seeds ?? [],
-      language: options.language ?? "en", auto: false,
+      language: options.language ?? "en", auto: options.auto ?? false,
       max_pages_per_site: options.maxPagesPerSite ?? 5,
       per_domain: options.perDomain ?? 1, obey_robots: true,
     });
