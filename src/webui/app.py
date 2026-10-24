@@ -1702,19 +1702,34 @@ async def marketplace(request: Request, q: str = Query(""), tag: str = Query("")
 
 
 @router.get("/app/agents", response_class=HTMLResponse, name="agent_marketplace")
-async def agent_marketplace(request: Request, q: str = Query(""), tag: str = Query(""),
-                            notice: str = Query(""), error: str = Query("")):
+async def agent_marketplace(
+    request: Request, q: str = Query(""), tag: str = Query(""),
+    catalog_offset: int = Query(0, ge=0, le=5000),
+    mine_offset: int = Query(0, ge=0, le=5000),
+    tab: str = Query("browse", pattern="^(browse|owned|create)$"),
+    notice: str = Query(""), error: str = Query(""),
+):
     api, me, redirect = await _guard(request)
     if redirect:
         return redirect
     catalog, mine = await _gather(
-        api.get("/api/v1/agent-marketplace/agents", params={"q": q, "tag": tag}),
-        api.get("/api/v1/agent-marketplace/my/agents"),
+        api.get("/api/v1/agent-marketplace/agents", params={
+            "q": q, "tag": tag, "limit": 21, "offset": catalog_offset,
+        }),
+        api.get("/api/v1/agent-marketplace/my/agents", params={
+            "limit": 21, "offset": mine_offset,
+        }),
     )
+    catalog_data = catalog.data if catalog.ok and isinstance(catalog.data, list) else None
+    mine_data = mine.data if mine.ok and isinstance(mine.data, list) else None
     return render(
         request, "agents.html", page="agent_marketplace", me=me, q=q, tag=tag,
-        catalog=(catalog.data if catalog.ok and isinstance(catalog.data, list) else None),
-        my_agents=(mine.data if mine.ok and isinstance(mine.data, list) else None),
+        tab=tab,
+        catalog=(catalog_data[:20] if catalog_data is not None else None),
+        catalog_has_next=(len(catalog_data) > 20 if catalog_data is not None else False),
+        my_agents=(mine_data[:20] if mine_data is not None else None),
+        mine_has_next=(len(mine_data) > 20 if mine_data is not None else False),
+        catalog_offset=catalog_offset, mine_offset=mine_offset,
         catalog_error=(catalog.error if not catalog.ok else None),
         mine_error=(mine.error if not mine.ok else None),
         notice=notice, form_error=error,
@@ -1756,7 +1771,7 @@ async def agent_marketplace_create(
             raise TypeError("Input and output schemas must be JSON objects.")
     except (json.JSONDecodeError, TypeError) as exc:
         message = str(exc) if str(exc) else "Schemas must be valid JSON objects."
-        return RedirectResponse(f"/app/agents?error={quote(message)}", status_code=303)
+        return RedirectResponse(f"/app/agents?error={quote(message)}&tab=create", status_code=303)
     result = await api.post("/api/v1/agent-marketplace/agents", {
         "manifest": {"name": name, "version": version, "summary": summary,
                      "capabilities": [v.strip() for v in capabilities.split(",") if v.strip()],
@@ -1765,8 +1780,8 @@ async def agent_marketplace_create(
         "license": license,
     })
     if not result.ok:
-        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not create listing.'))}", status_code=303)
-    return RedirectResponse("/app/agents?notice=Draft%20listing%20created.%20No%20code%20was%20uploaded%20or%20executed.", status_code=303)
+        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not create listing.'))}&tab=create", status_code=303)
+    return RedirectResponse("/app/agents?tab=owned&notice=Draft%20listing%20created.%20No%20code%20was%20uploaded%20or%20executed.", status_code=303)
 
 
 @router.post("/app/agents/{agent_id}/edit")
@@ -1786,7 +1801,7 @@ async def agent_marketplace_edit(
             raise TypeError("Input and output schemas must be JSON objects.")
     except (json.JSONDecodeError, TypeError) as exc:
         message = str(exc) if str(exc) else "Schemas must be valid JSON objects."
-        return RedirectResponse(f"/app/agents?error={quote(message)}", status_code=303)
+        return RedirectResponse(f"/app/agents?error={quote(message)}&tab=owned", status_code=303)
     result = await api.patch(f"/api/v1/agent-marketplace/agents/{agent_id}", {
         "manifest": {
             "name": name, "version": version, "summary": summary,
@@ -1798,10 +1813,10 @@ async def agent_marketplace_edit(
     })
     if not result.ok:
         return RedirectResponse(
-            f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}",
+            f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}&tab=owned",
             status_code=303,
         )
-    return RedirectResponse("/app/agents?notice=Listing%20details%20updated.", status_code=303)
+    return RedirectResponse("/app/agents?tab=owned&notice=Listing%20details%20updated.", status_code=303)
 
 
 @router.post("/app/agents/{agent_id}/status")
@@ -1811,11 +1826,11 @@ async def agent_marketplace_status(request: Request, agent_id: str,
     if redirect:
         return redirect
     if status not in {"draft", "published"}:
-        return RedirectResponse("/app/agents?error=Unsupported%20status%20change.", status_code=303)
+        return RedirectResponse("/app/agents?error=Unsupported%20status%20change.&tab=owned", status_code=303)
     result = await api.patch(f"/api/v1/agent-marketplace/agents/{agent_id}", {"status": status})
     if not result.ok:
-        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}", status_code=303)
-    return RedirectResponse(f"/app/agents?notice=Listing%20{quote(status)}.", status_code=303)
+        return RedirectResponse(f"/app/agents?error={quote(str(result.error or 'Could not update listing.'))}&tab=owned", status_code=303)
+    return RedirectResponse(f"/app/agents?tab=owned&notice=Listing%20{quote(status)}.", status_code=303)
 
 
 @router.post("/app/marketplace/datasets")

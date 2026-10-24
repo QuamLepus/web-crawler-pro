@@ -28,8 +28,10 @@ publisher code payload.
 
 Authenticated users can browse published cards, search by name/summary or tag,
 create draft cards, edit their own listing metadata, publish or unpublish
-cards, and inspect listing metadata plus declared input/output schemas at
-`/app/agents`. These console actions call the catalog API using the
+cards, browse/search results and owner listings in 20-card pages, and inspect
+listing metadata plus declared input/output schemas at `/app/agents`. The
+console caps its UI offsets at the API's 5,000-item bound. These console actions
+call the catalog API using the
 user's session. The UI does not accept code uploads or execute publisher code;
 editing a card's version is metadata-only and does not provision a backend.
 
