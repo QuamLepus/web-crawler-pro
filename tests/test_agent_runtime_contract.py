@@ -58,6 +58,7 @@ def _request(**changes):
     data = {
         "run_id": "run-1", "tenant_id": "tenant-1", "agent_id": "agent-1",
         "version": "1.2.3", "backend": RuntimeBackend.WASM_WASI,
+        "backend_environment_id": "pool-test-a",
         "sha256": DIGEST, "input_bytes": 128, "deadline_seconds": 30,
     }
     data.update(changes)
@@ -86,6 +87,7 @@ def _ready(**changes):
     backend = changes.get("backend", RuntimeBackend.WASM_WASI)
     data = {
         "backend": backend,
+        "environment_id": "pool-test-a",
         "enabled": True,
         "conformance_evidence": {
             gate: hashlib.sha256(gate.encode()).hexdigest()
@@ -154,6 +156,8 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(readiness_keys={}).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready().model_copy(
         update={"enabled": False})).reason == "backend_not_provisioned"
+    assert _decide(request=_request(backend_environment_id="pool-prod-b")).reason \
+        == "backend_not_provisioned"
     assert _decide(readiness=_ready(
         issued_at=NOW - timedelta(hours=2),
         expires_at=NOW - timedelta(hours=1))).reason == "backend_not_provisioned"

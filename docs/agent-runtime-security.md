@@ -99,8 +99,11 @@ run admission requests/decisions, and metadata-only audit events. Its pure
 admission function requires an exact backend, digest, agent/version, approved
 review state, and enabled/conformant readiness for that same backend. Backend
 readiness is an Ed25519-signed, time-bounded operator assertion bound to the
-backend, policy revision, enabled state, per-gate evidence digests, and trusted
-key lifecycle. Each backend has a distinct required gate set; missing gates or
+backend, exact environment/pool ID, policy revision, enabled state, per-gate
+evidence digests, and trusted key lifecycle. Admission requires the requested
+pool ID to match, preventing readiness evidence from being replayed across
+staging/production or separate backend pools. Each backend has a distinct
+required gate set; missing gates or
 evidence with malformed digests fail closed. It uses a separate
 operator-managed trusted-key set from artifact attestations, so an artifact
 reviewer cannot implicitly assert backend isolation readiness; unsigned,

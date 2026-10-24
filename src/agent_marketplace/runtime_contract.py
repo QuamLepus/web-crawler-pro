@@ -187,6 +187,7 @@ class BackendReadiness(StrictContract):
     """
 
     backend: RuntimeBackend
+    environment_id: str = Field(min_length=1, max_length=160)
     enabled: bool
     conformance_evidence: dict[str, str]
     policy_revision: str = Field(min_length=1, max_length=80)
@@ -282,6 +283,7 @@ class AdmissionRequest(StrictContract):
     agent_id: str = Field(min_length=1, max_length=128)
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=32)
     backend: RuntimeBackend
+    backend_environment_id: str = Field(min_length=1, max_length=160)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_bytes: int = Field(ge=0, le=1_048_576)
     deadline_seconds: int = Field(ge=1, le=3600)
@@ -364,6 +366,7 @@ def decide_admission(
         return AdmissionDecision(admitted=False, reason=reason, **base)
 
     if (readiness is None or readiness.backend != request.backend
+            or readiness.environment_id != request.backend_environment_id
             or not readiness.enabled):
         return deny("backend_not_provisioned")
     if artifact_revoked:
