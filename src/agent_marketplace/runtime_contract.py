@@ -285,23 +285,25 @@ def backend_readiness_signing_payload(readiness: BackendReadiness) -> bytes:
 def verify_backend_evidence(
     readiness: BackendReadiness,
     evidence: Mapping[str, bytes] | None,
+    source_evidence: Mapping[str, bytes] | None,
     *,
     now: datetime | None = None,
     maximum_total_bytes: int = 10 * 1024 * 1024,
     maximum_age_seconds: int = 24 * 60 * 60,
 ) -> bool:
-    """Verify signed gate reports' bytes, backend/pool bindings, and freshness.
+    """Verify signed reports, source bytes, backend/pool bindings, and freshness.
 
-    The report summaries are structurally validated, but their attached
-    underlying test logs/results are not retrieved here; assessors must retain
-    and interpret that source evidence independently.
+    The reports and source artifacts must both be supplied and match their
+    signed digests. Their semantic sufficiency still requires assessor review.
     """
-    if (evidence is None or maximum_total_bytes < 0
-            or maximum_age_seconds < 1):
+    if (evidence is None or source_evidence is None
+            or maximum_total_bytes < 0 or maximum_age_seconds < 1):
         return False
     required = BACKEND_REQUIRED_GATES[readiness.backend]
-    if (set(evidence) != set(readiness.conformance_evidence)
-            or not required.issubset(evidence)):
+    expected_gates = set(readiness.conformance_evidence)
+    if (set(evidence) != expected_gates
+            or set(source_evidence) != expected_gates
+            or not required.issubset(expected_gates)):
         return False
     current_time = now or datetime.now(UTC)
     if current_time.tzinfo is None or current_time.utcoffset() is None:
@@ -333,6 +335,13 @@ def verify_backend_evidence(
                 or report.policy_revision != readiness.policy_revision
                 or tested_at > current_time
                 or (current_time - tested_at).total_seconds() > maximum_age_seconds):
+            return False
+        source_bytes = source_evidence[gate]
+        if not isinstance(source_bytes, bytes):
+            return False
+        total_bytes += len(source_bytes)
+        if (total_bytes > maximum_total_bytes
+                or hashlib.sha256(source_bytes).hexdigest() != report.report_sha256):
             return False
     return True
 
@@ -469,6 +478,7 @@ def decide_admission(
     trusted_readiness_keys: Mapping[str, TrustedAttestationKey],
     trusted_conformance_keys: Mapping[str, TrustedAttestationKey],
     backend_evidence: Mapping[str, bytes] | None,
+    backend_source_evidence: Mapping[str, bytes] | None,
     review_approved: bool,
     artifact_revoked: bool,
     backend_readiness: BackendReadiness | None,
@@ -508,7 +518,8 @@ def decide_admission(
     if not verify_backend_readiness(
             readiness, trusted_readiness_keys, trusted_conformance_keys):
         return deny("backend_not_provisioned")
-    if not verify_backend_evidence(readiness, backend_evidence):
+    if not verify_backend_evidence(
+            readiness, backend_evidence, backend_source_evidence):
         return deny("backend_not_conformant")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):

@@ -96,16 +96,24 @@ def _attestation(**changes):
     return attestation
 
 
+def _source_evidence_for(backend):
+    return {
+        gate: f"source-report:{backend.value}:{gate}".encode()
+        for gate in BACKEND_REQUIRED_GATES[backend]
+    }
+
+
 def _evidence_for(backend, *, environment_id="pool-test-a",
-                  policy_revision="policy-v1", tested_at=NOW):
+                  policy_revision="policy-v1", tested_at=NOW,
+                  source_evidence=None):
+    source_evidence = source_evidence or _source_evidence_for(backend)
     reports = {}
     for gate in BACKEND_REQUIRED_GATES[backend]:
         report = BackendGateEvidence(
             gate_id=gate, backend=backend, environment_id=environment_id,
             policy_revision=policy_revision, result="passed", tested_at=tested_at,
             test_run_id=f"conformance-{backend.value}-{gate}",
-            report_sha256=hashlib.sha256(
-                f"source-report:{backend.value}:{gate}".encode()).hexdigest())
+            report_sha256=hashlib.sha256(source_evidence[gate]).hexdigest())
         reports[gate] = json.dumps(
             report.model_dump(mode="json"), sort_keys=True,
             separators=(",", ":")).encode()
@@ -156,6 +164,7 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
             readiness_keys=_READINESS_KEYS,
             conformance_keys=_ASSESSOR_KEYS,
             backend_evidence=_DEFAULT,
+            backend_source_evidence=_DEFAULT,
             artifact_bytes=ARTIFACT_BYTES, revoked=False):
     if attestation is _DEFAULT:
         attestation = _attestation()
@@ -164,12 +173,16 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
     if backend_evidence is _DEFAULT:
         backend_evidence = (
             _evidence_for(readiness.backend) if readiness is not None else None)
+    if backend_source_evidence is _DEFAULT:
+        backend_source_evidence = (
+            _source_evidence_for(readiness.backend) if readiness is not None else None)
     return decide_admission(
         request or _request(), attestation=attestation,
         artifact_bytes=artifact_bytes, trusted_keys=trusted_keys,
         trusted_readiness_keys=readiness_keys,
         trusted_conformance_keys=conformance_keys,
         backend_evidence=backend_evidence,
+        backend_source_evidence=backend_source_evidence,
         review_approved=approved, artifact_revoked=revoked,
         backend_readiness=readiness)
 
@@ -205,14 +218,21 @@ def test_backend_readiness_evidence_is_backend_specific_and_signed():
         assert not verify_backend_readiness(
             readiness, _READINESS_KEYS, _ASSESSOR_KEYS, now=NOW,
             maximum_validity_seconds=60)
-        assert verify_backend_evidence(readiness, evidence)
+        assert verify_backend_evidence(
+            readiness, evidence, _source_evidence_for(backend), now=NOW)
         tampered = dict(evidence)
         first_gate = next(iter(tampered))
         tampered[first_gate] += b"tampered"
-        assert not verify_backend_evidence(readiness, tampered)
-        assert not verify_backend_evidence(readiness, {})
         assert not verify_backend_evidence(
-            readiness, evidence, maximum_total_bytes=1)
+            readiness, tampered, _source_evidence_for(backend), now=NOW)
+        assert not verify_backend_evidence(readiness, {}, {}, now=NOW)
+        assert not verify_backend_evidence(
+            readiness, evidence, _source_evidence_for(backend), now=NOW,
+            maximum_total_bytes=1)
+        altered_source = _source_evidence_for(backend)
+        altered_source[first_gate] += b"tampered"
+        assert not verify_backend_evidence(
+            readiness, evidence, altered_source, now=NOW)
 
     with pytest.raises(ValidationError, match="unknown backend gates"):
         _ready(conformance_evidence={
@@ -232,6 +252,7 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     assert _decide(readiness=_ready(enabled=False)).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready(conformance_evidence={})).reason == "backend_not_conformant"
     assert _decide(backend_evidence=None).reason == "backend_not_conformant"
+    assert _decide(backend_source_evidence=None).reason == "backend_not_conformant"
     altered_evidence = _evidence_for(RuntimeBackend.WASM_WASI)
     first_gate = next(iter(altered_evidence))
     altered_evidence[first_gate] += b"tampered"
@@ -247,15 +268,20 @@ def test_admission_requires_all_pins_review_and_backend_gates():
     noncanonical_evidence[first_gate] = b" " + noncanonical_evidence[first_gate]
     noncanonical_readiness = _ready(evidence_override=noncanonical_evidence)
     assert not verify_backend_evidence(
-        noncanonical_readiness, noncanonical_evidence, now=NOW)
+        noncanonical_readiness, noncanonical_evidence,
+        _source_evidence_for(RuntimeBackend.WASM_WASI), now=NOW)
     stale_evidence = _evidence_for(
         RuntimeBackend.WASM_WASI, tested_at=NOW - timedelta(days=2))
     stale_readiness = _ready(evidence_override=stale_evidence)
-    assert not verify_backend_evidence(stale_readiness, stale_evidence, now=NOW)
+    assert not verify_backend_evidence(
+        stale_readiness, stale_evidence,
+        _source_evidence_for(RuntimeBackend.WASM_WASI), now=NOW)
     future_evidence = _evidence_for(
         RuntimeBackend.WASM_WASI, tested_at=NOW + timedelta(minutes=1))
     future_readiness = _ready(evidence_override=future_evidence)
-    assert not verify_backend_evidence(future_readiness, future_evidence, now=NOW)
+    assert not verify_backend_evidence(
+        future_readiness, future_evidence,
+        _source_evidence_for(RuntimeBackend.WASM_WASI), now=NOW)
     assert _decide(readiness=_ready().model_copy(
         update={"signature": "invalid"})).reason == "backend_not_provisioned"
     # Artifact-review trust alone must never assert backend isolation readiness.
@@ -292,6 +318,7 @@ def test_admission_enforces_resource_bounds():
         trusted_keys=_TRUSTED_KEYS, trusted_readiness_keys=_READINESS_KEYS,
         trusted_conformance_keys=_ASSESSOR_KEYS,
         backend_evidence=_evidence_for(RuntimeBackend.WASM_WASI),
+        backend_source_evidence=_source_evidence_for(RuntimeBackend.WASM_WASI),
         review_approved=True,
         artifact_revoked=False, backend_readiness=_ready(), maximum_input_bytes=256,
         maximum_deadline_seconds=20)
