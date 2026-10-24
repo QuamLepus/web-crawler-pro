@@ -279,6 +279,7 @@
     { t: "Topic discovery", u: "/app/discovery", i: "✦", k: "discover topic seed domains" },
     { t: "Own search index", u: "/app/index", i: "🗂", k: "index corpus build sources levels" },
     { t: "Data exchange", u: "/app/marketplace", i: "🛒", k: "dataset catalogue bounty licence" },
+    { t: "Agent marketplace", u: "/app/agents", i: "⚙", k: "agent catalog listing manifest publisher" },
     { t: "API keys", u: "/app/keys", i: "🔑", k: "api key token secret auth" },
     { t: "Usage & billing", u: "/app/billing", i: "💳", k: "billing plan invoice usage quota" },
     { t: "Settings & webhooks", u: "/app/settings", i: "⚙", k: "settings webhook config" },

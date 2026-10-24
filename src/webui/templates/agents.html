@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set catalog_rows = catalog|rows %}
+{% set owned_rows = my_agents|rows %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><span>Agent marketplace</span></div>
+  <h1>Agent marketplace</h1>
+  <p class="dim">Browse declarative Agent catalog cards or create a listing. Cards describe metadata and schemas only: this console does not accept or execute publisher code. Runtime backends remain design-only and unavailable.</p>
+</div>
+{% if notice %}<div class="alert success mb-3">{{ notice }}</div>{% endif %}
+{% if form_error %}<div class="alert danger mb-3">{{ form_error }}</div>{% endif %}
+<div class="card mb-3" data-tabs>
+  <div class="card-head" style="padding:0;border-bottom:0"><div class="tabs" style="width:100%;border-bottom:0" role="tablist">
+    <button class="tab" role="tab" data-tab="browse" aria-selected="true">Browse <span class="badge">{{ catalog_rows|length }}</span></button>
+    <button class="tab" role="tab" data-tab="owned" aria-selected="false">Your listings <span class="badge">{{ owned_rows|length }}</span></button>
+    <button class="tab" role="tab" data-tab="create" aria-selected="false">Create a draft</button>
+  </div></div>
+  <section class="tabpanel" data-panel="browse" role="tabpanel" style="padding:1rem">
+    <form method="get" action="/app/agents" class="row-wrap mb-3">
+      <input class="input" name="q" value="{{ q }}" placeholder="Search Agent cards" aria-label="Search Agent cards">
+      <input class="input" name="tag" value="{{ tag }}" placeholder="Filter by tag" aria-label="Filter by tag">
+      <button class="btn">Search</button>
+    </form>
+    {% if catalog_error %}<div class="alert danger">Catalog unavailable: {{ catalog_error }}</div>
+    {% elif catalog_rows %}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      {% for card in catalog_rows %}{% set m = card.get('manifest') or {} %}
+      <article class="card" style="padding:1rem">
+        <div class="between"><h2>{{ m.get('name', 'Agent') }}</h2><span class="badge">v{{ m.get('version', '—') }}</span></div>
+        <p>{{ m.get('summary', '') }}</p>
+        <div class="row-wrap tiny">{% for t in card.get('tags') or [] %}<span class="badge">{{ t }}</span>{% endfor %}<span class="badge">{{ card.get('license', '—') }}</span></div>
+        <p class="tiny dim mt-1">Capabilities: {{ (m.get('capabilities') or [])|join(', ') }}</p>
+        <p class="tiny muted">Declarative listing · no executable artifact</p>
+      </article>{% endfor %}
+    </div>{% else %}<div class="empty"><strong>No published Agent cards yet.</strong><p>Try another search, or create a draft listing.</p></div>{% endif %}
+  </section>
+  <section class="tabpanel" data-panel="owned" role="tabpanel" style="padding:1rem" hidden>
+    {% if mine_error %}<div class="alert danger">Your listings could not be loaded: {{ mine_error }}</div>
+    {% elif owned_rows %}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">{% for card in owned_rows %}{% set m = card.get('manifest') or {} %}
+      <article class="card" style="padding:1rem"><div class="between"><h2>{{ m.get('name', 'Agent') }}</h2><span class="badge">{{ card.get('status') }}</span></div>
+        <p class="dim">{{ m.get('summary', '') }}</p><p class="tiny muted">{{ card.get('agent_id') }}</p>
+        {% if card.get('status') in ['draft', 'published'] %}<form method="post" action="/app/agents/{{ card.get('agent_id') }}/status">
+          {% if card.get('status') == 'draft' %}<input type="hidden" name="status" value="published"><button class="btn btn-primary">Publish card</button>
+          {% else %}<input type="hidden" name="status" value="draft"><button class="btn">Unpublish card</button>{% endif %}
+        </form>{% endif %}
+      </article>{% endfor %}</div>{% else %}<div class="empty"><strong>No listings yet.</strong><p>Create a draft to get started.</p></div>{% endif %}
+  </section>
+  <section class="tabpanel" data-panel="create" role="tabpanel" style="padding:1rem" hidden>
+    <p class="dim">Create a draft metadata card. Publishing makes the card discoverable; it does not provision or run an execution backend.</p>
+    <form method="post" action="/app/agents" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <label>Agent name<input class="input" name="name" minlength="3" maxlength="120" required></label>
+      <label>Version<input class="input" name="version" value="1.0.0" pattern="[0-9]+\.[0-9]+\.[0-9]+" required></label>
+      <label style="grid-column:1/-1">Summary<textarea class="input" name="summary" minlength="10" maxlength="1000" required></textarea></label>
+      <label>Capabilities (comma-separated)<input class="input" name="capabilities" placeholder="summarize, classify" required></label>
+      <label>Tags (comma-separated)<input class="input" name="tags" placeholder="research, offline"></label>
+      <label>License<input class="input" name="license" value="CC-BY-4.0" maxlength="80" required></label>
+      <label>Input schema (JSON object)<textarea class="input" style="font-family:monospace" name="input_schema">{}</textarea></label>
+      <label>Output schema (JSON object)<textarea class="input" style="font-family:monospace" name="output_schema">{}</textarea></label>
+      <div style="grid-column:1/-1"><button class="btn btn-primary">Create draft</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}
