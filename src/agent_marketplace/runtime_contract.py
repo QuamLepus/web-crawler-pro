@@ -172,18 +172,21 @@ def decide_admission(
     request: AdmissionRequest,
     *,
     attestation: ArtifactAttestation | None,
+    artifact_bytes: bytes | None,
     trusted_public_keys: Mapping[str, bytes],
     review_approved: bool,
     backend_readiness: BackendReadiness | None,
     maximum_input_bytes: int = 1_048_576,
     maximum_deadline_seconds: int = 3600,
+    maximum_artifact_bytes: int = 50 * 1024 * 1024,
 ) -> AdmissionDecision:
     """Evaluate explicit pinning and readiness; never choose another backend.
 
     The review-state and readiness arguments must come from trusted,
     independently verified control-plane sources. The attestation signature is
-    verified here against operator-supplied keys. This does not launch a
-    sandbox, fetch artifact bytes, or prove a backend is secure.
+    verified against operator-supplied keys, and the supplied artifact bytes
+    must match its signed digest. This does not retrieve or persist artifact
+    bytes, launch a sandbox, or prove a backend is secure.
     """
     readiness = backend_readiness
     policy_revision = readiness.policy_revision if readiness else "unavailable"
@@ -207,6 +210,9 @@ def decide_admission(
         return deny("artifact_mismatch")
     if attestation.agent_id != request.agent_id or attestation.version != request.version:
         return deny("agent_version_mismatch")
+    if not verify_artifact_bytes(
+            attestation, artifact_bytes, maximum_bytes=maximum_artifact_bytes):
+        return deny("artifact_mismatch")
     if (request.input_bytes > maximum_input_bytes
             or request.deadline_seconds > maximum_deadline_seconds):
         return deny("resource_limit_exceeded")
