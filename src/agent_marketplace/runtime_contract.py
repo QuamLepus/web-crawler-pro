@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -23,6 +24,25 @@ class RuntimeBackend(StrEnum):
     WASM_WASI = "wasm_wasi"
     SANDBOXED_KUBERNETES = "sandboxed_kubernetes"
     MICROVM = "microvm"
+
+
+BACKEND_REQUIRED_GATES: dict[RuntimeBackend, frozenset[str]] = {
+    RuntimeBackend.WASM_WASI: frozenset({
+        "runtime_version_pinned", "component_abi_pinned", "imports_allowlisted",
+        "fuel_and_memory_bounded", "io_bounded", "network_denied",
+        "cancellation_verified", "cross_run_cleanup_verified",
+    }),
+    RuntimeBackend.SANDBOXED_KUBERNETES: frozenset({
+        "dedicated_pool", "sandbox_runtime_verified", "restricted_pod_security",
+        "resource_quotas_enforced", "egress_policy_enforced", "metadata_blocked",
+        "cancellation_verified", "cross_run_cleanup_verified",
+    }),
+    RuntimeBackend.MICROVM: frozenset({
+        "dedicated_kvm_hosts", "vmm_and_guest_pinned", "vm_per_run",
+        "network_denied", "resource_quotas_enforced", "vsock_restricted",
+        "cancellation_verified", "cross_run_cleanup_verified",
+    }),
+}
 
 
 class StrictContract(BaseModel):
@@ -168,7 +188,7 @@ class BackendReadiness(StrictContract):
 
     backend: RuntimeBackend
     enabled: bool
-    conformance_passed: bool
+    conformance_evidence: dict[str, str]
     policy_revision: str = Field(min_length=1, max_length=80)
     issued_at: datetime
     expires_at: datetime
@@ -176,6 +196,22 @@ class BackendReadiness(StrictContract):
     key_id: str = Field(min_length=1, max_length=160)
     signature_algorithm: Literal["ed25519"] = "ed25519"
     signature: str = Field(min_length=1, max_length=256)
+
+    @field_validator("conformance_evidence")
+    @classmethod
+    def _gate_evidence_is_backend_scoped(
+        cls, value: dict[str, str], info,
+    ) -> dict[str, str]:
+        backend = info.data.get("backend")
+        if backend is None:
+            raise ValueError("backend is required for conformance evidence")
+        allowed = BACKEND_REQUIRED_GATES[backend]
+        if set(value) - allowed:
+            raise ValueError("conformance evidence contains unknown backend gates")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", digest)
+               for digest in value.values()):
+            raise ValueError("gate evidence must use lowercase SHA-256 digests")
+        return value
 
     @field_validator("issued_at", "expires_at")
     @classmethod
@@ -338,7 +374,8 @@ def decide_admission(
         return deny("artifact_signature_invalid")
     if not verify_backend_readiness(readiness, trusted_readiness_keys):
         return deny("backend_not_provisioned")
-    if not readiness.conformance_passed:
+    if not BACKEND_REQUIRED_GATES[readiness.backend].issubset(
+            readiness.conformance_evidence):
         return deny("backend_not_conformant")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):
