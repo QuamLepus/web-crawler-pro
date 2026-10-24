@@ -5,10 +5,16 @@ supply independently verified backend and artifact-review state before use.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import base64
+import json
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -25,7 +31,8 @@ class StrictContract(BaseModel):
 class ArtifactAttestation(StrictContract):
     """Claim binding an immutable artifact to its review/provenance record.
 
-    `signature` is opaque data; constructing this object does not verify it.
+    `signature` is a base64url Ed25519 signature over the canonical payload;
+    constructing this object does not verify it.
     """
 
     agent_id: str = Field(min_length=1, max_length=128)
@@ -34,8 +41,56 @@ class ArtifactAttestation(StrictContract):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     provenance_id: str = Field(min_length=1, max_length=160)
     signer_id: str = Field(min_length=1, max_length=160)
-    signature: str = Field(min_length=1, max_length=4096)
+    key_id: str = Field(min_length=1, max_length=160)
+    signature_algorithm: Literal["ed25519"]
+    signature: str = Field(min_length=1, max_length=256)
     created_at: datetime
+
+
+def attestation_signing_payload(attestation: ArtifactAttestation) -> bytes:
+    """Return the stable UTF-8 payload that artifact reviewers must sign."""
+    created_at = attestation.created_at
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
+        raise ValueError("attestation timestamp must include a timezone")
+    value = {
+        "agent_id": attestation.agent_id,
+        "backend": attestation.backend.value,
+        "created_at": created_at.astimezone(UTC).isoformat(),
+        "key_id": attestation.key_id,
+        "provenance_id": attestation.provenance_id,
+        "sha256": attestation.sha256,
+        "signature_algorithm": attestation.signature_algorithm,
+        "signer_id": attestation.signer_id,
+        "version": attestation.version,
+    }
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("utf-8")
+
+
+def verify_attestation_signature(
+    attestation: ArtifactAttestation,
+    trusted_public_keys: Mapping[str, bytes],
+) -> bool:
+    """Verify an Ed25519 signature against operator-provisioned PEM keys.
+
+    `key_id` selects the trusted key; unknown/malformed keys, signatures, or
+    payload timestamps fail closed. This verifies only the signed claim; it
+    does not fetch artifact bytes or establish that review state is current.
+    """
+    public_key_pem = trusted_public_keys.get(attestation.key_id)
+    if public_key_pem is None:
+        return False
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem)
+        if not isinstance(public_key, Ed25519PublicKey):
+            return False
+        encoded = attestation.signature.encode("ascii")
+        signature = base64.b64decode(
+            encoded + b"=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        public_key.verify(signature, attestation_signing_payload(attestation))
+    except (ValueError, TypeError, UnicodeEncodeError, InvalidSignature):
+        return False
+    return True
 
 
 class BackendReadiness(StrictContract):

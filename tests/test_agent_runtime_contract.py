@@ -1,7 +1,10 @@
 """Pure contract tests: no sandbox or publisher code is provisioned or run."""
+import base64
 from datetime import UTC, datetime
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 
 from src.agent_marketplace.runtime_contract import (
@@ -10,7 +13,9 @@ from src.agent_marketplace.runtime_contract import (
     BackendReadiness,
     RuntimeAuditEvent,
     RuntimeBackend,
+    attestation_signing_payload,
     decide_admission,
+    verify_attestation_signature,
 )
 
 DIGEST = "a" * 64
@@ -32,6 +37,7 @@ def _attestation(**changes):
         "agent_id": "agent-1", "version": "1.2.3",
         "backend": RuntimeBackend.WASM_WASI, "sha256": DIGEST,
         "provenance_id": "prov-1", "signer_id": "review-service",
+        "key_id": "review-key-1", "signature_algorithm": "ed25519",
         "signature": "opaque-signature", "created_at": NOW,
     }
     data.update(changes)
@@ -89,6 +95,26 @@ def test_admission_enforces_resource_bounds():
         _request(input_bytes=1_048_577)
     with pytest.raises(ValidationError):
         _request(deadline_seconds=3601)
+
+
+def test_attestation_signature_verifies_claim_and_fails_closed_on_tampering():
+    private_key = Ed25519PrivateKey.generate()
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo)
+    unsigned = _attestation(signature="pending")
+    signature = base64.urlsafe_b64encode(
+        private_key.sign(attestation_signing_payload(unsigned))).decode().rstrip("=")
+    signed = unsigned.model_copy(update={"signature": signature})
+
+    assert verify_attestation_signature(signed, {"review-key-1": public_pem})
+    assert not verify_attestation_signature(signed, {})
+    assert not verify_attestation_signature(
+        signed.model_copy(update={"sha256": "b" * 64}),
+        {"review-key-1": public_pem})
+    assert not verify_attestation_signature(
+        signed.model_copy(update={"signature": "not-base64%%%"}),
+        {"review-key-1": public_pem})
 
 
 def test_contracts_reject_unknown_fields_and_noncanonical_digest():
