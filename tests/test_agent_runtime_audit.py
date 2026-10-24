@@ -1,14 +1,23 @@
 """Tenant isolation, retention, and integrity tests for runtime audit metadata."""
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 
 import fakeredis
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from src.agent_marketplace.audit_ledger import AuditLedgerError, RuntimeAuditLedger
-from src.agent_marketplace.runtime_contract import RuntimeAuditEvent, RuntimeBackend
+from src.agent_marketplace.audit_ledger import (
+    AuditLedgerError,
+    RuntimeAuditLedger,
+)
+from src.agent_marketplace.runtime_contract import (
+    RuntimeAuditEvent,
+    RuntimeBackend,
+    TrustedAttestationKey,
+)
 
 
 def _event(tenant_id="tenant-a", suffix="1"):
@@ -105,6 +114,65 @@ def test_retention_limit_can_be_reduced_without_breaking_chain():
     smaller.append("tenant-a", _event(suffix="after-shrink"))
     assert [item.sequence for item in smaller.read("tenant-a", limit=2)] == [5, 6]
     assert smaller.verify("tenant-a")
+
+
+def test_signed_checkpoint_is_tenant_bound_and_verifiable_outside_redis():
+    now = datetime.now(UTC)
+    private_key = Ed25519PrivateKey.generate()
+    public_key_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii")
+    trusted_key = TrustedAttestationKey(
+        key_id="audit-key-1", signer_id="audit-operator",
+        public_key_pem=public_key_pem,
+        valid_from=now - timedelta(days=1), expires_at=now + timedelta(days=1))
+    ledger = _ledger(max_events=2)
+    for index in range(3):
+        ledger.append("tenant-a", _event(suffix=f"checkpoint-{index}"))
+
+    checkpoint = ledger.create_checkpoint(
+        "tenant-a", signer_id="audit-operator", key_id="audit-key-1",
+        private_key=private_key, created_at=now)
+    trusted_keys = {"audit-key-1": trusted_key}
+    assert checkpoint.sequence == 3
+    assert RuntimeAuditLedger.verify_checkpoint(
+        checkpoint, tenant_id="tenant-a", trusted_keys=trusted_keys, now=now)
+    assert ledger.matches_checkpoint(checkpoint, "tenant-a")
+    assert not ledger.matches_checkpoint(checkpoint, "tenant-b")
+    assert not RuntimeAuditLedger.verify_checkpoint(
+        checkpoint, tenant_id="tenant-b", trusted_keys=trusted_keys, now=now)
+    assert not RuntimeAuditLedger.verify_checkpoint(
+        checkpoint.model_copy(update={"event_hash": "b" * 64}),
+        tenant_id="tenant-a", trusted_keys=trusted_keys, now=now)
+    ledger.append("tenant-a", _event(suffix="after-checkpoint"))
+    assert not ledger.matches_checkpoint(checkpoint, "tenant-a")
+
+
+def test_signed_checkpoint_rejects_revoked_or_expired_signing_keys():
+    now = datetime.now(UTC)
+    private_key = Ed25519PrivateKey.generate()
+    public_key_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii")
+    ledger = _ledger()
+    ledger.append("tenant-a", _event())
+    checkpoint = ledger.create_checkpoint(
+        "tenant-a", signer_id="audit-operator", key_id="audit-key-1",
+        private_key=private_key, created_at=now)
+    base = {
+        "key_id": "audit-key-1", "signer_id": "audit-operator",
+        "public_key_pem": public_key_pem,
+        "valid_from": now - timedelta(days=1),
+        "expires_at": now + timedelta(days=1),
+    }
+    revoked = TrustedAttestationKey(**{**base, "revoked_at": now})
+    expired = TrustedAttestationKey(**{**base, "expires_at": now})
+    assert not RuntimeAuditLedger.verify_checkpoint(
+        checkpoint, tenant_id="tenant-a", trusted_keys={"audit-key-1": revoked},
+        now=now)
+    assert not RuntimeAuditLedger.verify_checkpoint(
+        checkpoint, tenant_id="tenant-a", trusted_keys={"audit-key-1": expired},
+        now=now)
 
 
 def test_concurrent_appends_have_a_single_ordered_chain():

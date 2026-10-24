@@ -6,14 +6,27 @@ immutable or externally anchored audit archive.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+from pydantic import Field
 from redis.exceptions import WatchError
 
-from src.agent_marketplace.runtime_contract import RuntimeAuditEvent
+from src.agent_marketplace.runtime_contract import (
+    RuntimeAuditEvent,
+    StrictContract,
+    TrustedAttestationKey,
+)
 
 
 class AuditLedgerError(ValueError):
@@ -49,6 +62,31 @@ def _record_hash(sequence: int, previous_hash: str,
     }, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
        allow_nan=False).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+class AuditCheckpoint(StrictContract):
+    """Signed checkpoint that can be exported to an independently protected store."""
+
+    tenant_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sequence: int = Field(ge=0)
+    event_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    first_sequence: int = Field(ge=1)
+    first_previous_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    signer_id: str = Field(min_length=1, max_length=160)
+    key_id: str = Field(min_length=1, max_length=160)
+    signature_algorithm: Literal["ed25519"] = "ed25519"
+    signature: str = Field(min_length=1, max_length=256)
+
+
+def _checkpoint_payload(checkpoint: AuditCheckpoint) -> bytes:
+    created_at = checkpoint.created_at
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
+        raise ValueError("checkpoint timestamp must include a timezone")
+    value = checkpoint.model_dump(mode="json", exclude={"signature"})
+    value["created_at"] = created_at.astimezone(UTC).isoformat()
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 class RuntimeAuditLedger:
@@ -166,18 +204,17 @@ class RuntimeAuditLedger:
         records_key, _ = self._keys(str(tenant_id))
         return self._decode_records(self.r.lrange(records_key, -limit, -1))
 
-    def verify(self, tenant_id: str) -> bool:
-        """Verify the retained chain and its head; an empty ledger is valid."""
+    def _snapshot(self, tenant_id: str) -> tuple[list[AuditRecord], dict[str, str]]:
         records_key, head_key = self._keys(str(tenant_id))
-        try:
-            with self.r.pipeline(transaction=True) as pipe:
-                pipe.lrange(records_key, -self.max_events, -1)
-                pipe.hgetall(head_key)
-                raw_records, raw_head = pipe.execute()
-            records = self._decode_records(raw_records)
-        except AuditLedgerError:
-            return False
-        head = self._text_mapping(raw_head)
+        with self.r.pipeline(transaction=True) as pipe:
+            pipe.lrange(records_key, -self.max_events, -1)
+            pipe.hgetall(head_key)
+            raw_records, raw_head = pipe.execute()
+        return self._decode_records(raw_records), self._text_mapping(raw_head)
+
+    @staticmethod
+    def _verify_snapshot(tenant_id: str, records: list[AuditRecord],
+                         head: dict[str, str]) -> bool:
         if not records:
             return not head
         try:
@@ -203,6 +240,126 @@ class RuntimeAuditLedger:
             prior_sequence = record.sequence
         try:
             return (int(head.get("sequence", -1)) == records[-1].sequence
-                    and self._text(head.get("event_hash", "")) == records[-1].event_hash)
+                    and head.get("event_hash", "") == records[-1].event_hash)
         except (TypeError, ValueError):
             return False
+
+    def verify(self, tenant_id: str) -> bool:
+        """Verify the retained chain and its head; an empty ledger is valid."""
+        try:
+            records, head = self._snapshot(str(tenant_id))
+        except AuditLedgerError:
+            return False
+        return self._verify_snapshot(str(tenant_id), records, head)
+
+    def create_checkpoint(
+        self,
+        tenant_id: str,
+        *,
+        signer_id: str,
+        key_id: str,
+        private_key: Ed25519PrivateKey,
+        created_at: datetime | None = None,
+    ) -> AuditCheckpoint:
+        """Sign the current verified head for caller-managed external storage.
+
+        The signing key is only used in memory here and is never persisted by
+        this class. The returned checkpoint must be exported independently to
+        protect it from administrators who can rewrite this Redis database.
+        """
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise AuditLedgerError("checkpoint signing requires an Ed25519 private key")
+        tenant_id = str(tenant_id)
+        if not tenant_id:
+            raise AuditLedgerError("tenant ID is required for a checkpoint")
+        try:
+            records, head = self._snapshot(tenant_id)
+        except AuditLedgerError as exc:
+            raise AuditLedgerError("cannot checkpoint an invalid audit ledger") from exc
+        if not self._verify_snapshot(tenant_id, records, head):
+            raise AuditLedgerError("cannot checkpoint an invalid audit ledger")
+        timestamp = created_at or datetime.now(UTC)
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise AuditLedgerError("checkpoint timestamp must include a timezone")
+        checkpoint = AuditCheckpoint(
+            tenant_sha256=hashlib.sha256(tenant_id.encode("utf-8")).hexdigest(),
+            sequence=int(head.get("sequence", 0)),
+            event_hash=head.get("event_hash", self.ZERO_HASH),
+            first_sequence=int(head.get("first_sequence", 1)),
+            first_previous_hash=head.get("first_previous_hash", self.ZERO_HASH),
+            created_at=timestamp,
+            signer_id=signer_id,
+            key_id=key_id,
+            signature="pending",
+        )
+        signature = base64.urlsafe_b64encode(
+            private_key.sign(_checkpoint_payload(checkpoint))).decode("ascii").rstrip("=")
+        return checkpoint.model_copy(update={"signature": signature})
+
+    def matches_checkpoint(self, checkpoint: AuditCheckpoint,
+                           tenant_id: str) -> bool:
+        """Check whether this valid current ledger still matches a saved checkpoint."""
+        tenant_id = str(tenant_id)
+        tenant_hash = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()
+        if checkpoint.tenant_sha256 != tenant_hash:
+            return False
+        try:
+            records, head = self._snapshot(tenant_id)
+        except AuditLedgerError:
+            return False
+        if not self._verify_snapshot(tenant_id, records, head):
+            return False
+        try:
+            return (
+                int(head.get("sequence", 0)) == checkpoint.sequence
+                and head.get("event_hash", self.ZERO_HASH) == checkpoint.event_hash
+                and int(head.get("first_sequence", 1)) == checkpoint.first_sequence
+                and head.get("first_previous_hash", self.ZERO_HASH)
+                == checkpoint.first_previous_hash
+            )
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def verify_checkpoint(
+        checkpoint: AuditCheckpoint,
+        *,
+        tenant_id: str,
+        trusted_keys: dict[str, TrustedAttestationKey],
+        now: datetime | None = None,
+    ) -> bool:
+        """Verify checkpoint signature, tenant binding, signer, and key status."""
+        expected_tenant = hashlib.sha256(str(tenant_id).encode("utf-8")).hexdigest()
+        if (checkpoint.signature_algorithm != "ed25519"
+                or checkpoint.tenant_sha256 != expected_tenant):
+            return False
+        key = trusted_keys.get(checkpoint.key_id)
+        if (key is None or key.key_id != checkpoint.key_id
+                or key.signer_id != checkpoint.signer_id):
+            return False
+        current_time = now or datetime.now(UTC)
+        signed_at = checkpoint.created_at
+        if (current_time.tzinfo is None or current_time.utcoffset() is None
+                or signed_at.tzinfo is None or signed_at.utcoffset() is None):
+            return False
+        current_time = current_time.astimezone(UTC)
+        signed_at = signed_at.astimezone(UTC)
+        if (signed_at > current_time
+                or signed_at < key.valid_from.astimezone(UTC)
+                or signed_at >= key.expires_at.astimezone(UTC)
+                or (key.revoked_at is not None
+                    and current_time >= key.revoked_at.astimezone(UTC))):
+            return False
+        try:
+            public_key = serialization.load_pem_public_key(
+                key.public_key_pem.encode("ascii"))
+            if not isinstance(public_key, Ed25519PublicKey):
+                return False
+            encoded = checkpoint.signature.encode("ascii")
+            signature = base64.b64decode(
+                encoded + b"=" * (-len(encoded) % 4),
+                altchars=b"-_", validate=True)
+            public_key.verify(signature, _checkpoint_payload(checkpoint))
+        except (ValueError, TypeError, UnicodeEncodeError, InvalidSignature):
+            return False
+        return True
