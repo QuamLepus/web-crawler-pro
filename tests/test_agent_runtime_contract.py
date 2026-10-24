@@ -17,6 +17,7 @@ from src.agent_marketplace.runtime_contract import (
     RuntimeBackend,
     TrustedAttestationKey,
     attestation_signing_payload,
+    backend_conformance_signing_payload,
     backend_readiness_signing_payload,
     decide_admission,
     verify_artifact_bytes,
@@ -53,6 +54,15 @@ _READINESS_KEY = TrustedAttestationKey(
     public_key_pem=_READINESS_PUBLIC_KEY_PEM.decode("ascii"),
     valid_from=NOW - timedelta(days=1), expires_at=NOW + timedelta(days=1))
 _READINESS_KEYS = {"readiness-key-1": _READINESS_KEY}
+_ASSESSOR_PRIVATE_KEY = Ed25519PrivateKey.generate()
+_ASSESSOR_PUBLIC_KEY_PEM = _ASSESSOR_PRIVATE_KEY.public_key().public_bytes(
+    serialization.Encoding.PEM,
+    serialization.PublicFormat.SubjectPublicKeyInfo)
+_ASSESSOR_KEY = TrustedAttestationKey(
+    key_id="assessor-key-1", signer_id="independent-assessor",
+    public_key_pem=_ASSESSOR_PUBLIC_KEY_PEM.decode("ascii"),
+    valid_from=NOW - timedelta(days=1), expires_at=NOW + timedelta(days=1))
+_ASSESSOR_KEYS = {"assessor-key-1": _ASSESSOR_KEY}
 
 
 def _request(**changes):
@@ -107,14 +117,21 @@ def _ready(**changes):
         "expires_at": NOW + timedelta(hours=1),
         "signer_id": "runtime-operator",
         "key_id": "readiness-key-1",
-        "signature": "pending",
+        "assessor_id": "independent-assessor",
+        "assessor_key_id": "assessor-key-1",
+        "assessor_signature": "pending-assessor",
+        "signature": "pending-operator",
     }
     data.update(changes)
     readiness = BackendReadiness(**data)
-    signature = base64.urlsafe_b64encode(
+    assessor_signature = base64.urlsafe_b64encode(
+        _ASSESSOR_PRIVATE_KEY.sign(backend_conformance_signing_payload(readiness))
+    ).decode().rstrip("=")
+    readiness = readiness.model_copy(update={"assessor_signature": assessor_signature})
+    operator_signature = base64.urlsafe_b64encode(
         _READINESS_PRIVATE_KEY.sign(backend_readiness_signing_payload(readiness))
     ).decode().rstrip("=")
-    return readiness.model_copy(update={"signature": signature})
+    return readiness.model_copy(update={"signature": operator_signature})
 
 
 _DEFAULT = object()
@@ -123,6 +140,7 @@ _DEFAULT = object()
 def _decide(request=None, *, attestation=_DEFAULT, approved=True,
             readiness=_DEFAULT, trusted_keys=_TRUSTED_KEYS,
             readiness_keys=_READINESS_KEYS,
+            conformance_keys=_ASSESSOR_KEYS,
             backend_evidence=_DEFAULT,
             artifact_bytes=ARTIFACT_BYTES, revoked=False):
     if attestation is _DEFAULT:
@@ -136,6 +154,7 @@ def _decide(request=None, *, attestation=_DEFAULT, approved=True,
         request or _request(), attestation=attestation,
         artifact_bytes=artifact_bytes, trusted_keys=trusted_keys,
         trusted_readiness_keys=readiness_keys,
+        trusted_conformance_keys=conformance_keys,
         backend_evidence=backend_evidence,
         review_approved=approved, artifact_revoked=revoked,
         backend_readiness=readiness)
@@ -146,7 +165,8 @@ def test_backend_readiness_evidence_is_backend_specific_and_signed():
         readiness = _ready(backend=backend)
         evidence = _evidence_for(backend)
         assert set(readiness.conformance_evidence) == required_gates
-        assert verify_backend_readiness(readiness, _READINESS_KEYS, now=NOW)
+        assert verify_backend_readiness(
+            readiness, _READINESS_KEYS, _ASSESSOR_KEYS, now=NOW)
         assert verify_backend_evidence(readiness, evidence)
         tampered = dict(evidence)
         first_gate = next(iter(tampered))
@@ -182,6 +202,9 @@ def test_admission_requires_all_pins_review_and_backend_gates():
         update={"signature": "invalid"})).reason == "backend_not_provisioned"
     # Artifact-review trust alone must never assert backend isolation readiness.
     assert _decide(readiness_keys={}).reason == "backend_not_provisioned"
+    assert _decide(conformance_keys={}).reason == "backend_not_provisioned"
+    assert _decide(readiness=_ready().model_copy(
+        update={"assessor_signature": "invalid"})).reason == "backend_not_provisioned"
     assert _decide(readiness=_ready().model_copy(
         update={"enabled": False})).reason == "backend_not_provisioned"
     assert _decide(request=_request(backend_environment_id="pool-prod-b")).reason \
@@ -209,6 +232,7 @@ def test_admission_enforces_resource_bounds():
     result = decide_admission(
         request, attestation=_attestation(), artifact_bytes=ARTIFACT_BYTES,
         trusted_keys=_TRUSTED_KEYS, trusted_readiness_keys=_READINESS_KEYS,
+        trusted_conformance_keys=_ASSESSOR_KEYS,
         backend_evidence=_evidence_for(RuntimeBackend.WASM_WASI),
         review_approved=True,
         artifact_revoked=False, backend_readiness=_ready(), maximum_input_bytes=256,

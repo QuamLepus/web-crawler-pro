@@ -107,10 +107,12 @@ required gate set; admission also requires the corresponding bounded evidence
 bytes and recomputes each signed digest. Missing, extra, malformed, oversized, or
 mismatched evidence fails closed. Digest matching verifies byte identity only;
 it does not establish that evidence semantically proves a gate, which remains
-an independent operator review responsibility. Readiness uses a separate
-operator-managed trusted-key set from artifact attestations, so an artifact
-reviewer cannot implicitly assert backend isolation readiness; unsigned,
-expired, future-dated, mismatched, or revoked-key assertions fail closed. It rejects resource-limit overruns and never selects a fallback. Contract tests
+an independent operator review responsibility. Readiness is dual-signed: an
+independent conformance assessor signs the gate evidence digests, then a distinct
+operator signs the enablement assertion. Admission verifies them using separate
+assessor, readiness-operator, and artifact-review trust sets; assessor and
+readiness signer identities and key IDs must differ. Unsigned, expired,
+future-dated, mismatched, or revoked-key assertions fail closed. It rejects resource-limit overruns and never selects a fallback. Contract tests
 cover mismatches, unavailable backends, bounds, and rejection of unknown
 fields.
 
