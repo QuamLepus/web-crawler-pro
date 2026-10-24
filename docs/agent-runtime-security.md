@@ -124,10 +124,16 @@ concurrent appends and SHA-256 hash links plus a chain/head verifier. The stored
 head anchors the first retained sequence and its predecessor digest, so the
 verifier detects accidental retained-prefix loss as well as changes inside the
 window. Legacy ledgers without this anchor are accepted using their current
-oldest record and are upgraded on their next append. It is not wired into
-runtime paths; Redis operators can rewrite both records and heads, so it is not
-immutable, tamper-proof, or externally anchored. Retention keeps the latest
-configured window and the head remains stored. No backend is
+oldest record and are upgraded on their next append. `create_checkpoint` can
+sign the verified head with an Ed25519 operator key; the returned tenant-bound
+checkpoint can be exported to a separately protected immutable store, and
+`verify_checkpoint` validates its signer, key validity/revocation, tenant, and
+signature; `matches_checkpoint` compares a signed checkpoint with a verified
+current Redis head. The ledger does not export or persist checkpoints itself. It is not
+wired into runtime paths; Redis operators can rewrite both records and heads,
+so without an externally retained checkpoint it is not immutable, tamper-proof,
+or externally anchored. Retention keeps the latest configured window and the
+head remains stored. No backend is
 provisioned or enabled; all launch gates below remain in force.
 
 ## Proposed architecture (not implemented)
