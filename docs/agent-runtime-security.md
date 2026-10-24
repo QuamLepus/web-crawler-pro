@@ -103,8 +103,11 @@ backend, exact environment/pool ID, policy revision, enabled state, per-gate
 evidence digests, and trusted key lifecycle. Admission requires the requested
 pool ID to match, preventing readiness evidence from being replayed across
 staging/production or separate backend pools. Each backend has a distinct
-required gate set; missing gates or
-evidence with malformed digests fail closed. It uses a separate
+required gate set; admission also requires the corresponding bounded evidence
+bytes and recomputes each signed digest. Missing, extra, malformed, oversized, or
+mismatched evidence fails closed. Digest matching verifies byte identity only;
+it does not establish that evidence semantically proves a gate, which remains
+an independent operator review responsibility. Readiness uses a separate
 operator-managed trusted-key set from artifact attestations, so an artifact
 reviewer cannot implicitly assert backend isolation readiness; unsigned,
 expired, future-dated, mismatched, or revoked-key assertions fail closed. It rejects resource-limit overruns and never selects a fallback. Contract tests

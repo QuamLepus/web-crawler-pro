@@ -239,6 +239,35 @@ def backend_readiness_signing_payload(readiness: BackendReadiness) -> bytes:
                       ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
+def verify_backend_evidence(
+    readiness: BackendReadiness,
+    evidence: Mapping[str, bytes] | None,
+    *,
+    maximum_total_bytes: int = 10 * 1024 * 1024,
+) -> bool:
+    """Verify supplied evidence bytes match every signed backend gate digest.
+
+    This verifies byte identity and bounded size, not the semantic validity of
+    the evidence; an independent operator review must interpret each item.
+    """
+    if evidence is None or maximum_total_bytes < 0:
+        return False
+    required = BACKEND_REQUIRED_GATES[readiness.backend]
+    if (set(evidence) != set(readiness.conformance_evidence)
+            or not required.issubset(evidence)):
+        return False
+    total_bytes = 0
+    for gate, raw in evidence.items():
+        if not isinstance(raw, bytes):
+            return False
+        total_bytes += len(raw)
+        if total_bytes > maximum_total_bytes:
+            return False
+        if hashlib.sha256(raw).hexdigest() != readiness.conformance_evidence[gate]:
+            return False
+    return True
+
+
 def verify_backend_readiness(
     readiness: BackendReadiness,
     trusted_keys: Mapping[str, TrustedAttestationKey],
@@ -340,6 +369,7 @@ def decide_admission(
     artifact_bytes: bytes | None,
     trusted_keys: Mapping[str, TrustedAttestationKey],
     trusted_readiness_keys: Mapping[str, TrustedAttestationKey],
+    backend_evidence: Mapping[str, bytes] | None,
     review_approved: bool,
     artifact_revoked: bool,
     backend_readiness: BackendReadiness | None,
@@ -377,8 +407,7 @@ def decide_admission(
         return deny("artifact_signature_invalid")
     if not verify_backend_readiness(readiness, trusted_readiness_keys):
         return deny("backend_not_provisioned")
-    if not BACKEND_REQUIRED_GATES[readiness.backend].issubset(
-            readiness.conformance_evidence):
+    if not verify_backend_evidence(readiness, backend_evidence):
         return deny("backend_not_conformant")
     if (attestation.backend != request.backend
             or attestation.sha256 != request.sha256):
