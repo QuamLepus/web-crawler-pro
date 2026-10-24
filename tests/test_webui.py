@@ -103,6 +103,7 @@ def test_console_pages_require_a_session(client):
         "/app/index",
         "/app/marketplace",
         "/app/agents",
+        "/app/agents/example-card",
         "/app/discovery",
     ):
         res = client.get(path, follow_redirects=False)
@@ -161,6 +162,7 @@ PAGES = [
     "/app/index",
     "/app/marketplace",
     "/app/agents",
+    "/app/agents/example-card",
     "/app/keys",
     "/app/billing",
     "/app/settings",
@@ -214,6 +216,12 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert "Console Research Agent Revised" in edited.text
     assert "compare" in edited.text
 
+    detail = signed_in.get(f"/app/agents/{agent_id}")
+    assert detail.status_code == 200
+    assert "A revised declarative research assistant listing." in detail.text
+    assert "Declared input schema" in detail.text
+    assert "Declarative catalog entry only" in detail.text
+
     published = signed_in.post(
         f"/app/agents/{agent_id}/status", data={"status": "published"},
         follow_redirects=True,
@@ -230,6 +238,13 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert unpublished.status_code == 200
     assert "Listing draft" in unpublished.text
     assert "No published Agent cards yet." in unpublished.text
+
+
+def test_agent_detail_distinguishes_unavailable_listing(signed_in):
+    response = signed_in.get("/app/agents/not-a-real-agent")
+    assert response.status_code == 200
+    assert "Listing unavailable" in response.text
+    assert "No published Agent cards yet." not in response.text
 
 
 def test_agent_marketplace_rejects_non_object_schema(signed_in):

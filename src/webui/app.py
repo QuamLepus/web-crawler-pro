@@ -1722,6 +1722,24 @@ async def agent_marketplace(request: Request, q: str = Query(""), tag: str = Que
     )
 
 
+@router.get("/app/agents/{agent_id}", response_class=HTMLResponse,
+            name="agent_marketplace_detail")
+async def agent_marketplace_detail(request: Request, agent_id: str):
+    api, me, redirect = await _guard(request)
+    if redirect:
+        return redirect
+    result = await api.get(f"/api/v1/agent-marketplace/agents/{agent_id}")
+    card = result.data if result.ok and isinstance(result.data, dict) else None
+    manifest = (card.get("manifest") or {}) if card else {}
+    return render(
+        request, "agent_detail.html", page="agent_marketplace", me=me,
+        card=card, manifest=manifest,
+        error=(result.error if not result.ok else None),
+        title=(f"{manifest.get('name')} — Agent marketplace"
+               if manifest else "Agent listing — Agent marketplace"),
+    )
+
+
 @router.post("/app/agents")
 async def agent_marketplace_create(
     request: Request, name: str = Form(""), version: str = Form("1.0.0"),

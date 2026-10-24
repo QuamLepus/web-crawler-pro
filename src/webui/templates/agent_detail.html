@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/app">Home</a><span>/</span><a href="/app/agents">Agent marketplace</a><span>/</span><span>Listing</span></div>
+  {% if card %}
+    <div class="between"><div><h1>{{ manifest.get('name', 'Agent listing') }}</h1><p class="dim">{{ manifest.get('summary', '') }}</p></div>
+      <span class="badge">{{ card.get('status') }} · v{{ manifest.get('version', '—') }}</span></div>
+  {% else %}<h1>Agent listing</h1>{% endif %}
+</div>
+{% if error %}<div class="alert danger">Listing unavailable: {{ error }}</div>
+{% elif card %}
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <section class="card" style="padding:1rem">
+      <h2>Catalog metadata</h2>
+      <p><strong>Capabilities</strong></p>
+      <div class="row-wrap tiny">{% for capability in manifest.get('capabilities') or [] %}<span class="badge">{{ capability }}</span>{% endfor %}</div>
+      <p class="mt-1"><strong>License</strong> · {{ card.get('license', '—') }}</p>
+      <p><strong>Tags</strong></p>
+      <div class="row-wrap tiny">{% for tag in card.get('tags') or [] %}<span class="badge">{{ tag }}</span>{% else %}<span class="muted">No tags</span>{% endfor %}</div>
+      <p class="tiny muted mt-1">Updated {{ card.get('updated_at', '—') }}</p>
+    </section>
+    <section class="card" style="padding:1rem">
+      <h2>Declared input schema</h2>
+      <pre class="mono" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ (manifest.get('input_schema') or {})|tojson(indent=2) }}</pre>
+    </section>
+    <section class="card" style="padding:1rem">
+      <h2>Declared output schema</h2>
+      <pre class="mono" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ (manifest.get('output_schema') or {})|tojson(indent=2) }}</pre>
+    </section>
+  </div>
+  <div class="alert mt-3">Declarative catalog entry only. This listing does not provide executable code or a runnable backend.</div>
+  {% if card.get('owner_tenant') == me.get('tenant') %}<p class="mt-2"><a class="btn" href="/app/agents">Manage your listings</a></p>{% endif %}
+{% endif %}
+{% endblock %}
