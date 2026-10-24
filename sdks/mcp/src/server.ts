@@ -193,8 +193,10 @@ export function buildServer(client: WebIntelligenceClient) {
     catch (error) { return failure(error); }
   });
 
-  server.tool("wio_billing_invoice_estimate", "Read the API-calculated current-period invoice estimate for the authenticated tenant; it is not a Stripe-issued invoice and triggers no payment.", {}, async () => {
-    try { return result(await client.getBillingInvoiceEstimate()); }
+  server.tool("wio_billing_invoice_estimate", "Read the API-calculated invoice estimate for the authenticated tenant's current period or a specified YYYY-MM period; it is not a Stripe-issued invoice and triggers no payment.", {
+    period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+  }, async ({ period }) => {
+    try { return result(await client.getBillingInvoiceEstimate(period)); }
     catch (error) { return failure(error); }
   });
 

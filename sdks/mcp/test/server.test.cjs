@@ -65,6 +65,36 @@ test('MCP billing tools read plans, usage, and a current-period estimate', async
   }
 });
 
+test('MCP invoice-estimate tool accepts a validated historical period', async () => {
+  let request;
+  const api = new WebIntelligenceClient({ apiKey: 'historical-billing-key', fetch: async (url, init) => {
+    request = { url, method: init.method, key: init.headers['X-API-Key'] };
+    return new Response(JSON.stringify({ period: '2026-08', total_cents: 450 }),
+      { status: 200 });
+  } });
+  const server = buildServer(api);
+  const client = new Client({ name: 'historical-billing-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const response = await client.callTool({ name: 'wio_billing_invoice_estimate',
+      arguments: { period: '2026-08' } });
+    assert.equal(response.isError, undefined);
+    assert.match(response.content[0].text, /2026-08/);
+    assert.deepEqual(request, {
+      url: 'http://localhost:8000/api/v1/billing/invoice?period=2026-08',
+      method: 'GET', key: 'historical-billing-key',
+    });
+    const invalid = await client.callTool({ name: 'wio_billing_invoice_estimate',
+      arguments: { period: '2026-13' } });
+    assert.equal(invalid.isError, true);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test('MCP own-index levels tool reads roadmap metadata without issuing a query', async () => {
   const calls = [];
   const api = new WebIntelligenceClient({ apiKey: 'index-key', fetch: async (url, init) => {
