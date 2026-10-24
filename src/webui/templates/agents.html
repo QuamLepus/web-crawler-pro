@@ -72,10 +72,19 @@
             <button class="btn btn-primary">Save listing</button>
           </form>
         </details>
-        {% if card.get('status') in ['draft', 'published'] %}<form method="post" action="/app/agents/{{ card.get('agent_id') }}/status">
-          {% if card.get('status') == 'draft' %}<input type="hidden" name="status" value="published"><button class="btn btn-primary">Publish card</button>
-          {% else %}<input type="hidden" name="status" value="draft"><button class="btn">Unpublish card</button>{% endif %}
-        </form>{% endif %}
+        {% if card.get('status') in ['draft', 'published'] %}
+          <form method="post" action="/app/agents/{{ card.get('agent_id') }}/status" class="row-wrap">
+            {% if card.get('status') == 'draft' %}<input type="hidden" name="status" value="published"><button class="btn btn-primary">Publish card</button>
+            {% else %}<input type="hidden" name="status" value="draft"><button class="btn">Unpublish card</button>{% endif %}
+          </form>
+          <form method="post" action="/app/agents/{{ card.get('agent_id') }}/status" data-confirm="Archive this listing? It will be removed from the public catalog but remain in your records.">
+            <input type="hidden" name="status" value="archived"><button class="btn btn-sm">Archive listing</button>
+          </form>
+        {% elif card.get('status') == 'archived' %}
+          <form method="post" action="/app/agents/{{ card.get('agent_id') }}/status" data-confirm="Restore this archived listing as a draft? It will not be public until you publish it.">
+            <input type="hidden" name="status" value="draft"><button class="btn">Restore as draft</button>
+          </form>
+        {% endif %}
       </article>{% endfor %}</div>{% elif mine_offset > 0 %}<div class="empty"><strong>No more listings on this page.</strong><p>Return to the previous page to see your earlier listings.</p></div>
     {% elif mine_status %}<div class="empty"><strong>No {{ mine_status }} listings.</strong><p>Choose another status or create a draft.</p></div>
     {% else %}<div class="empty"><strong>No listings yet.</strong><p>Create a draft to get started.</p></div>{% endif %}

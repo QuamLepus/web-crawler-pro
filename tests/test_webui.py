@@ -247,6 +247,25 @@ def test_agent_marketplace_console_draft_publish_and_unpublish(signed_in):
     assert unpublished.status_code == 200
     assert "Listing draft" in unpublished.text
     assert "No published Agent cards yet." in unpublished.text
+    assert "Archive listing" in unpublished.text
+
+    archived = signed_in.post(
+        f"/app/agents/{agent_id}/status", data={"status": "archived"},
+        follow_redirects=True,
+    )
+    assert archived.status_code == 200
+    assert "Listing archived" in archived.text
+    assert "Restore as draft" in archived.text
+    archived_filter = signed_in.get("/app/agents?tab=owned&mine_status=archived")
+    assert "Console Research Agent Revised" in archived_filter.text
+
+    restored = signed_in.post(
+        f"/app/agents/{agent_id}/status", data={"status": "draft"},
+        follow_redirects=True,
+    )
+    assert restored.status_code == 200
+    assert "Listing draft" in restored.text
+    assert "Publish card" in restored.text
 
 
 def test_agent_marketplace_browse_and_owner_views_paginate(signed_in):
