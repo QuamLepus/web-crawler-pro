@@ -48,7 +48,8 @@ not register code or grant execution. The managed endpoint uses an explicit
 server-side allow-list and does not execute seller-provided content. This first
 managed implementation is free and has no paid access or settlement path.
 
-Publisher-supplied executable agents remain deferred until an isolated runtime
-is designed, including network and secret boundaries, resource quotas, artifact
-review, and abuse handling. The catalog alone is not a trust or security review
-of a listing.
+Publisher-supplied executable agents remain deferred until the WASM/WASI,
+sandboxed-Kubernetes, and dedicated-microVM backends are implemented and each
+validated against the launch gates in `docs/agent-runtime-security.md`. Each
+agent version must pin one backend, with no automatic downgrade. The catalog
+alone is not a trust or security review of a listing.
