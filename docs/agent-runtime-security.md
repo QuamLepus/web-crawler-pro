@@ -1,0 +1,123 @@
+# Publisher-supplied agent runtime: security design and launch gates
+
+**Status: design only.** No publisher code is accepted, built, uploaded, or run by
+the current agent marketplace. The catalog and the allow-listed managed
+`data-curator` remain separate paths. This document is a precondition for any
+publisher-supplied executable-agent feature, not evidence that a sandbox exists.
+
+## Security objectives
+
+1. Treat every publisher artifact and every run input as hostile, including
+   artifacts from previously approved publishers.
+2. Prevent a run from reading host files, credentials, another run's state, or
+   another tenant's data.
+3. Make outbound network access unavailable unless an operator has explicitly
+   enabled a narrow, policy-enforced destination set for that agent/version.
+4. Bound CPU, memory, process count, wall time, disk, input, output, and logs;
+   terminate runs that exceed the contract.
+5. Preserve an auditable chain from a published version to an immutable artifact
+   digest, review decision, policy, run, and revocation event.
+6. Keep the control plane and the existing API/worker services outside the
+   execution boundary.
+
+## Threat model
+
+| Threat | Required control |
+|---|---|
+| Container or runtime escape | A dedicated, hardened execution plane with a stronger isolation boundary than a normal application container; no privileged mode, host mounts, host PID/network namespaces, or container-runtime socket. |
+| Secret theft or cross-tenant reads | No ambient credentials in the runner; no shared application Redis/DB mounts; short-lived, run-scoped capabilities only when required; isolated ephemeral storage wiped after each run. |
+| SSRF, scanning, or exfiltration | Network disabled by default; enforce egress outside the guest with default-deny policy and destination/IP validation; block metadata, private, loopback, link-local, and control-plane ranges, including after DNS resolution and redirects. |
+| Resource exhaustion or fork bombs | Hard CPU, memory, PID, disk, wall-clock, input/output, and log quotas enforced by the host/runtime, not just by the agent process. Kill the entire run cgroup/VM on timeout. |
+| Malicious or compromised artifact | Immutable digest, signed build provenance, malware/dependency review, human approval before initial publication, version revocation, and a kill switch that prevents new runs. |
+| Data poisoning or misleading output | Validate outputs against the published schema and size limits; label outputs as untrusted; do not automatically feed them into crawls, indexes, billing, or other agents. |
+| Cross-run or cross-tenant side channels | One isolated execution unit per run, no shared writable caches, tenant-scoped authorization at the control plane, and cleanup verified between runs. |
+| Abuse, illegal content, or policy evasion | Publisher identity and reporting process, rate and spend limits, audit trail, suspension and revocation controls, retention limits, and an incident response owner before launch. |
+
+## Runtime portfolio (all three boundaries are targets)
+
+The product architecture should support three explicitly selected isolation
+classes rather than pretending one runtime fits every artifact:
+
+| Runtime class | Intended artifact | Isolation profile and tradeoff |
+|---|---|---|
+| WASM/WASI | A constrained WebAssembly component | Narrow, explicit host capabilities and a smaller interface; limits language/runtime compatibility and must still enforce memory, fuel/time, and I/O caps. |
+| Sandboxed Kubernetes pool | OCI image on a separate pool configured with a sandbox runtime such as gVisor or Kata | Broader compatibility with containerized agents, but requires its own cluster/pool, admission policy, node hardening, network controls, and runtime-specific escape testing. |
+| Dedicated microVM pool | OCI image inside one VM per run | Strong per-run isolation boundary and broad compatibility, at higher startup, capacity, and operational cost. |
+
+These are **all desired backend classes over time**, not permission to run an
+artifact in whichever environment happens to be available. Every agent version
+must pin exactly one declared runtime class and immutable artifact digest.
+Admission rejects unsupported or disabled runtime classes; the scheduler must
+never silently fall back to a weaker backend. Each backend implements the same
+control-plane contract for identity, input/output limits, deadlines, resource
+accounting, cancellation, audit events, and cleanup, while adding its own
+runtime-specific policy. A run's security level is the selected backend's
+verified profile, not a publisher's self-declared label.
+
+Supporting all three requires separately provisioned and validated execution
+pools. A single Docker worker or an abstract interface without enforced backend
+policies does not satisfy this design.
+
+## Proposed architecture (not implemented)
+
+- **Control plane:** the API authenticates the caller, checks ownership/access,
+  validates the published manifest version, enforces quotas, and creates a run
+  record. It never imports, evaluates, or launches publisher code itself.
+- **Artifact intake:** accept only immutable, digest-addressed artifacts through
+  a quarantine pipeline. Build and scan outside the serving API. Store signed
+  provenance and approval state separately from seller-editable catalog data.
+  Publication pins a reviewed digest; changing bytes requires a new version and
+  review.
+- **Scheduler:** enqueue a bounded run request containing an artifact digest,
+  validated input, a short-lived run identity, and an explicit policy. Do not
+  put long-lived credentials or unrestricted storage locations in task payloads.
+- **Execution plane:** isolated workers in a separate account/cluster/host pool
+  from the API and regular Celery workers. Use a per-run sandbox with an
+  unprivileged identity, read-only base filesystem, minimal writable scratch,
+  dropped capabilities, syscall restrictions, no host mounts, no shared
+  service credentials, and enforced resource ceilings. A regular container
+  alone is not an adequate multi-tenant boundary for untrusted code.
+- **Network:** deny egress by default at the host/network layer. If a use case
+  requires web access, route it through a policy-enforcing proxy that resolves
+  and pins public addresses, checks every redirect, applies per-request/domain
+  budgets, and blocks internal/control-plane destinations. Do not let the guest
+  choose a proxy or bypass the enforcement point.
+- **Results:** cap stdout/stderr and result bytes; validate the returned JSON
+  against the versioned output schema; label it untrusted; persist only with an
+  explicit retention policy and tenant ownership. Record digests and status,
+  not secrets or unrestricted payloads, in audit events.
+- **Revocation:** stop accepting runs for suspended or revoked versions
+  immediately; cancel queued runs and terminate active sandboxes within a
+  documented maximum interval; retain minimal audit evidence.
+
+The selected backend and its concrete technology are infrastructure decisions
+that must be validated on the target deployment. This repository does not
+currently provision any of these execution pools. Do not substitute `eval`,
+subprocess execution in an API/worker container, Docker-in-Docker, or a
+publisher-controlled image launched with ambient host credentials.
+
+## Mandatory launch gates
+
+Do not enable publisher code execution until all of these are verified in the
+target environment:
+
+- documented isolation boundary, threat review, and escape-response procedure
+  for each enabled backend;
+- each WASM/WASI, sandboxed-Kubernetes, and microVM backend independently passes
+  its escape, cleanup, accounting, and policy conformance tests before it can be
+  enabled; backend unavailability never permits downgrade;
+- default-deny egress tested against DNS rebinding, redirects, IPv4/IPv6 private
+  ranges, metadata endpoints, and proxy bypass attempts;
+- enforced per-run CPU, memory, PID, wall-time, storage, input/output, and log
+  ceilings with tests proving whole-sandbox termination;
+- no secret or host-filesystem visibility from a malicious test agent;
+- tenant-crossing, concurrent-run, cleanup, and revocation tests;
+- immutable artifacts, signature/provenance verification, review workflow, and
+  emergency kill switch;
+- metering, maximum spend, billing reconciliation, retention, abuse reporting,
+  and operational ownership approved before any paid listing is offered.
+
+Until those gates are met, keep the runtime feature unavailable and continue to
+use only the server-owned managed-agent allow-list. The current heuristic
+`data-curator` is not an untrusted-code sandbox and its heuristic safety scores
+are not a content-moderation guarantee.
