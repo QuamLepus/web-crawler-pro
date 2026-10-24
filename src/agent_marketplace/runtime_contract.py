@@ -181,9 +181,9 @@ def verify_artifact_bytes(
 class BackendReadiness(StrictContract):
     """Operator-signed, short-lived backend gate result.
 
-    A boolean readiness claim is not evidence by itself. The signature binds
-    the backend, enabled/conformance state, policy revision, and validity
-    window to an operator-managed trusted key.
+    A boolean readiness claim is not evidence by itself. An independent
+    assessor signs the backend-specific evidence digests; a distinct operator
+    signs the enablement assertion and validity window.
     """
 
     backend: RuntimeBackend
@@ -195,6 +195,9 @@ class BackendReadiness(StrictContract):
     expires_at: datetime
     signer_id: str = Field(min_length=1, max_length=160)
     key_id: str = Field(min_length=1, max_length=160)
+    assessor_id: str = Field(min_length=1, max_length=160)
+    assessor_key_id: str = Field(min_length=1, max_length=160)
+    assessor_signature: str = Field(min_length=1, max_length=256)
     signature_algorithm: Literal["ed25519"] = "ed25519"
     signature: str = Field(min_length=1, max_length=256)
 
@@ -228,6 +231,23 @@ class BackendReadiness(StrictContract):
         if issued_at is not None and value <= issued_at:
             raise ValueError("readiness expiry must be after issue time")
         return value
+
+
+def backend_conformance_signing_payload(readiness: BackendReadiness) -> bytes:
+    """Return canonical evidence payload for an independent conformance assessor."""
+    value = {
+        "assessor_id": readiness.assessor_id,
+        "assessor_key_id": readiness.assessor_key_id,
+        "backend": readiness.backend.value,
+        "conformance_evidence": readiness.conformance_evidence,
+        "environment_id": readiness.environment_id,
+        "expires_at": readiness.expires_at.astimezone(UTC).isoformat(),
+        "issued_at": readiness.issued_at.astimezone(UTC).isoformat(),
+        "policy_revision": readiness.policy_revision,
+        "signature_algorithm": readiness.signature_algorithm,
+    }
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 def backend_readiness_signing_payload(readiness: BackendReadiness) -> bytes:
@@ -268,24 +288,18 @@ def verify_backend_evidence(
     return True
 
 
-def verify_backend_readiness(
-    readiness: BackendReadiness,
-    trusted_keys: Mapping[str, TrustedAttestationKey],
+def _verify_readiness_signer(
+    key: TrustedAttestationKey | None,
     *,
-    now: datetime | None = None,
+    key_id: str,
+    signer_id: str,
+    signature_text: str,
+    payload: bytes,
+    issued_at: datetime,
+    expires_at: datetime,
+    current_time: datetime,
 ) -> bool:
-    """Verify signed readiness and reject stale, future, or revoked evidence."""
-    key = trusted_keys.get(readiness.key_id)
-    if (key is None or key.key_id != readiness.key_id
-            or key.signer_id != readiness.signer_id):
-        return False
-    current_time = now or datetime.now(UTC)
-    if current_time.tzinfo is None or current_time.utcoffset() is None:
-        return False
-    current_time = current_time.astimezone(UTC)
-    issued_at = readiness.issued_at.astimezone(UTC)
-    expires_at = readiness.expires_at.astimezone(UTC)
-    if (issued_at > current_time or current_time >= expires_at
+    if (key is None or key.key_id != key_id or key.signer_id != signer_id
             or issued_at < key.valid_from.astimezone(UTC)
             or issued_at >= key.expires_at.astimezone(UTC)
             or expires_at > key.expires_at.astimezone(UTC)
@@ -297,13 +311,45 @@ def verify_backend_readiness(
         if not isinstance(public_key, Ed25519PublicKey):
             return False
         signature = base64.b64decode(
-            readiness.signature.encode("ascii")
-            + b"=" * (-len(readiness.signature) % 4),
+            signature_text.encode("ascii")
+            + b"=" * (-len(signature_text) % 4),
             altchars=b"-_", validate=True)
-        public_key.verify(signature, backend_readiness_signing_payload(readiness))
+        public_key.verify(signature, payload)
     except (ValueError, TypeError, UnicodeEncodeError, InvalidSignature):
         return False
     return True
+
+
+def verify_backend_readiness(
+    readiness: BackendReadiness,
+    trusted_keys: Mapping[str, TrustedAttestationKey],
+    trusted_assessor_keys: Mapping[str, TrustedAttestationKey],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Verify independently assessed gate evidence and operator readiness."""
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        return False
+    current_time = current_time.astimezone(UTC)
+    issued_at = readiness.issued_at.astimezone(UTC)
+    expires_at = readiness.expires_at.astimezone(UTC)
+    if (issued_at > current_time or current_time >= expires_at
+            or readiness.key_id == readiness.assessor_key_id
+            or readiness.signer_id == readiness.assessor_id):
+        return False
+    operator_ok = _verify_readiness_signer(
+        trusted_keys.get(readiness.key_id), key_id=readiness.key_id,
+        signer_id=readiness.signer_id, signature_text=readiness.signature,
+        payload=backend_readiness_signing_payload(readiness),
+        issued_at=issued_at, expires_at=expires_at, current_time=current_time)
+    assessor_ok = _verify_readiness_signer(
+        trusted_assessor_keys.get(readiness.assessor_key_id),
+        key_id=readiness.assessor_key_id, signer_id=readiness.assessor_id,
+        signature_text=readiness.assessor_signature,
+        payload=backend_conformance_signing_payload(readiness),
+        issued_at=issued_at, expires_at=expires_at, current_time=current_time)
+    return operator_ok and assessor_ok
 
 
 class AdmissionRequest(StrictContract):
@@ -369,6 +415,7 @@ def decide_admission(
     artifact_bytes: bytes | None,
     trusted_keys: Mapping[str, TrustedAttestationKey],
     trusted_readiness_keys: Mapping[str, TrustedAttestationKey],
+    trusted_conformance_keys: Mapping[str, TrustedAttestationKey],
     backend_evidence: Mapping[str, bytes] | None,
     review_approved: bool,
     artifact_revoked: bool,
@@ -381,8 +428,9 @@ def decide_admission(
 
     The review-state and readiness arguments must come from trusted,
     independently verified control-plane sources. Artifact attestations and
-    backend readiness use separate trusted-key sets, preventing artifact
-    reviewers from implicitly asserting runtime isolation readiness. The
+    backend readiness and independent conformance assessment use distinct
+    trusted-key sets, preventing artifact reviewers or readiness operators
+    from asserting their own isolation evidence. The
     attestation signature is verified against operator-supplied keys, and artifact bytes
     must match its signed digest. This does not retrieve or persist artifact
     bytes, launch a sandbox, or prove a backend is secure.
@@ -405,7 +453,8 @@ def decide_admission(
         return deny("artifact_not_approved")
     if not verify_attestation_signature(attestation, trusted_keys):
         return deny("artifact_signature_invalid")
-    if not verify_backend_readiness(readiness, trusted_readiness_keys):
+    if not verify_backend_readiness(
+            readiness, trusted_readiness_keys, trusted_conformance_keys):
         return deny("backend_not_provisioned")
     if not verify_backend_evidence(readiness, backend_evidence):
         return deny("backend_not_conformant")
